@@ -340,7 +340,8 @@ async function materializeGate2HowArtifacts({
     }
   }
 
-  for (const draft of buildDependencyDraftsFromContainer(container, { blueprintIdMap })) {
+  const dependencyDrafts = buildDependencyDraftsFromContainer(container, { blueprintIdMap });
+  for (const draft of dependencyDrafts) {
     try {
       const r = await upsertPlanningDraft({
         organizationId,
@@ -356,6 +357,42 @@ async function materializeGate2HowArtifacts({
     }
   }
 
+  // Execution Control Wave 0 — sync DEPENDENCY edges onto Task.dependsOn
+  try {
+    const { syncDependsOnFromEdges, snapshotBaselineOnPromote } = require('./executionControl.service');
+    const edges = dependencyDrafts
+      .map((d) => d.structured)
+      .filter((s) => s && s.predecessorTaskId && s.successorTaskId);
+    const sync = await syncDependsOnFromEdges({ projectId, organizationId, edges });
+    stats.taskDependsOnSynced = sync.updated;
+
+    const Task = require('../models/Task');
+    const promotedTasks = await Task.find({
+      projectId,
+      isActive: true,
+      blueprintTaskId: { $nin: [null, ''] },
+    })
+      .select('_id startDate dueDate estimateHours assigneeId sprintId')
+      .lean();
+    for (const t of promotedTasks) {
+      await snapshotBaselineOnPromote(t._id, {
+        source: 'gate2_promote',
+        startDate: t.startDate,
+        dueDate: t.dueDate,
+        estimateHours: t.estimateHours,
+        assigneeId: t.assigneeId,
+        sprintId: t.sprintId,
+        promotedAt: new Date(),
+      });
+    }
+    stats.baselinesSnapshotted = promotedTasks.length;
+  } catch (err) {
+    stats.warnings.push({
+      type: 'execution_control_sync_fail',
+      message: err.message || String(err),
+    });
+  }
+
   for (const draft of buildRiskDraftsFromContainer(container)) {
     try {
       const r = await upsertPlanningDraft({
@@ -367,6 +404,36 @@ async function materializeGate2HowArtifacts({
       });
       if (r.created) stats.risksSeeded += 1;
       else stats.risksSkipped += 1;
+      // Wave risk — seed ProjectRisk draft from Gate2 RISK artifact
+      try {
+        const { createOrUpdateRisk } = require('./executionControl.service');
+        await createOrUpdateRisk({
+          organizationId,
+          projectId,
+          title: draft.title || draft.externalKey || 'Risk',
+          description: draft.summary || '',
+          createdBy: userId,
+          seedFromPlanningArtifactId: r?.artifact?._id || r?.doc?._id || null,
+          contingency: {
+            summary: draft.structured?.mitigation || draft.structured?.contingency || '',
+            actions: [],
+          },
+          triggers: [
+            {
+              kind: 'confirm',
+              conditionKey: 'manual_confirm',
+              description: 'Confirm risk occurred',
+            },
+          ],
+        });
+        stats.executionRisksSeeded = (stats.executionRisksSeeded || 0) + 1;
+      } catch (seedErr) {
+        stats.warnings.push({
+          type: 'execution_risk_seed_fail',
+          key: draft.externalKey,
+          message: seedErr.message,
+        });
+      }
     } catch (err) {
       stats.warnings.push({ type: 'risk_fail', key: draft.externalKey, message: err.message });
     }

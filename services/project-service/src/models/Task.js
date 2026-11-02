@@ -347,6 +347,160 @@ const taskSchema = new mongoose.Schema(
       default: '',
       maxlength: 500,
     },
+    /**
+     * Execution Control — remaining effort SoT is confirmed remainingHours.
+     * inferredRemainingHours is UI hint only (never sole AT_RISK input).
+     */
+    remainingHours: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    remainingSource: {
+      type: String,
+      enum: ['confirmed', 'inferred', null],
+      default: null,
+    },
+    remainingUpdatedAt: {
+      type: Date,
+      default: null,
+    },
+    remainingConfirmedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    inferredRemainingHours: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    /** Meaningful progress stamp (not comment-only). */
+    lastProgressAt: {
+      type: Date,
+      default: null,
+    },
+    /** Snapshot at Gate2 promote / WBS publish / CR apply — not living plan source. */
+    baselineRef: {
+      type: {
+        planningBaselineId: { type: mongoose.Schema.Types.ObjectId, default: null },
+        revisionId: { type: String, trim: true, default: '' },
+        promotedAt: { type: Date, default: null },
+        source: {
+          type: String,
+          enum: ['gate2_promote', 'wbs_publish', 'cr_apply', 'manual', 'missing'],
+          default: 'missing',
+        },
+        missing: { type: Boolean, default: true },
+      },
+      default: () => ({ missing: true, source: 'missing' }),
+    },
+    baseline: {
+      type: {
+        startDate: { type: Date, default: null },
+        dueDate: { type: Date, default: null },
+        estimateHours: { type: Number, min: 0, default: null },
+        assigneeId: { type: mongoose.Schema.Types.ObjectId, default: null },
+        sprintId: { type: mongoose.Schema.Types.ObjectId, default: null },
+      },
+      default: () => ({}),
+    },
+    baselineVersion: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    /** Optimistic concurrency for execution apply. */
+    entityVersion: {
+      type: Number,
+      min: 0,
+      default: 0,
+      index: true,
+    },
+    forecast: {
+      type: {
+        finishDate: { type: Date, default: null },
+        remainingHours: { type: Number, min: 0, default: null },
+        riskLabel: { type: String, trim: true, default: '', maxlength: 64 },
+        computedAt: { type: Date, default: null },
+        inputVersion: { type: String, trim: true, default: '', maxlength: 128 },
+        baselineVersion: { type: Number, min: 0, default: 0 },
+        completeness: {
+          type: String,
+          enum: ['FULL', 'PARTIAL', 'UNKNOWN', null],
+          default: null,
+        },
+      },
+      default: () => ({}),
+    },
+    /**
+     * Execution-time dependency edges (synced from Gate2 DEPENDENCY when possible).
+     * type: FS|SS|FF|SF — MVP impact engine FULL only for FS.
+     */
+    dependsOn: {
+      type: [
+        {
+          predecessorId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Task',
+            required: true,
+          },
+          type: {
+            type: String,
+            enum: ['FS', 'SS', 'FF', 'SF'],
+            default: 'FS',
+          },
+          lagHours: { type: Number, default: 0 },
+          inputReadyRule: { type: String, trim: true, default: '', maxlength: 120 },
+          sourceVersion: { type: String, trim: true, default: '', maxlength: 64 },
+          source: {
+            type: String,
+            enum: ['gate2_artifact', 'manual', 'cr'],
+            default: 'gate2_artifact',
+          },
+        },
+      ],
+      default: [],
+    },
+    blockers: {
+      type: [
+        {
+          kind: {
+            type: String,
+            enum: ['task', 'decision', 'document', 'external', 'other'],
+            default: 'other',
+          },
+          reason: { type: String, trim: true, default: '', maxlength: 1000 },
+          ownerId: { type: mongoose.Schema.Types.ObjectId, default: null },
+          relatedTaskId: { type: mongoose.Schema.Types.ObjectId, ref: 'Task', default: null },
+          since: { type: Date, default: Date.now },
+          resolvedAt: { type: Date, default: null },
+          dueAt: { type: Date, default: null },
+        },
+      ],
+      default: [],
+    },
+    /** Times card left Done / completed (quality reopen signal). */
+    reopenCount: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    servesSprintGoal: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    costActual: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    costBaseline: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
     encV: {
       type: Number,
       default: 0,

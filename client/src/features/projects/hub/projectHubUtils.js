@@ -11,6 +11,7 @@ export const PROJECT_HUB_TABS = [
   { id: 'chat', labelKey: 'workspace.projectHubTabChat' },
   { id: 'timeline', labelKey: 'workspace.projectHubTabTimeline' },
   { id: 'changeRequests', labelKey: 'workspace.projectHubTabChangeRequests' },
+  { id: 'executionControl', labelKey: 'workspace.projectHubTabExecutionControl' },
   { id: 'testCases', labelKey: 'workspace.phaseQaTestCasesTitle' },
   { id: 'members', labelKey: 'workspace.projectHubTabMembers' },
   { id: 'files', labelKey: 'workspace.projectHubTabFiles' },

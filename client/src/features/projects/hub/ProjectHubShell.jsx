@@ -15,6 +15,7 @@ import ProjectHubPlanningPanel from './ProjectHubPlanningPanel';
 import ProjectHubListPanel from './ProjectHubListPanel';
 import ProjectHubTimelinePanel from './ProjectHubTimelinePanel';
 import ProjectHubChangeRequestsPanel from './ProjectHubChangeRequestsPanel';
+import ProjectHubExecutionControlPanel from './ExecutionControl/ProjectHubExecutionControlPanel';
 import ProjectHubTestCasesPanel from './ProjectHubTestCasesPanel';
 import ProjectHubDeliveryPhasePanel from './ProjectHubDeliveryPhasePanel';
 import WorkItemDetail from './WorkItemDetail';
@@ -1090,6 +1091,10 @@ export default function ProjectHubShell({
   const isProjectCompleted = isProjectCompletedStatus(
     projectPayload?.status || resolvedBoard?.status
   );
+  const isDraftProject =
+    String(projectPayload?.status || resolvedBoard?.status || '')
+      .trim()
+      .toLowerCase() === 'draft';
   const workLooksComplete = summary.total > 0 && summary.donePercent === 100;
   const informationLevel = String(
     projectPayload?.access?.informationLevel ||
@@ -1254,6 +1259,7 @@ export default function ProjectHubShell({
       }
       if (item.id === 'members' && !hubCaps.canViewMembers) return false;
       if (item.id === 'changeRequests' && !hubCaps.canViewChangeRequests) return false;
+      if (item.id === 'executionControl' && !hubCaps.canViewWorkItems) return false;
       if (item.id === 'testCases' && !hubCaps.canViewWorkItems) return false;
       if (item.id === 'planning' && !hubCaps.canViewBacklog) return false;
       // Timeline: SoT P2 default — show with work-items view (not gated on backlog:view)
@@ -1288,6 +1294,8 @@ export default function ProjectHubShell({
   const showTimelinePanel = Boolean(visitedTabs.timeline) && hubCaps.canViewWorkItems;
   const showChangeRequestsPanel =
     Boolean(visitedTabs.changeRequests) && hubCaps.canViewChangeRequests;
+  const showExecutionControlPanel =
+    Boolean(visitedTabs.executionControl) && hubCaps.canViewWorkItems;
   const showTestCasesPanel = Boolean(visitedTabs.testCases) && hubCaps.canViewWorkItems;
   const showMembersPanel = Boolean(visitedTabs.members) && hubCaps.canViewMembers;
 
@@ -2007,14 +2015,31 @@ export default function ProjectHubShell({
             <span>{t('common.loading')}</span>
           </div>
         ) : null}
+        {showExecutionControlPanel ? (
+          <div
+            className={
+              tab === 'executionControl'
+                ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
+                : 'hidden'
+            }
+            hidden={tab !== 'executionControl'}
+            aria-hidden={tab !== 'executionControl'}
+          >
+            <ProjectHubExecutionControlPanel
+              projectId={projectId}
+              listActive={tab === 'executionControl'}
+            />
+          </div>
+        ) : null}
+
         {showChangeRequestsPanel ? (
-        <div
-          className={
-            tab === 'changeRequests' ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'hidden'
-          }
-          hidden={tab !== 'changeRequests'}
-          aria-hidden={tab !== 'changeRequests'}
-        >
+          <div
+            className={
+              tab === 'changeRequests' ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'hidden'
+            }
+            hidden={tab !== 'changeRequests'}
+            aria-hidden={tab !== 'changeRequests'}
+          >
           <ProjectHubChangeRequestsPanel
             projectId={projectId}
             listActive={tab === 'changeRequests'}
@@ -2119,6 +2144,7 @@ export default function ProjectHubShell({
             canArchiveProject={Boolean(hubCaps.canArchiveProject)}
             canArchiveWithoutComplete={Boolean(hubCaps.canArchiveWithoutComplete)}
             isProjectCompleted={isProjectCompleted}
+            isDraftProject={isDraftProject}
             projectStillActive={projectStillActive}
             onRequestArchive={() => setArchiveProjectOpen(true)}
             isDarkMode={isDarkMode}
@@ -2185,10 +2211,19 @@ export default function ProjectHubShell({
           isOpen={archiveProjectOpen}
           projectId={projectId}
           projectTitle={resolvedBoard?.title || projectPayload?.title || ''}
-          earlyArchive={!isProjectCompleted && Boolean(hubCaps.canArchiveWithoutComplete)}
+          draftDelete={isDraftProject}
+          earlyArchive={
+            !isDraftProject &&
+            !isProjectCompleted &&
+            Boolean(hubCaps.canArchiveWithoutComplete)
+          }
           onClose={() => setArchiveProjectOpen(false)}
           onArchived={() => {
-            toast.success(t('workspace.projectHubArchiveSuccess'));
+            toast.success(
+              isDraftProject
+                ? t('workspace.projectHubDeleteDraftSuccess')
+                : t('workspace.projectHubArchiveSuccess')
+            );
             setArchiveProjectOpen(false);
             writeStoredLastProjectId('');
             void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });

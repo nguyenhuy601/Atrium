@@ -422,9 +422,16 @@ export default function ProjectHubSettingsPanel({
       return undefined;
     }
     let cancelled = false;
+    const orgId = resolvedOrganizationId;
+    const workspaceSlug = String(apiCtx?.workspaceSlug || '').trim();
     (async () => {
       try {
-        const res = await taskAPI.getBoardWorkflow(boardId, apiCtx || { organizationId: resolvedOrganizationId });
+        // Best-effort: Settings đã catch; skip global 403 toast (board:admin ≠ settings:update).
+        const res = await taskAPI.getBoardWorkflow(boardId, {
+          organizationId: orgId || apiCtx?.organizationId || '',
+          workspaceSlug,
+          skipPermissionDeniedToast: true,
+        });
         const wf = unwrapTaskApiPayload(res) ?? res?.data?.data ?? res?.data ?? res;
         if (cancelled) return;
         setWorkflowDoc(wf && typeof wf === 'object' ? wf : null);
@@ -446,7 +453,7 @@ export default function ProjectHubSettingsPanel({
     return () => {
       cancelled = true;
     };
-  }, [canManage, boardId, apiCtx, resolvedOrganizationId]);
+  }, [canManage, boardId, apiCtx?.organizationId, apiCtx?.workspaceSlug, resolvedOrganizationId]);
 
   const onVisibilityModeChange = (nextMode) => {
     const mode = nextMode === 'custom' ? 'custom' : 'inherit';

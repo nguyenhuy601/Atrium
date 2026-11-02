@@ -563,11 +563,12 @@ export const taskAPI = {
 
   getBoardWorkflow: (boardId, opts = {}) => {
     const ctx = extractWorkspaceApiContext(opts);
+    const cfg = axiosCallConfig(opts);
     return requestWithWorkspaceFallback({
       ctx,
       workspaceRequest: () =>
-        apiClient.get(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/workflow`),
-      legacyRequest: () => apiClient.get(`${legacyBoardBase()}/${boardId}/workflow`),
+        apiClient.get(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/workflow`, cfg),
+      legacyRequest: () => apiClient.get(`${legacyBoardBase()}/${boardId}/workflow`, cfg),
     });
   },
 

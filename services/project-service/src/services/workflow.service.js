@@ -43,6 +43,44 @@ async function requireBoardAdmin(boardId, userId) {
   return board;
 }
 
+/** GET workflow: board:admin hoặc settings:view/update — tránh 403 toast khi mở Cài đặt. */
+async function requireWorkflowRead(boardId, userId) {
+  const board = await TaskBoard.findById(boardId).lean();
+  if (!board || board.isActive === false) {
+    const err = new Error('Board không tồn tại');
+    err.statusCode = 404;
+    throw err;
+  }
+  const { isProjectRbacEnabled, hasPermission } = require('../utils/project/projectPermissionMatrix');
+  if (isProjectRbacEnabled() && board.projectId) {
+    const { resolveUserProjectPermissions } = require('./projectAccess.service');
+    const resolved = await resolveUserProjectPermissions({
+      userId,
+      projectId: board.projectId,
+      boardId,
+    });
+    const perms = resolved.permissions || [];
+    if (
+      hasPermission(perms, 'board:admin') ||
+      hasPermission(perms, 'settings:update') ||
+      hasPermission(perms, 'settings:view')
+    ) {
+      return board;
+    }
+    const err = new Error('Không có quyền xem workflow board này');
+    err.statusCode = 403;
+    throw err;
+  }
+  const boardService = require('./taskBoard.service');
+  const ok = await boardService.userCanAdminBoard(userId, board);
+  if (ok) return board;
+  const viewed = await boardService.ensureBoardViewAccess(boardId, userId);
+  if (viewed) return board;
+  const err = new Error('Không có quyền xem workflow board này');
+  err.statusCode = 403;
+  throw err;
+}
+
 async function requireOrgAdmin(organizationId, userId) {
   const { fetchTaskWorkspaceScope } = require('./taskWorkspaceScope');
   const scope = await fetchTaskWorkspaceScope(userId, organizationId);
@@ -219,7 +257,7 @@ async function upsertWorkflowTemplate({
 }
 
 async function getWorkflow(boardId, userId) {
-  await requireBoardAdmin(boardId, userId);
+  await requireWorkflowRead(boardId, userId);
   return WorkflowDefinition.findOne({ boardId }).lean();
 }
 

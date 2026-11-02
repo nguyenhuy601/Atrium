@@ -36,6 +36,10 @@ bindObjectIdParams(router, [
   'testCaseId',
   'userId',
   'budgetId',
+  'issueId',
+  'proposalId',
+  'riskId',
+  'taskId',
 ]);
 
 /**
@@ -285,6 +289,29 @@ router.post('/:projectId/sprints/:sprintId/complete', controller.completeSprint)
 router.get(
   '/:projectId/sprints/:sprintId/time-summary',
   require('../controllers/worklog.controller').getSprintTimeSummaryController
+);
+
+const executionControlCtrl = require('../controllers/executionControl.controller');
+router.get('/:projectId/execution-issues', executionControlCtrl.listIssues);
+router.get('/:projectId/execution-issues/:issueId', executionControlCtrl.getIssue);
+router.post('/:projectId/execution-issues/:issueId/proposals', executionControlCtrl.saveProposal);
+router.post('/:projectId/execution-issues/:issueId/follow-up', executionControlCtrl.runFollowUp);
+router.post(
+  '/:projectId/execution-proposals/:proposalId/decide',
+  executionControlCtrl.decideProposal
+);
+router.post('/:projectId/execution-incidents', executionControlCtrl.createIncident);
+router.get('/:projectId/execution-risks', executionControlCtrl.listRisks);
+router.post('/:projectId/execution-risks', executionControlCtrl.createRisk);
+router.post(
+  '/:projectId/execution-risks/:riskId/confirm-occurred',
+  executionControlCtrl.confirmRiskOccurred
+);
+router.post('/:projectId/execution-control/scan', executionControlCtrl.scanProject);
+router.post('/:projectId/execution-control/migrate-baselines', executionControlCtrl.migrateBaselines);
+router.patch(
+  '/:projectId/tasks/:taskId/remaining',
+  executionControlCtrl.confirmRemaining
 );
 
 router.get('/:projectId/change-requests', changeRequest.listItems);
