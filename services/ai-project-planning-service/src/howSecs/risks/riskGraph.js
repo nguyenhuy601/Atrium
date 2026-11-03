@@ -79,43 +79,15 @@ function buildRiskFacts(semOut) {
   };
 }
 
-/** Map allowlist FR ids for exact + compact (FR-41 / FR41) + case-insensitive match. */
-function buildFrAllowIndex(frIds) {
-  const byKey = new Map();
-  for (const id of frIds || []) {
-    const raw = String(id || '').trim();
-    if (!raw) continue;
-    byKey.set(raw, raw);
-    byKey.set(raw.toUpperCase(), raw);
-    const compact = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (compact) byKey.set(compact, raw);
-  }
-  return byKey;
-}
-
-function resolveAllowedFrId(frAllow, candidate) {
-  const frId = String(candidate || '').trim();
-  if (!frId) return null;
-  return (
-    frAllow.get(frId) ||
-    frAllow.get(frId.toUpperCase()) ||
-    frAllow.get(frId.toUpperCase().replace(/[^A-Z0-9]/g, '')) ||
-    null
-  );
-}
-
 async function proposeRisk({ semantic, facts, env, generateJsonFn }) {
   if (!semantic) return { ok: false, skipped: true, meta: { fallbackReason: 'missing_SEMANTIC' } };
   if (!isLlmEnabled(env)) return { ok: false, skipped: true, meta: { fallbackReason: 'LLM_off' } };
   const { languageInstruction } = require('../../semantic/buildSemanticDeriveContext');
-  const allowFrIds = Array.isArray(facts?.allowLists?.frIds) ? facts.allowLists.frIds : [];
   const system = [
     'You are a project risk analyst. Return JSON only.',
     'Report only risks with a concrete trigger present in SEMANTIC or FACTS. Do not invent generic risks.',
     'trigger states the condition. impactDescription states the business consequence. mitigation states an actionable response.',
-    'relatedFrIds MUST be a non-empty list copied verbatim from ALLOW_FR_IDS only — never invent FR ids, Story ids, or free-text labels.',
-    'If none of ALLOW_FR_IDS apply to a trigger, omit that risk (or return risks: []).',
-    'probability and impact must be integers from 1 to 5.',
+    'relatedFrIds must be a non-empty list of FR IDs from ALLOW. probability and impact must be integers from 1 to 5.',
     'If the input is too thin to judge probability or impact, say that uncertainty in impactDescription instead of presenting an unsupported score as a measured fact.',
     'If no evidence-supported risk exists, return risks: [].',
     'Output: {"risks":[{"title":"...","trigger":"...","impactDescription":"...","relatedFrIds":["FR-id"],"probability":1,"impact":1,"mitigation":"..."}]}.',
@@ -125,7 +97,6 @@ async function proposeRisk({ semantic, facts, env, generateJsonFn }) {
     `SEMANTIC=${JSON.stringify(semantic)}`,
     `FACTS=${JSON.stringify(facts.triggers)}`,
     `ALLOW=${JSON.stringify(facts.allowLists)}`,
-    `ALLOW_FR_IDS=${JSON.stringify(allowFrIds)}`,
     `SHAPE={"risks":[{"title":"","trigger":"","impactDescription":"","relatedFrIds":[],"probability":1,"impact":1,"mitigation":""}]}`,
   ].join('\n');
   const { resolveHowSecAttemptTimeoutMs } = require('../howSecAttemptTimeout');
@@ -142,8 +113,7 @@ async function proposeRisk({ semantic, facts, env, generateJsonFn }) {
 }
 
 function acceptRisk({ raw, facts, openQuestionsIn = [] }) {
-  const frAllow = buildFrAllowIndex(facts?.allowLists?.frIds || []);
-  const frAllowSize = frAllow.size > 0 ? new Set(frAllow.values()).size : 0;
+  const frSet = new Set(facts?.allowLists?.frIds || []);
   const rejectedInvent = [];
   const openQuestions = [...openQuestionsIn];
   for (const q of raw?.openQuestions || []) {
@@ -158,31 +128,24 @@ function acceptRisk({ raw, facts, openQuestionsIn = [] }) {
       rejectedInvent.push({ reason: 'fr_not_in_allow', title });
       continue;
     }
-    // Keep only allowlisted FR ids (drop invent / typos); reject row only if none remain.
     const relatedFrIds = [];
+    let frInvalid = false;
     for (const id of row.relatedFrIds) {
-      const canon = resolveAllowedFrId(frAllow, id);
-      if (!canon) continue;
-      if (relatedFrIds.includes(canon)) continue;
-      relatedFrIds.push(canon);
-      if (relatedFrIds.length > 12) break;
+      const frId = String(id || '').trim();
+      if (!frId || (frSet.size && !frSet.has(frId))) {
+        frInvalid = true;
+        break;
+      }
+      if (relatedFrIds.includes(frId)) continue;
+      relatedFrIds.push(frId);
+      if (relatedFrIds.length > 12) {
+        frInvalid = true;
+        break;
+      }
     }
-    if (frAllowSize && !relatedFrIds.length) {
+    if (frInvalid || (frSet.size && !relatedFrIds.length)) {
       rejectedInvent.push({ reason: 'fr_not_in_allow', title });
       continue;
-    }
-    if (!frAllowSize && !relatedFrIds.length) {
-      // Empty allowlist: require at least one non-empty raw id (legacy thin packs).
-      for (const id of row.relatedFrIds) {
-        const frId = String(id || '').trim();
-        if (!frId || relatedFrIds.includes(frId)) continue;
-        relatedFrIds.push(frId);
-        if (relatedFrIds.length > 12) break;
-      }
-      if (!relatedFrIds.length) {
-        rejectedInvent.push({ reason: 'fr_not_in_allow', title });
-        continue;
-      }
     }
     const trigger = clip(row.trigger, 200);
     const impactDescription = clip(row.impactDescription, 200);
@@ -220,20 +183,7 @@ function acceptRisk({ raw, facts, openQuestionsIn = [] }) {
   }
 
   if (!risks.length && !openQuestions.length) {
-    const frRejects = rejectedInvent.filter((r) => r.reason === 'fr_not_in_allow');
-    if (frRejects.length) {
-      openQuestions.push({
-        code: 'RISK_FR_NOT_IN_ALLOW',
-        message: clip(
-          `LLM đề xuất rủi ro nhưng relatedFrIds không thuộc ALLOW (${frRejects
-            .map((r) => r.title)
-            .slice(0, 3)
-            .join('; ')}).`
-        ),
-      });
-    } else {
-      openQuestions.push({ code: 'RISK_EMPTY', message: 'Không có rủi ro từ dữ liệu thật.' });
-    }
+    openQuestions.push({ code: 'RISK_EMPTY', message: 'Không có rủi ro từ dữ liệu thật.' });
   }
 
   const maxSeverity = risks.reduce((max, r) => {
