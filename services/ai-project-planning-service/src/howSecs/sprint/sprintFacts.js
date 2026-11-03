@@ -114,6 +114,8 @@ function readEdges(container) {
 
 /**
  * Distinguish analyzed-empty vs never analyzed — edges:[] alone is not enough.
+ * Schedulable edges optional: PARTIAL / FAILED / SKIPPED with executionTerminal
+ * still counts as analyzed so Sprint is not hard-blocked.
  * @returns {'has_edges'|'analyzed_empty'|'not_analyzed'}
  */
 function resolveDependencyEvidence(container) {
@@ -127,6 +129,19 @@ function resolveDependencyEvidence(container) {
   if (/COMPLETE_NO_EDGES|NO_SUPPORTED|DEPENDENCIES_FOUND|ANALYZED_EMPTY/.test(statusToken)) {
     return 'analyzed_empty';
   }
+  // Terminal analysis without schedulable edges (proposal-only INTEGRATION, LLM skip, …).
+  if (
+    /PARTIAL|FAILED|INVALID|INCOMPLETE|SEMANTIC_INCOMPLETE|SKIPPED/.test(statusToken) ||
+    analysis.executionTerminal === true ||
+    analysis.meta?.executionTerminal === true
+  ) {
+    return 'analyzed_empty';
+  }
+  const proposalCount = Array.isArray(analysis.proposalEdges)
+    ? analysis.proposalEdges.length
+    : 0;
+  if (proposalCount > 0) return 'analyzed_empty';
+
   const meta = analysis.meta || {};
   if (meta.analysisComplete === true || meta.coverageVerified === true) {
     return 'analyzed_empty';
@@ -137,7 +152,8 @@ function resolveDependencyEvidence(container) {
     const conclusion = String(assessed?.assessment?.conclusion || assessed?.analysisStatus || '');
     if (
       assessed?.analysisComplete === true ||
-      /COMPLETE_NO_EDGES|NO_SUPPORTED|ANALYZED/i.test(conclusion)
+      assessed?.executionTerminal === true ||
+      /COMPLETE_NO_EDGES|NO_SUPPORTED|ANALYZED|PARTIAL|FAILED|SKIPPED/i.test(conclusion)
     ) {
       return 'analyzed_empty';
     }

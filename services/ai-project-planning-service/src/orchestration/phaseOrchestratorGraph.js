@@ -81,22 +81,65 @@ async function runPhaseOrchestrator(opts = {}) {
   const threadId = String(opts.threadId || `${phase}-run`);
   const shared = spreadInputToShared(opts.input || {});
   const recursionLimit = resolvePhaseRecursionLimit(opts);
+  const checkpointer = opts.hooks?.checkpointer || null;
+  const durableThreadId = String(shared.runId || threadId || `${phase}-run`);
 
-  const finalState = await graph.invoke(
-    {
-      phase,
-      threadId,
-      output: null,
-      ...shared,
-    },
-    {
-      recursionLimit,
-      configurable: {
-        thread_id: String(shared.runId || threadId || `${phase}-run`),
+  let finalState;
+  try {
+    finalState = await graph.invoke(
+      {
+        phase,
+        threadId,
+        output: null,
+        ...shared,
       },
-    }
-  );
+      {
+        recursionLimit,
+        configurable: {
+          thread_id: durableThreadId,
+        },
+      }
+    );
+  } catch (err) {
+    const name = String(err?.name || '');
+    const msg = String(err?.message || err || '');
+    const isRecursion =
+      name.includes('GraphRecursion') ||
+      /recursion\s*limit/i.test(msg) ||
+      /Recursion\s*limit/i.test(msg);
+    if (!isRecursion) throw err;
+    console.warn(
+      '[agent_core] graph recursion limit phase=%s limit=%s err=%s',
+      phase,
+      recursionLimit,
+      msg.slice(0, 200)
+    );
+    const projected = projectSharedFromState({
+      ...shared,
+      stopReason: 'GRAPH_RECURSION_LIMIT',
+      evaluate: {
+        kind: 'evaluate_local',
+        enoughInfoToContinue: false,
+        reason: 'GRAPH_RECURSION_LIMIT',
+      },
+    });
+    return {
+      ...projected,
+      stopReason: 'GRAPH_RECURSION_LIMIT',
+      interrupted: false,
+      partial: { reason: 'GRAPH_RECURSION_LIMIT' },
+    };
+  }
 
+  const { resolveOrchestratorInvokeState } = require('./interruptedPhaseState');
+  const resolved = await resolveOrchestratorInvokeState(finalState, {
+    checkpointer,
+    threadId: durableThreadId,
+    phase,
+  });
+  if (resolved.interrupted) {
+    return resolved;
+  }
   if (finalState?.output && typeof finalState.output === 'object') {
     return finalState.output;
   }

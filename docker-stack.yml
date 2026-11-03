@@ -189,6 +189,7 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_CHAT_FALLBACK_MODELS=${LLM_CHAT_FALLBACK_MODELS:-}
     networks:
       - enterprise-network
     deploy:
@@ -220,6 +221,7 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_CHAT_FALLBACK_MODELS=${LLM_CHAT_FALLBACK_MODELS:-}
     networks:
       - enterprise-network
     deploy:
@@ -254,6 +256,7 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_CHAT_FALLBACK_MODELS=${LLM_CHAT_FALLBACK_MODELS:-}
       # DashScope free embed when LLM_PROVIDER=openai_compatible|dashscope; Ollama tags ignored in code
       - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-text-embedding-v4}
       - RAG_EMBEDDING_VERSION=${RAG_EMBEDDING_VERSION:-dashscope-text-embedding-v4}
@@ -346,6 +349,7 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_CHAT_FALLBACK_MODELS=${LLM_CHAT_FALLBACK_MODELS:-}
       - RABBITMQ_URL=${RABBITMQ_URL}
       - RABBITMQ_QUORUM_QUEUES=${RABBITMQ_QUORUM_QUEUES:-true}
     networks:

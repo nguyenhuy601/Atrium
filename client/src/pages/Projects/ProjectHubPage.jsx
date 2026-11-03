@@ -222,17 +222,34 @@ export default function ProjectHubPage({
     }
   }, [orgId, projectId, queryClient, applyBoardPickerList, t]);
 
-  /** Một lần getBoardDetail (full) — tránh lists + full song song trên overview. */
+  /** Board/list/timeline: full cards ngay 1 request; overview: lists-first rồi escalate. */
+  const moduleWantsFullCards =
+    currentModule === 'board' || currentModule === 'list' || currentModule === 'timeline';
+  const [wantFullBoardCards, setWantFullBoardCards] = useState(() => moduleWantsFullCards);
+
+  useEffect(() => {
+    setWantFullBoardCards(
+      currentModule === 'board' || currentModule === 'list' || currentModule === 'timeline'
+    );
+  }, [projectId, selectedTaskBoardId, currentModule]);
+
+  const needListsSkeleton = Boolean(selectedTaskBoardId) && currentModule === 'overview';
+  const boardDetailEnabled =
+    Boolean(selectedTaskBoardId) && (wantFullBoardCards || needListsSkeleton);
+
   const boardDetailQuery = useProjectHubBoardDetail(selectedTaskBoardId, apiCtx, {
-    includeCards: true,
-    enabled: Boolean(selectedTaskBoardId),
+    includeCards: wantFullBoardCards,
+    enabled: boardDetailEnabled,
   });
 
   const taskBoardDetail = boardDetailQuery.data ?? null;
   const loadingTaskBoardDetail =
-    Boolean(selectedTaskBoardId) && !taskBoardDetail && boardDetailQuery.isPending;
+    boardDetailEnabled && !taskBoardDetail && boardDetailQuery.isPending;
   const fullBoardCardsReady =
-    Boolean(selectedTaskBoardId) && !boardDetailQuery.isPending && Boolean(taskBoardDetail);
+    Boolean(selectedTaskBoardId) &&
+    wantFullBoardCards &&
+    !boardDetailQuery.isPending &&
+    Boolean(taskBoardDetail);
 
   useEffect(() => {
     if (!boardDetailQuery.isError) return;
@@ -779,6 +796,7 @@ export default function ProjectHubPage({
         apiCtx={apiCtx}
         onRefresh={refreshTaskBoardView}
         boardCardsReady={fullBoardCardsReady}
+        onNeedFullBoardCards={() => setWantFullBoardCards(true)}
         onUpdateCard={handleUpdateBoardCard}
         onPatchBoardCards={applyBoardCardsPatch}
         workspaceSlug=""

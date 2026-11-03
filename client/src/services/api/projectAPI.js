@@ -140,6 +140,10 @@ export const projectAPI = {
     apiClient.get(`/projects/${encodeURIComponent(projectId)}/members`, {
       skipPermissionDeniedToast: Boolean(config.skipPermissionDeniedToast),
       skipNotFoundToast: Boolean(config.skipNotFoundToast),
+      params: {
+        ...(config.view ? { view: config.view } : {}),
+        ...(config.weekKey ? { weekKey: config.weekKey } : {}),
+      },
     }),
 
   listMemberCandidates: (projectId, projectRoleKey) =>

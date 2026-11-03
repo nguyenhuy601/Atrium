@@ -50,11 +50,66 @@ function resolveChatMaxOutputTokens(env = process.env, modelName) {
   return QWEN_PLUS_MAX_OUTPUT_TOKENS;
 }
 
+function parseModelList(raw) {
+  return String(raw || '')
+    .split(/[,;\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function dedupeModels(models) {
+  const seen = new Set();
+  const out = [];
+  for (const item of models) {
+    const model = String(item || '').trim();
+    if (!model || seen.has(model)) continue;
+    seen.add(model);
+    out.push(model);
+  }
+  return out;
+}
+
+/**
+ * Ordered DashScope/OpenAI-compatible chat models for reactive quota fallback.
+ * Prefer LLM_CHAT_MODELS (comma list); else LLM_CHAT_MODEL + LLM_CHAT_FALLBACK_MODELS.
+ * Does not include Ollama models.
+ */
+function chatModelCandidates(env = process.env) {
+  const fromList = parseModelList(env.LLM_CHAT_MODELS);
+  if (fromList.length) return dedupeModels(fromList);
+  const primary = String(env.LLM_CHAT_MODEL || env.DASHSCOPE_MODEL || '').trim();
+  const fallbacks = parseModelList(env.LLM_CHAT_FALLBACK_MODELS);
+  return dedupeModels(primary ? [primary, ...fallbacks] : fallbacks);
+}
+
 function chatModel(env = process.env, fallback = 'qwen3.8-max') {
   if (isOpenAiCompatibleProvider(env)) {
-    return String(env.LLM_CHAT_MODEL || '').trim();
+    const candidates = chatModelCandidates(env);
+    return candidates[0] || String(env.LLM_CHAT_MODEL || '').trim();
   }
   return String(env.OLLAMA_MODEL || fallback).trim() || fallback;
+}
+
+/**
+ * Free-tier / allocation exhausted — advance to next chat model in the chain.
+ * Transient 429 without quota wording stays same-model retry only.
+ */
+function isQuotaExhaustedSignal(status, detail) {
+  const text = String(detail || '').toLowerCase();
+  if (
+    text.includes('quota') ||
+    text.includes('free tier') ||
+    text.includes('freetier') ||
+    text.includes('free_tier') ||
+    text.includes('allocationquota') ||
+    text.includes('allocation quota')
+  ) {
+    return true;
+  }
+  if (Number(status) === 403 && (text.includes('allocation') || text.includes('free'))) {
+    return true;
+  }
+  return false;
 }
 
 /** Free-quota DashScope text embed (OpenAI-compatible). Override via G7_EMBEDDING_MODEL. */
@@ -86,60 +141,20 @@ function isRetryableHttpStatus(status) {
 }
 
 /**
- * Non-stream chat.completions — returns assistant text (no enable_thinking).
- * Masks email/phone before remote POST; unmasks content after success.
- * Retries up to 2 times on 429 / timeout / 502–504.
- * @param {{
- *   prompt: string,
- *   temperature?: number,
- *   timeoutMs?: number,
- *   maxTokens?: number,
- *   model?: string,
- *   env?: NodeJS.ProcessEnv,
- *   axiosImpl?: object,
- *   sleepImpl?: (ms: number) => Promise<void>,
- * }} opts
- * @returns {Promise<{ ok: boolean, text: string, model: string, error?: string, usage?: object }>}
+ * One model: transient retries on 429/502–504/timeout. Does not switch model.
  */
-async function chatCompletionsText(opts = {}) {
-  const env = opts.env || process.env;
-  const remote = isOpenAiCompatibleProvider(env);
-  const model = remote
-    ? String(env.LLM_CHAT_MODEL || '').trim()
-    : String(opts.model || chatModel(env)).trim();
-  if (remote && !model) {
-    return { ok: false, text: '', model: '', error: 'LLM_CHAT_MODEL_missing' };
-  }
-  const http = opts.axiosImpl || axios;
-  const wait = opts.sleepImpl || sleep;
-  const baseUrl = openAiBaseUrl(env);
-  const apiKey = openAiApiKey(env);
-  const promptRaw = String(opts.prompt || '');
-  const { text: prompt, tokens } = remote
-    ? maskPromptPrivacy(promptRaw)
-    : { text: promptRaw, tokens: new Map() };
-
-  if (!baseUrl) {
-    return { ok: false, text: '', model, error: 'OPENAI_BASE_URL_missing' };
-  }
-  if (!apiKey) {
-    return { ok: false, text: '', model, error: 'DASHSCOPE_API_KEY_missing' };
-  }
-
-  const timeout =
-    opts.timeoutMs != null && Number.isFinite(Number(opts.timeoutMs))
-      ? Math.max(5000, Math.min(600000, Number(opts.timeoutMs)))
-      : 180000;
-  const outputCeiling = resolveChatMaxOutputTokens(env, model);
-  const maxTokens =
-    opts.maxTokens != null && Number.isFinite(Number(opts.maxTokens))
-      ? Math.max(32, Math.min(outputCeiling, Math.round(Number(opts.maxTokens))))
-      : outputCeiling;
-  const temperature =
-    opts.temperature != null && Number.isFinite(Number(opts.temperature))
-      ? Number(opts.temperature)
-      : 0.1;
-
+async function chatCompletionsTextOnce({
+  model,
+  prompt,
+  tokens,
+  baseUrl,
+  apiKey,
+  timeout,
+  maxTokens,
+  temperature,
+  http,
+  wait,
+}) {
   let lastError = 'openai_error';
   for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt += 1) {
     try {
@@ -171,7 +186,8 @@ async function chatCompletionsText(opts = {}) {
           .trim()
           .slice(0, 160);
         lastError = detail ? `openai_http_${status}: ${detail}` : `openai_http_${status}`;
-        if (isRetryableHttpStatus(status) && attempt < MAX_TRANSIENT_RETRIES) {
+        const quotaExhausted = isQuotaExhaustedSignal(status, detail);
+        if (!quotaExhausted && isRetryableHttpStatus(status) && attempt < MAX_TRANSIENT_RETRIES) {
           await wait(RETRY_DELAY_MS);
           continue;
         }
@@ -181,6 +197,7 @@ async function chatCompletionsText(opts = {}) {
           model,
           error: lastError,
           usage: { promptTokens: 0, completionTokens: 0 },
+          quotaExhausted,
         };
       }
 
@@ -193,10 +210,17 @@ async function chatCompletionsText(opts = {}) {
       };
 
       if (!text) {
-        return { ok: false, text: '', model, error: 'openai_empty_content', usage };
+        return {
+          ok: false,
+          text: '',
+          model,
+          error: 'openai_empty_content',
+          usage,
+          quotaExhausted: false,
+        };
       }
 
-      return { ok: true, text, model, usage };
+      return { ok: true, text, model, usage, quotaExhausted: false };
     } catch (err) {
       const code = err.code === 'ECONNABORTED' ? 'openai_timeout' : 'openai_error';
       lastError = code;
@@ -210,6 +234,7 @@ async function chatCompletionsText(opts = {}) {
         model,
         error: code,
         usage: { promptTokens: 0, completionTokens: 0 },
+        quotaExhausted: false,
       };
     }
   }
@@ -220,6 +245,131 @@ async function chatCompletionsText(opts = {}) {
     model,
     error: lastError,
     usage: { promptTokens: 0, completionTokens: 0 },
+    quotaExhausted: false,
+  };
+}
+
+/**
+ * Non-stream chat.completions — returns assistant text (no enable_thinking).
+ * Masks email/phone before remote POST; unmasks content after success.
+ * Same-model retries on 429 / timeout / 502–504.
+ * Remote: on free-tier/quota exhaustion, tries next model in chatModelCandidates
+ * (LLM_CHAT_MODELS or LLM_CHAT_MODEL + LLM_CHAT_FALLBACK_MODELS). No Ollama fallback.
+ * @param {{
+ *   prompt: string,
+ *   temperature?: number,
+ *   timeoutMs?: number,
+ *   maxTokens?: number,
+ *   model?: string,
+ *   env?: NodeJS.ProcessEnv,
+ *   axiosImpl?: object,
+ *   sleepImpl?: (ms: number) => Promise<void>,
+ * }} opts
+ * @returns {Promise<{
+ *   ok: boolean,
+ *   text: string,
+ *   model: string,
+ *   error?: string,
+ *   usage?: object,
+ *   modelsAttempted?: string[],
+ *   fallbackUsed?: boolean,
+ * }>}
+ */
+async function chatCompletionsText(opts = {}) {
+  const env = opts.env || process.env;
+  const remote = isOpenAiCompatibleProvider(env);
+  const preferred = String(opts.model || '').trim();
+  const chain = remote
+    ? dedupeModels(preferred ? [preferred, ...chatModelCandidates(env)] : chatModelCandidates(env))
+    : [preferred || chatModel(env)].filter(Boolean);
+  const model = chain[0] || '';
+  if (remote && !model) {
+    return { ok: false, text: '', model: '', error: 'LLM_CHAT_MODEL_missing' };
+  }
+  const http = opts.axiosImpl || axios;
+  const wait = opts.sleepImpl || sleep;
+  const baseUrl = openAiBaseUrl(env);
+  const apiKey = openAiApiKey(env);
+  const promptRaw = String(opts.prompt || '');
+  const { text: prompt, tokens } = remote
+    ? maskPromptPrivacy(promptRaw)
+    : { text: promptRaw, tokens: new Map() };
+
+  if (!baseUrl) {
+    return { ok: false, text: '', model, error: 'OPENAI_BASE_URL_missing' };
+  }
+  if (!apiKey) {
+    return { ok: false, text: '', model, error: 'DASHSCOPE_API_KEY_missing' };
+  }
+
+  const timeout =
+    opts.timeoutMs != null && Number.isFinite(Number(opts.timeoutMs))
+      ? Math.max(5000, Math.min(600000, Number(opts.timeoutMs)))
+      : 180000;
+  const temperature =
+    opts.temperature != null && Number.isFinite(Number(opts.temperature))
+      ? Number(opts.temperature)
+      : 0.1;
+
+  const modelsAttempted = [];
+  let lastResult = {
+    ok: false,
+    text: '',
+    model,
+    error: 'openai_error',
+    usage: { promptTokens: 0, completionTokens: 0 },
+  };
+
+  for (let i = 0; i < chain.length; i += 1) {
+    const candidate = chain[i];
+    modelsAttempted.push(candidate);
+    const outputCeiling = resolveChatMaxOutputTokens(env, candidate);
+    const maxTokens =
+      opts.maxTokens != null && Number.isFinite(Number(opts.maxTokens))
+        ? Math.max(32, Math.min(outputCeiling, Math.round(Number(opts.maxTokens))))
+        : outputCeiling;
+
+    const result = await chatCompletionsTextOnce({
+      model: candidate,
+      prompt,
+      tokens,
+      baseUrl,
+      apiKey,
+      timeout,
+      maxTokens,
+      temperature,
+      http,
+      wait,
+    });
+    lastResult = result;
+
+    if (result.ok) {
+      return {
+        ok: true,
+        text: result.text,
+        model: candidate,
+        usage: result.usage,
+        modelsAttempted,
+        fallbackUsed: i > 0,
+      };
+    }
+
+    const canAdvance =
+      remote && result.quotaExhausted && i < chain.length - 1;
+    if (canAdvance) {
+      continue;
+    }
+    break;
+  }
+
+  return {
+    ok: false,
+    text: '',
+    model: lastResult.model || model,
+    error: lastResult.error,
+    usage: lastResult.usage || { promptTokens: 0, completionTokens: 0 },
+    modelsAttempted,
+    fallbackUsed: modelsAttempted.length > 1,
   };
 }
 
@@ -435,6 +585,8 @@ module.exports = {
   openAiBaseUrl,
   openAiApiKey,
   chatModel,
+  chatModelCandidates,
+  isQuotaExhaustedSignal,
   remoteEmbedModel,
   remoteEmbedDimensions,
   chatCompletionsText,

@@ -82,6 +82,15 @@ const WhatPhaseState = Annotation.Root({
     reducer: appendList,
     default: () => [],
   }),
+  // Parity HOW: Pattern B applyShared writes toolExecutions — parent must keep channel
+  // or parallel Send merges are dropped (ADAPTER_RESULT_LOST / re-pick loops).
+  toolExecutions: Annotation({
+    reducer: (left, right) => {
+      const { reduceToolExecutions } = require('./toolExecutionContract');
+      return reduceToolExecutions(left, right);
+    },
+    default: () => [],
+  }),
   messages: Annotation({
     reducer: appendMessages,
     default: () => [],
@@ -146,6 +155,7 @@ async function persistNode(state, currentNode, onCheckpoint, extra = {}) {
     iteration: Array.isArray(state.history) ? state.history.length : 0,
     history: Array.isArray(state.history) ? [...state.history] : [],
     toolResults: Array.isArray(state.toolResults) ? [...state.toolResults] : [],
+    toolExecutions: Array.isArray(state.toolExecutions) ? [...state.toolExecutions] : [],
     contextPackage: state.contextPackage,
     status: 'running',
     hitl: 'gate1',
@@ -362,11 +372,16 @@ function buildWhatPhaseGraph(hooks = {}) {
     const corpus = prepared.corpus;
     const contextPackage = prepared.contextPackage;
     const frCount = Array.isArray(frRows) ? frRows.length : 0;
+    const { buildCtxPromptFragment } = require('./howProposalNodes');
+    const { logWhatCtx } = require('./whatTiming');
+    const { itemCount } = buildCtxPromptFragment(contextPackage);
+    logWhatCtx('prepareWhat:what_prepare', contextPackage, itemCount);
     whatTiming = markStage(whatTiming, 'prepareWhat', {
       ms: endUnderstand(),
       frCount,
       candidateCount: null,
       topLevelFrCount: topLen,
+      contextItems: itemCount,
     });
     const history = ['step2:prepare', 'prepareWhat', 'context:what_base'];
     await persistNode(
@@ -451,107 +466,94 @@ function buildWhatPhaseGraph(hooks = {}) {
   graph.addNode(PLAIN_TOOLS_NODE, buildPlainToolsNode({ phase: 'what', onProgress }));
 
   /**
-   * Staged FR HITL (always-on): stamp revision + interrupt/soft-wait until baseline pinned.
-   * Side effects before interrupt are idempotent (revision contentHash / pin requestId).
+   * After WhatFrTool: stamp FR revision + auto-pin baseline, then continue to UC/Data
+   * (same class as other section tools — no human FR confirm gate).
    */
   graph.addNode('frCheckpoint', async (state) => {
     onProgress?.({ node: 'frCheckpoint', phase: 'what' });
     const {
       stampFrRevisionAfterTool,
-      needsFrConfirm,
-      applyFrConfirmResume,
+      pinFrBaseline,
       getCurrentRequirementsRevisionId,
     } = require('../planningRevision');
-    const { awaitInRunHitl, normalizeInRunKind } = require('./hitlInterrupt');
 
-    let next = { ...state };
-    const hrEnvelope = state.humanResume;
-    if (hrEnvelope && typeof hrEnvelope === 'object') {
-      const kind = normalizeInRunKind(hrEnvelope.kind || hrEnvelope.resume?.kind);
-      const resumeBody =
-        hrEnvelope.resume && typeof hrEnvelope.resume === 'object'
-          ? { ...hrEnvelope.resume, kind }
-          : { ...hrEnvelope, kind };
-      if (kind === 'fr_confirm') {
-        const applied = applyFrConfirmResume(next, {
-          ...resumeBody,
-          kind: 'fr_confirm',
-          action: resumeBody.action || resumeBody.decision || 'confirm',
-        });
-        if (applied.applied) {
-          next = applied.state;
-        }
-      }
-    }
-
-    const stamped = stampFrRevisionAfterTool(next.container || {}, {
-      runId: next.runId || null,
+    const stamped = stampFrRevisionAfterTool(state.container || {}, {
+      runId: state.runId || null,
       toolName: WHAT_FR_TOOL,
-      srsProposal: next.srsProposal || null,
+      srsProposal: state.srsProposal || null,
     });
-    next = {
-      ...next,
-      container: stamped.container,
-      history: stamped.created
-        ? [`fr_revision:${stamped.revision.revisionId}`]
-        : stamped.revision
-          ? ['fr_revision:idempotent']
-          : ['fr_revision:empty'],
-    };
+    let container = stamped.container;
+    const hist = [];
+    if (stamped.created) hist.push(`fr_revision:${stamped.revision.revisionId}`);
+    else if (stamped.revision) hist.push('fr_revision:idempotent');
+    else hist.push('fr_revision:empty');
 
-    if (needsFrConfirm(next)) {
-      const frRev = getCurrentRequirementsRevisionId(next.container, 'fr');
-      const content = stamped.revision?.content || {};
-      const hitl = awaitInRunHitl({
-        kind: 'fr_confirm',
-        runId: next.runId,
-        snapshotId: next.snapshotId,
-        summary: {
-          frRevisionId: frRev,
-          frCount: Number(content.frCount) || 0,
-          note: 'Confirm FR baseline before UC/Data',
-        },
-        prompt: 'Xác nhận FR để chạy tiếp UC/Data',
+    const tipId = getCurrentRequirementsRevisionId(container, 'fr');
+    if (tipId) {
+      const pinned = pinFrBaseline(container, {
+        revisionId: tipId,
+        actorUserId: null,
+        requestId: `auto-pin-${state.runId || tipId}`,
       });
-      if (hitl && hitl.skipped) {
-        await persistNode(next, 'frCheckpoint', onCheckpoint, {
-          status: 'waiting_human',
-          hitl: {
-            type: 'in_run_hitl',
-            kind: 'fr_confirm',
-            waiting: true,
-            frRevisionId: frRev,
-          },
-        });
-        return {
-          container: next.container,
-          humanResume: null,
-          history: [`frCheckpoint:waiting_soft:${hitl.reason || 'skipped'}`],
-          hitl: {
-            type: 'in_run_hitl',
-            kind: 'fr_confirm',
-            waiting: true,
-            frRevisionId: frRev,
-          },
-          paused: true,
-        };
-      }
+      container = pinned.container;
+      hist.push(
+        pinned.duplicated
+          ? `fr_baseline_pinned:idempotent:${pinned.revisionId}`
+          : `fr_baseline_pinned:${pinned.revisionId}`
+      );
     }
+
+    await persistNode(
+      {
+        ...state,
+        container,
+        srsProposal: state.srsProposal || null,
+        proposalFragment: state.proposalFragment || null,
+        frUnderstanding: state.frUnderstanding || null,
+      },
+      'frCheckpoint',
+      onCheckpoint,
+      { status: 'running' }
+    );
 
     return {
-      container: next.container,
+      container,
+      srsProposal: state.srsProposal || null,
+      proposalFragment: state.proposalFragment || null,
+      frUnderstanding: state.frUnderstanding || null,
       humanResume: null,
-      history: ['frCheckpoint:ok'],
-      hitl: next.hitl || null,
+      history: hist.length ? hist : ['frCheckpoint:ok'],
+      hitl: state.hitl || null,
       paused: false,
     };
   });
 
   function routeAfterSelectToolsWhat(state) {
-    if (routeAfterSelectTools(state) === 'assemble') return 'metaGate';
+    const {
+      isWhatDeadlockStopReason,
+      detectWhatSelectDeadlock,
+      isWhatCatalogComplete,
+    } = require('./computeEligibleWhatTools');
+    const stop = String(state?.stopReason || '');
+    const budgetOrHardFail =
+      stop.startsWith('BUDGET_') ||
+      stop === 'TOOL_FAILED' ||
+      stop.startsWith('TOOL_FAILED:');
+    if (isWhatDeadlockStopReason(stop) || budgetOrHardFail) {
+      return isWhatCatalogComplete(state) ? 'metaGate' : 'emitIncomplete';
+    }
+    if (routeAfterSelectTools(state) === 'assemble') {
+      if (isWhatCatalogComplete(state)) return 'metaGate';
+      const deadlock = detectWhatSelectDeadlock(state);
+      return deadlock.deadlocked ? 'emitIncomplete' : 'metaGate';
+    }
     const ai = lastAiMessage(state.messages);
     const calls = toolCallsFromMessage(ai);
-    if (!calls.length) return 'metaGate';
+    if (!calls.length) {
+      if (isWhatCatalogComplete(state)) return 'metaGate';
+      const deadlock = detectWhatSelectDeadlock(state);
+      return deadlock.deadlocked ? 'emitIncomplete' : 'metaGate';
+    }
     const sends = [];
     let plainQueued = false;
     for (const call of calls) {
@@ -573,7 +575,10 @@ function buildWhatPhaseGraph(hooks = {}) {
         );
       }
     }
-    return sends.length ? sends : 'metaGate';
+    if (sends.length) return sends;
+    if (isWhatCatalogComplete(state)) return 'metaGate';
+    const deadlock = detectWhatSelectDeadlock(state);
+    return deadlock.deadlocked ? 'emitIncomplete' : 'metaGate';
   }
 
   graph.addNode('metaGate', async (state) => {
@@ -667,22 +672,11 @@ function buildWhatPhaseGraph(hooks = {}) {
   graph.addEdge('metaGate', 'scoreCompleteness');
   graph.addConditionalEdges(
     'scoreCompleteness',
-    (state) => {
-      const {
-        isWhatWaitingFrStopReason,
-        isWaitingFrConfirmOnly,
-      } = require('./computeEligibleWhatTools');
-      if (
-        isWhatWaitingFrStopReason(state.stopReason) ||
-        isWaitingFrConfirmOnly(state)
-      ) {
-        return 'emitIncomplete';
-      }
-      return routeAfterCompleteness(state, {
+    (state) =>
+      routeAfterCompleteness(state, {
         maxEnrich: envMaxEnrich(state.env || process.env),
         env: state.env || process.env,
-      });
-    },
+      }),
     {
       injectGap: 'injectGap',
       emitReady: 'emitReady',

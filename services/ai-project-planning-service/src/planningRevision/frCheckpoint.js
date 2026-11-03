@@ -1,7 +1,5 @@
 /**
- * FR staged checkpoint (WHAT) — always-on.
- * Pin requirements.frBaselineRevisionId before UC/Data dependents.
- * No product env flag (unlike WBS AGENT_CORE_HITL_WBS_CHECKPOINT).
+ * WHAT FR revision stamp + auto-pin after WhatFrTool (no human confirm gate).
  */
 
 const {
@@ -18,18 +16,6 @@ const {
 function getFrBaselineRevisionId(container) {
   const id = container?.requirements?.frBaselineRevisionId;
   return id ? String(id) : null;
-}
-
-/**
- * True when FR content/revision exists but baseline not pinned.
- * @param {object} state — LangGraph state or { container, srsProposal }
- */
-function needsFrConfirm(state) {
-  const container = state?.container || state || {};
-  if (getFrBaselineRevisionId(container)) return false;
-  const content = extractFrContent(container, state?.srsProposal || null);
-  if (Number(content.frCount) > 0) return true;
-  return Boolean(getCurrentRequirementsRevisionId(container, 'fr'));
 }
 
 /**
@@ -74,7 +60,7 @@ function stampFrRevisionAfterTool(container, meta = {}) {
 }
 
 /**
- * Pin FR baseline after human confirm (idempotent if already same id).
+ * Auto-pin FR baseline after WhatFrTool (idempotent if already same id).
  * @param {object} container
  * @param {{ revisionId?: string|null, actorUserId?: string|null, requestId?: string|null }} opts
  */
@@ -104,53 +90,9 @@ function pinFrBaseline(container, opts = {}) {
   return { container: base, revisionId, duplicated: false };
 }
 
-/**
- * Apply human resume for fr_confirm (idempotent on requestId).
- * @param {object} state
- * @param {object} humanResume
- */
-function applyFrConfirmResume(state, humanResume = {}) {
-  const action = String(humanResume.action || humanResume.decision || '')
-    .trim()
-    .toLowerCase();
-  const kind = String(humanResume.kind || '').trim().toLowerCase();
-  if (kind && kind !== 'fr_confirm') {
-    return { state, applied: false };
-  }
-  if (action && action !== 'confirm' && action !== 'fr_confirm' && action !== 'approve') {
-    return { state, applied: false };
-  }
-  const requestId = humanResume.requestId || humanResume.idempotencyKey || null;
-  const container = state?.container || {};
-  if (
-    requestId &&
-    container?.requirements?.frBaselinePinRequestId &&
-    String(container.requirements.frBaselinePinRequestId) === String(requestId)
-  ) {
-    return { state, applied: true, duplicated: true };
-  }
-  const pinned = pinFrBaseline(container, {
-    revisionId: humanResume.frRevisionId || humanResume.revisionId || null,
-    actorUserId: humanResume.actorUserId || humanResume.userId || null,
-    requestId,
-  });
-  return {
-    state: {
-      ...state,
-      container: pinned.container,
-      history: [`fr_baseline_pinned:${pinned.revisionId}`],
-      humanResume: null,
-    },
-    applied: true,
-    duplicated: pinned.duplicated,
-  };
-}
-
 module.exports = {
   getFrBaselineRevisionId,
-  needsFrConfirm,
   stampFrRevisionAfterTool,
   pinFrBaseline,
-  applyFrConfirmResume,
   extractFrContent,
 };

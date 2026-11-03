@@ -46,9 +46,9 @@ function labelOf(t, key, fallback, vars) {
 
 export { shouldShowHowMonitorResults };
 
-function sectionHasIssue(tab, bySection) {
+function sectionHasIssue(tab) {
   if (!tab) return false;
-  const isMissing = Boolean(tab.missing) || !(bySection[tab.key]?.length || tab.count);
+  const isMissing = Boolean(tab.missing);
   const hasConflict = Boolean(tab.hasConflict) || Number(tab.conflictCount) > 0;
   return isMissing || hasConflict;
 }
@@ -216,6 +216,21 @@ function emptySectionCopy(section, pack, t) {
       );
     }
     if (analysisStatus === 'INCOMPLETE' || analysisStatus === 'PARTIAL' || analysisStatus === 'INVALID') {
+      const proposalCount = Array.isArray(depSection.proposalEdges)
+        ? depSection.proposalEdges.length
+        : 0;
+      const oqCount = Array.isArray(depSection.openQuestions)
+        ? depSection.openQuestions.length
+        : Array.isArray(depSection.unresolvedQuestions)
+          ? depSection.unresolvedQuestions.length
+          : 0;
+      if (proposalCount > 0 || oqCount > 0) {
+        return labelOf(
+          t,
+          'requirements.aiHitlMonitorResultsEmptyDepsPartialWithProposal',
+          'Phụ thuộc: có đề xuất/câu hỏi mở nhưng chưa đồng bộ lên bảng. Làm mới pack hoặc chạy lại HOW.'
+        );
+      }
       return labelOf(
         t,
         'requirements.aiHitlMonitorResultsEmptyDepsPartial',
@@ -323,8 +338,7 @@ export default function HowMonitorResultsPanel({
       ? activeRowsRaw.filter((row) => row?.recordKind !== 'test_strategy')
       : activeRowsRaw;
   const activeTab = sectionTabs.find((tab) => tab.key === activeSection);
-  const activeMissing = Boolean(activeTab?.missing) || activeRows.length === 0;
-  const activeHasIssue = sectionHasIssue(activeTab, bySection);
+  const activeHasIssue = sectionHasIssue(activeTab);
 
   return (
     <section
@@ -365,7 +379,7 @@ export default function HowMonitorResultsPanel({
         tabs={sectionTabs}
         activeKey={activeSection}
         onSelect={setActiveSection}
-        tabHasIssue={(tab) => sectionHasIssue(tab, bySection)}
+        tabHasIssue={(tab) => sectionHasIssue(tab)}
         t={t}
         ariaLabel={labelOf(
           t,
@@ -374,7 +388,7 @@ export default function HowMonitorResultsPanel({
         )}
       />
 
-      {!activeMissing && activeRows.length ? (
+      {activeRows.length > 0 ? (
         <>
           {activeSection === 'quality' ? (
             <p className="mb-2 text-xs text-muted-foreground">

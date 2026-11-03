@@ -691,23 +691,10 @@ export function resolveHowProgressViewModel(
   );
   const showSpinner = state === 'running' || state === 'queued' || state === 'finalizing';
   const waitingHuman = state === 'waiting_human';
-  const staleThresholdMs = WHAT_MONITOR_CONFIG.progressStaleMs;
-  const showProgressStale =
-    !waitingHuman &&
-    state === 'running' &&
-    Number.isFinite(staleThresholdMs) &&
-    progressStaleMs >= staleThresholdMs;
-  let errorMessage = resolveHowRunErrorMessage(liveRun, phaseHow);
-  if (state === 'incomplete' && !errorMessage) {
-    errorMessage = 'HOW dừng chưa hoàn tất (incomplete/stopped). Xem kết quả partial và chạy lại nếu cần.';
-  } else if (state === 'failed' && !errorMessage) {
-    if (wallTimedOut) {
-      errorMessage =
-        'Phiên HOW quá hạn / mất tín hiệu tiến độ — đã dừng đồng hồ. Chạy lại HOW nếu cần.';
-    } else {
-      errorMessage = 'HOW thất bại. Xem lại dữ liệu đầu vào hoặc chạy lại.';
-    }
-  }
+  // Do not surface FE "progress stale" / wall-timeout copy as Monitor warnings.
+  const showProgressStale = false;
+  // Only pass through BE error text — never invent wall/incomplete/failed blurbs.
+  const errorMessage = resolveHowRunErrorMessage(liveRun, phaseHow);
 
   // Don't keep "Chuẩn bị" as current when run already terminal-stopped.
   const displayMacroStep = terminalStopped ? 0 : macroStep;
@@ -734,6 +721,7 @@ export function resolveHowProgressViewModel(
     elapsedMs,
     progressStaleMs,
     showProgressStale,
+    wallTimedOut: Boolean(wallTimedOut),
     errorMessage,
     showSpinner,
     waitingHuman,
@@ -747,17 +735,15 @@ export function resolveHowProgressViewModel(
       : state === 'finalizing'
         ? 'Saving results'
         : macroDef?.fallback || 'Phase HOW',
-    descriptionKey: isIncomplete
-      ? 'requirements.aiHitlMonitorHowIncompleteHint'
-      : isHardFailed
-        ? 'requirements.aiHitlMonitorHowFailedHint'
+    descriptionKey:
+      isIncomplete || isHardFailed
+        ? 'requirements.aiHitlMonitorHowTitle'
         : state === 'finalizing'
           ? 'requirements.aiHitlHowFinalizingDesc'
           : macroDef?.descriptionKey || 'requirements.aiHitlMonitorHowHint',
-    descriptionFallback: isIncomplete
-      ? 'HOW dừng chưa hoàn tất. Xem kết quả partial bên dưới; chạy lại HOW nếu cần bổ sung.'
-      : isHardFailed
-        ? 'Phiên HOW đã dừng. Bấm Chạy lại HOW để thử lại.'
+    descriptionFallback:
+      isIncomplete || isHardFailed
+        ? 'Phase HOW — Planning AI'
         : state === 'finalizing'
           ? 'Analysis finished. Writing each section onto the pack.'
           : macroDef?.descriptionFallback || 'Đang chạy agent + tools. Chỉ hiện phase HOW.',

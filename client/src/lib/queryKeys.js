@@ -166,7 +166,13 @@ export const queryKeys = {
       'planningItems',
       String(projectId || ''),
     ],
-    members: (projectId) => [...queryKeys.projectHub.all, 'members', String(projectId || '')],
+    /** view: 'roster' (default) | 'forecastLoad' */
+    members: (projectId, view = 'roster') => [
+      ...queryKeys.projectHub.all,
+      'members',
+      String(projectId || ''),
+      view === 'forecastLoad' ? 'forecastLoad' : 'roster',
+    ],
     assignableMembers: (boardId) => [
       ...queryKeys.projectHub.all,
       'assignable',

@@ -21,7 +21,7 @@ flowchart LR
     AIPS[ai-project-planning-service]
     VOICE[voice-service]
     SOCK[socket-service /chat]
-    OTHER[friend role notification document ai-task]
+    OTHER[role notification webhook report]
   end
   subgraph data [Data]
     M[(MongoDB)]
@@ -69,12 +69,15 @@ flowchart LR
 
 ## AI Project (Two-Phase HITL)
 
+Hub + poster: [`ai-project/README.md`](ai-project/README.md) · [`ai-project/diagrams/00-overview-poster.svg`](ai-project/diagrams/00-overview-poster.svg).
+
 - **Sản phẩm:** Phase 1 WHAT → Gate 1 → Phase 2 HOW → Gate 2; compute trên **`ai-project-planning-service`**; pack/project + Gate HTTP + G20 trên **`project-service`**.
-- **Hybrid HITL SoT:** Gate 1/2 = Mongo Pack HTTP; in-run clarify/edit_draft = LangGraph checkpointer (Redis+RedisJSON, không Postgres). Chi tiết: [`ai-project/hybrid-hitl-langgraph.md`](ai-project/hybrid-hitl-langgraph.md).
+- **Agent Core:** điều phối phase WHAT/HOW (chat LLM qua **Alibaba Cloud API**, tools, truy hồi ngữ nghĩa hybrid). Chi tiết triển khai: hub [`ai-project/README.md`](ai-project/README.md).
+- **Hybrid HITL SoT:** Gate 1/2 = duyệt Pack qua HTTP; trong lần chạy có thể tạm dừng hỏi người (lưu trạng thái phiên, không Postgres). Chi tiết: [`ai-project/hybrid-hitl-langgraph.md`](ai-project/hybrid-hitl-langgraph.md).
 - **SoT nhóm G1–G20:** [`.cursor/plans/ai-project-build-spec-groups.plan.md`](../.cursor/plans/ai-project-build-spec-groups.plan.md); primer: [`.cursor/skills/ai-project-primer/SKILL.md`](../.cursor/skills/ai-project-primer/SKILL.md).
 - **Luồng 3-layer (A/B/C):** [`ai-project/main-flow-3layer.md`](ai-project/main-flow-3layer.md) — cùng backbone; kính đọc Workflow / Agent / Governance.
-- **Vá 3 track trước Agent Core:** [`ai-project/pre-agent-core-3tracks.md`](ai-project/pre-agent-core-3tracks.md) — C→A→B rồi mới LangGraph F2 / JEV runtime (RULE-14).
-- **JEV (control layer, deferred):** JEV 1/2/3 — chấm điểm / định tuyến model / giám sát agent; **provider-agnostic**; chưa implement runtime. Chi tiết: [`ai-project/jev-control-layer.md`](ai-project/jev-control-layer.md).
+- **Vá 3 track trước Agent Core:** [`ai-project/pre-agent-core-3tracks.md`](ai-project/pre-agent-core-3tracks.md) — C→A→B đã đóng; JEV runtime vẫn optional.
+- **JEV (control layer):** JEV 1/2/3 — chấm điểm / định tuyến model / giám sát agent; **provider-agnostic**; bật advisory qua env khi cần. Chi tiết: [`ai-project/jev-control-layer.md`](ai-project/jev-control-layer.md).
 
 ## Frontend
 

@@ -1,5 +1,7 @@
 /**
  * Risks sec — Semantic→Fact→Propose→Accept via LangGraph (real triggers only).
+ * Triggers include cap/gap/arch-high plus all DependencyTool edges (FS/FULL → kind `dep`,
+ * blocking/INTEGRATION/non-schedulable → `blockingDep`).
  */
 
 const { Annotation, StateGraph, START, END } = require('@langchain/langgraph');
@@ -55,7 +57,13 @@ async function buildRiskSemantic({ pack = {}, container = {}, env = process.env,
     missingSlots,
     openQuestions: hasTrigger
       ? []
-      : [{ code: 'RISK_NO_TRIGGERS', message: 'Không có trigger rủi ro thật (cap/gap/arch/dep).' }],
+      : [
+          {
+            code: 'RISK_NO_TRIGGERS',
+            message:
+              'Không có trigger rủi ro thật (cap/gap/arch/dep edges — kể cả FS/FULL).',
+          },
+        ],
     allowLists: { frIds: frBrief.map((row) => row.id) },
     semantic: {
       business: { locale, frBrief, projectName: clip(pack.overview?.name || pack.name, 80) },
@@ -65,6 +73,8 @@ async function buildRiskSemantic({ pack = {}, container = {}, env = process.env,
         gaps: byKind('gap'),
         archHigh: byKind('archHigh'),
         blockingDeps: byKind('blockingDep'),
+        /** FS/FULL và cạnh lịch thường từ DependencyTool — dữ liệu thật để phân tích Risk. */
+        deps: byKind('dep'),
       },
       layer: slimLayer(layer),
     },
@@ -86,6 +96,8 @@ async function proposeRisk({ semantic, facts, env, generateJsonFn }) {
   const system = [
     'You are a project risk analyst. Return JSON only.',
     'Report only risks with a concrete trigger present in SEMANTIC or FACTS. Do not invent generic risks.',
+    'FACTS.deps and FACTS.blockingDeps are real dependency edges from the run — treat each listed edge as valid evidence for sequencing, coupling, critical-path, or integration risk. Prefer those edges over inventing FR-only risks.',
+    'When FACTS.deps is non-empty, produce at least one risk grounded in a listed edge (cite from→to in trigger) unless the edges clearly carry no delivery risk.',
     'trigger states the condition. impactDescription states the business consequence. mitigation states an actionable response.',
     'relatedFrIds must be a non-empty list of FR IDs from ALLOW. probability and impact must be integers from 1 to 5.',
     'If the input is too thin to judge probability or impact, say that uncertainty in impactDescription instead of presenting an unsupported score as a measured fact.',

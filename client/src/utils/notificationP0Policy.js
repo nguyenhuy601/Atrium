@@ -45,6 +45,7 @@ const P0_SYSTEM_KINDS = new Set([
   'ai_hitl_gate2_po',
   'ai_hitl_gate2_approved',
   'ai_hitl_gate2_rejected',
+  'ai_hitl_gate2_line_rejected',
   'ai_hitl_gate_pending',
 ]);
 

@@ -223,14 +223,15 @@ function filterAlreadySuccessfulWhatToolCalls(state, toolCalls) {
 
 /**
  * Drop HOW tool_calls already recorded as successful (mirrors WHAT).
+ * Uses howSucceededTools so forceRerunSet tools stay selectable until re-validated.
  * @param {object} state
  * @param {Array<{ name?: string, toolName?: string }>} toolCalls
  */
 function filterAlreadySuccessfulHowToolCalls(state, toolCalls) {
   const list = Array.isArray(toolCalls) ? toolCalls : [];
   if (!list.length) return list;
-  const { successfulHowTools } = require('./howToolDag');
-  const done = successfulHowTools(state);
+  const { howSucceededTools } = require('./computeEligibleHowTools');
+  const done = howSucceededTools(state);
   if (!done.size) return list;
   return list.filter((c) => {
     const name = String(c?.name || c?.toolName || '').trim();
@@ -281,6 +282,36 @@ function howRequiredToolsStillMissing(state) {
   }
 }
 
+/**
+ * WHAT: dispatch all currently eligible catalog tools (multi-Send) — no 1-tool stub.
+ * @param {object} state
+ * @returns {{ tool_calls: object[], done: boolean, stub: boolean, eligible?: string[], running?: string[] }}
+ */
+function decideWhatByEligible(state) {
+  const { computeEligibleWhatTools } = require('./computeEligibleWhatTools');
+  const { eligible, running } = computeEligibleWhatTools(state);
+  if (!eligible.length) {
+    return {
+      tool_calls: [],
+      done: true,
+      stub: true,
+      eligible,
+      running,
+    };
+  }
+  return {
+    tool_calls: eligible.map((name) => ({
+      id: `elig_${name}`,
+      name,
+      args: {},
+    })),
+    done: false,
+    stub: true,
+    eligible,
+    running,
+  };
+}
+
 async function decideToolCalls(state, opts = {}) {
   if (typeof opts.decideToolCalls === 'function') {
     return opts.decideToolCalls(state, opts);
@@ -292,6 +323,9 @@ async function decideToolCalls(state, opts = {}) {
   const allowedToolNames = tools.map((t) => t.toolName);
 
   if (!isLlmEnabled(env) || String(env.LLM_PROVIDER || '').toLowerCase() === 'mock') {
+    if (phase === 'what') {
+      return decideWhatByEligible(state);
+    }
     return stubDecideToolCalls(state, tools, phase);
   }
 
@@ -351,26 +385,15 @@ async function decideToolCalls(state, opts = {}) {
   }
 
   // Hard gate: LLM often returns done=true with empty calls → prepare→metaGate skip.
-  // WHAT must run full catalog before done (completeness SoT).
+  // WHAT: force all eligible peers (pick_eligible), never 1-tool stub.
   if (phase === 'what' && (!decision.tool_calls.length || decision.done)) {
     const missing = whatRequiredToolsStillMissing(state);
     if (missing.length) {
-      const forced = stubDecideToolCalls(
-        {
-          ...state,
-          gapReport: {
-            ...(state.gapReport || {}),
-            missing,
-            hint: `Missing required WHAT tools: ${missing.join(', ')}`,
-          },
-        },
-        tools,
-        phase
-      );
+      const forced = decideWhatByEligible(state);
       console.info(
-        '[agent_core] what.selectTools override_llm_done missing=%s next=%s',
+        '[agent_core] what.selectTools override_llm_done missing=%s pick_eligible=%s',
         missing.length,
-        forced.tool_calls?.[0]?.name || '(none)'
+        (forced.tool_calls || []).map((c) => c.name).join(',') || '(none)'
       );
       decision = { ...forced, rejected: parsed.rejected, llmDoneIgnored: true };
     }
@@ -380,10 +403,14 @@ async function decideToolCalls(state, opts = {}) {
 }
 
 /**
- * Offline stub: one unused registered tool per turn, prefer gap keywords; no phase catalog.
+ * Offline stub: one unused registered tool per turn (HOW only).
+ * WHAT uses decideWhatByEligible (all eligible) — do not call this for phase=what.
  * HOW: only pick tools whose soft deps are satisfied.
  */
 function stubDecideToolCalls(state, tools, phase) {
+  if (phase === 'what') {
+    return decideWhatByEligible(state);
+  }
   const done = new Set(
     (Array.isArray(state.toolResults) ? state.toolResults : [])
       .filter((r) => r && !r.error)
@@ -488,6 +515,10 @@ function createSelectToolsNode(hooks = {}) {
       };
     }
 
+    const selectStarted = Date.now();
+    let selectLlmCalls = 0;
+    let selectTokens = 0;
+
     // RULE-P02: node-only — do not invent business substeps outside FR catalog.
     await onProgress?.({
       node: 'selectTools',
@@ -500,6 +531,13 @@ function createSelectToolsNode(hooks = {}) {
       decideToolCalls: decide,
       env: state.env || process.env,
     });
+    if (phase === 'what' && decision && decision.stub !== true && !decide) {
+      selectLlmCalls = 1;
+      const usage = decision.usage || decision.tokenUsage || null;
+      if (usage && Number.isFinite(Number(usage.totalTokens))) {
+        selectTokens = Number(usage.totalTokens);
+      }
+    }
 
     /** @type {string|null} */
     let hardStopReason = null;
@@ -515,8 +553,8 @@ function createSelectToolsNode(hooks = {}) {
     if (phase === 'what') {
       const {
         computeEligibleWhatTools,
-        isWaitingFrConfirmOnly,
-        STOP_WHAT_WAITING_FR_CONFIRM,
+        detectWhatSelectDeadlock,
+        isWhatCatalogComplete,
       } = require('./computeEligibleWhatTools');
       if (hasPhaseHardToolStop(state)) {
         const hardFail = (Array.isArray(state?.toolResults) ? state.toolResults : []).find(
@@ -529,64 +567,84 @@ function createSelectToolsNode(hooks = {}) {
         );
         decision = { tool_calls: [], done: true, stub: false };
         hardStopReason = STOP_TOOL_FAILED;
-      } else if (isWaitingFrConfirmOnly(state)) {
-        console.info('[agent_core] what.selectTools waiting_fr_confirm');
+      } else if (isWhatCatalogComplete(state)) {
         decision = { tool_calls: [], done: true, stub: false };
-        hardStopReason = STOP_WHAT_WAITING_FR_CONFIRM;
       } else {
-        const { eligible } = computeEligibleWhatTools(state);
-        const rawCalls = Array.isArray(decision.tool_calls) ? decision.tool_calls : [];
-        let filtered = filterWhatToolCallsForSelect(state, rawCalls);
-        if (filtered.length < rawCalls.length) {
+        const stuck = findStuckIncompleteTool(state, 2);
+        if (stuck) {
           console.info(
-            '[agent_core] what.selectTools drop_done_or_ineligible dropped=%s remain=%s eligible=%s',
-            rawCalls.length - filtered.length,
-            filtered.length,
-            eligible.length
+            '[agent_core] what.selectTools stop_incomplete_stuck tool=%s attempts=%s',
+            stuck.toolName,
+            stuck.attempts
           );
-        }
-        if (!filtered.length) {
-          if (eligible.length) {
-            const next = eligible[0];
+          decision = { tool_calls: [], done: true, stub: false };
+          hardStopReason = STOP_TOOL_FAILED;
+          stuckIncompleteError = {
+            toolName: stuck.toolName,
+            error: {
+              code: 'TOOL_STUCK_INCOMPLETE',
+              message: `${stuck.toolName} thất bại sau ${stuck.attempts} lần (incomplete: ${stuck.reason}). Dừng phase — không chạy tiếp.`,
+            },
+          };
+        } else {
+          const { eligible, running } = computeEligibleWhatTools(state);
+          const rawCalls = Array.isArray(decision.tool_calls) ? decision.tool_calls : [];
+          let filtered = filterWhatToolCallsForSelect(state, rawCalls);
+          if (filtered.length < rawCalls.length) {
             console.info(
-              '[agent_core] what.selectTools pick_eligible tool=%s eligible=%s',
-              next,
+              '[agent_core] what.selectTools drop_done_or_ineligible dropped=%s remain=%s eligible=%s',
+              rawCalls.length - filtered.length,
+              filtered.length,
               eligible.length
             );
-            decision = {
-              tool_calls: [{ id: `elig_${next}`, name: next, args: {} }],
-              done: false,
-              stub: true,
-            };
-          } else {
-            const missing = whatRequiredToolsStillMissing(state);
-            if (missing.length) {
-              const tools = describeToolsForPrompt(phase);
-              decision = stubDecideToolCalls(
-                {
-                  ...state,
-                  gapReport: {
-                    ...(state.gapReport || {}),
-                    missing,
-                    hint: `Missing required WHAT tools: ${missing.join(', ')}`,
-                  },
-                },
-                tools,
-                phase
-              );
-              decision.tool_calls = filterWhatToolCallsForSelect(
-                state,
-                decision.tool_calls || []
-              );
-              if (!decision.tool_calls.length) {
-                decision = { tool_calls: [], done: true };
-              }
-            } else {
-              decision = { ...decision, tool_calls: [], done: true };
-            }
           }
-        } else {
-          decision = { ...decision, tool_calls: filtered, done: false };
+          // WHAT SoT: always dispatch full eligible set (multi-Send) — never 1-tool stub/LLM subset.
+          if (eligible.length) {
+            const names = new Set(filtered.map((c) => c.name || c.toolName).filter(Boolean));
+            const incompleteSubset =
+              !filtered.length || eligible.some((n) => !names.has(n));
+            if (incompleteSubset) {
+              console.info(
+                '[agent_core] what.selectTools pick_eligible tools=%s eligible=%s running=%s llmSubset=%s',
+                eligible.join(','),
+                eligible.length,
+                running.length,
+                filtered.length
+              );
+              decision = {
+                tool_calls: eligible.map((name) => ({
+                  id: `elig_${name}`,
+                  name,
+                  args: {},
+                })),
+                done: false,
+                stub: true,
+                pickEligible: true,
+              };
+            } else {
+              decision = { ...decision, tool_calls: filtered, done: false };
+            }
+          } else if (!filtered.length) {
+            const deadlock = detectWhatSelectDeadlock(state);
+            if (deadlock.deadlocked) {
+              console.info(
+                '[agent_core] what.selectTools deadlock reason=%s blocked=%s',
+                deadlock.reason,
+                (deadlock.blocked || [])
+                  .map((b) => `${b.toolName}:${(b.blockedBy || []).join('|')}`)
+                  .join(',')
+              );
+              decision = { tool_calls: [], done: true, stub: false };
+              hardStopReason = deadlock.reason;
+            } else if (running.length) {
+              // In-flight workers — do not pick_eligible or stop.
+              decision = { tool_calls: [], done: true, stub: false };
+            } else {
+              decision = { tool_calls: [], done: true };
+            }
+          } else {
+            decision = { ...decision, tool_calls: filtered, done: false };
+          }
         }
       }
     }
@@ -597,6 +655,7 @@ function createSelectToolsNode(hooks = {}) {
         computeEligibleHowTools,
         isHowReadyForFinalize,
         detectHowSelectDeadlock,
+        forceRerunPendingTools,
       } = require('./computeEligibleHowTools');
       if (hasPhaseHardToolStop(state)) {
         const hardFail = (Array.isArray(state?.toolResults) ? state.toolResults : []).find(
@@ -609,8 +668,6 @@ function createSelectToolsNode(hooks = {}) {
         );
         decision = { tool_calls: [], done: true, stub: false };
         hardStopReason = STOP_TOOL_FAILED;
-      } else if (isHowReadyForFinalize(state)) {
-        decision = { tool_calls: [], done: true, stub: false, readyForFinalize: true };
       } else {
         const stuck = findStuckIncompleteTool(state, 2);
         if (stuck) {
@@ -630,47 +687,70 @@ function createSelectToolsNode(hooks = {}) {
           };
         } else {
           const { eligible } = computeEligibleHowTools(state);
-          const rawCalls = Array.isArray(decision.tool_calls) ? decision.tool_calls : [];
-          let filtered = filterHowToolCallsForSelect(state, rawCalls);
-          if (filtered.length < rawCalls.length) {
+          const pendingForce = forceRerunPendingTools(state);
+          const forceEligible = eligible.filter((n) => pendingForce.includes(n));
+          // Fix C: never finalize while force-rerun tools are still eligible (parity WHAT pick_eligible).
+          if (forceEligible.length) {
+            const next = forceEligible[0];
             console.info(
-              '[agent_core] how.selectTools drop_ineligible dropped=%s remain=%s eligible=%s',
-              rawCalls.length - filtered.length,
-              filtered.length,
+              '[agent_core] how.selectTools pick_eligible_force_rerun tool=%s pending=%s eligible=%s',
+              next,
+              pendingForce.join(','),
               eligible.length
             );
-          }
-          if (!filtered.length) {
-            if (eligible.length) {
-              const next = eligible[0];
+            decision = {
+              tool_calls: [{ id: `elig_${next}`, name: next, args: {} }],
+              done: false,
+              stub: true,
+              pickEligible: true,
+              forceRerunPick: true,
+            };
+          } else if (isHowReadyForFinalize(state)) {
+            decision = { tool_calls: [], done: true, stub: false, readyForFinalize: true };
+          } else {
+            const rawCalls = Array.isArray(decision.tool_calls) ? decision.tool_calls : [];
+            let filtered = filterHowToolCallsForSelect(state, rawCalls);
+            if (filtered.length < rawCalls.length) {
               console.info(
-                '[agent_core] how.selectTools pick_eligible tool=%s eligible=%s',
-                next,
+                '[agent_core] how.selectTools drop_ineligible dropped=%s remain=%s eligible=%s',
+                rawCalls.length - filtered.length,
+                filtered.length,
                 eligible.length
               );
-              decision = {
-                tool_calls: [{ id: `elig_${next}`, name: next, args: {} }],
-                done: false,
-                stub: true,
-              };
-            } else {
-              const deadlock = detectHowSelectDeadlock(state);
-              if (deadlock.deadlocked) {
-                console.info(
-                  '[agent_core] how.selectTools deadlock reason=%s blocked=%s',
-                  deadlock.reason,
-                  (deadlock.blocked || [])
-                    .map((b) => `${b.toolName}:${(b.blockedBy || []).join('|')}`)
-                    .join(',')
-                );
-                decision = { tool_calls: [], done: true, stub: false };
-                hardStopReason = deadlock.reason;
-              } else {
-                decision = { tool_calls: [], done: true };
-              }
             }
-          } else {
-            decision = { ...decision, tool_calls: filtered, done: false };
+            if (!filtered.length) {
+              if (eligible.length) {
+                const next = eligible[0];
+                console.info(
+                  '[agent_core] how.selectTools pick_eligible tool=%s eligible=%s',
+                  next,
+                  eligible.length
+                );
+                decision = {
+                  tool_calls: [{ id: `elig_${next}`, name: next, args: {} }],
+                  done: false,
+                  stub: true,
+                  pickEligible: true,
+                };
+              } else {
+                const deadlock = detectHowSelectDeadlock(state);
+                if (deadlock.deadlocked) {
+                  console.info(
+                    '[agent_core] how.selectTools deadlock reason=%s blocked=%s',
+                    deadlock.reason,
+                    (deadlock.blocked || [])
+                      .map((b) => `${b.toolName}:${(b.blockedBy || []).join('|')}`)
+                      .join(',')
+                  );
+                  decision = { tool_calls: [], done: true, stub: false };
+                  hardStopReason = deadlock.reason;
+                } else {
+                  decision = { tool_calls: [], done: true };
+                }
+              }
+            } else {
+              decision = { ...decision, tool_calls: filtered, done: false };
+            }
           }
         }
       }
@@ -703,6 +783,18 @@ function createSelectToolsNode(hooks = {}) {
     };
     if (hardStopReason) update.stopReason = hardStopReason;
     if (stuckIncompleteError) update.toolResults = [stuckIncompleteError];
+    if (phase === 'what' && state.whatTiming) {
+      try {
+        const { accumulateStage } = require('./whatTiming');
+        update.whatTiming = accumulateStage(state.whatTiming, 'selectTools', {
+          ms: Math.max(0, Date.now() - selectStarted),
+          llmCalls: selectLlmCalls,
+          tokens: selectTokens || undefined,
+        });
+      } catch {
+        /* timing optional */
+      }
+    }
     return update;
   };
 }
@@ -1177,6 +1269,7 @@ module.exports = {
   describeToolsForPrompt,
   routeAfterSelectTools,
   decideToolCalls,
+  decideWhatByEligible,
   stubDecideToolCalls,
   filterAlreadySuccessfulWhatToolCalls,
   filterWhatToolCallsByEligible,

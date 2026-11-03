@@ -24,6 +24,8 @@ VoiceHub/
 ├── shared/                      # Code dùng chung (Node): mongo, logger, middleware, …
 ├── docs/                        # Kiến trúc, migrate, cấu trúc, LICENSE, spec-pack, …
 │   ├── ARCHITECTURE.md
+│   ├── ai-project/                 # Two-Phase HITL hub + diagrams
+│   ├── ai-planning/                # Tool catalog / pipeline notes
 │   ├── MIGRATION.md
 │   ├── STRUCTURE.md             # File này
 │   └── LICENSE

@@ -30,6 +30,7 @@ import { useProjectMemberNames } from '../planning/useProjectMemberNames';
 import HowPlanSummaryChips from './HowPlanSummaryChips';
 import HitlSectionTabList from './HitlSectionTabList';
 import Gate2ConsolidationPanel from './Gate2ConsolidationPanel';
+import Gate2SynthesisConflictPanel from './Gate2SynthesisConflictPanel';
 import HowMonitorResultsPanel from './HowMonitorResultsPanel';
 import { shouldShowHowMonitorResults } from './howMonitorResultsVisibility';
 import DependencyFlowPanel from '../gate2/DependencyFlowPanel';
@@ -38,6 +39,16 @@ import {
   fillUnassignedWithReadyPeople,
   patchAssignmentCatalogValue,
 } from '../gate2/assignmentCatalogEdit';
+import {
+  patchWbsCatalogValue,
+  resolveWbsUiDepth,
+  wbsLevelSelectOptions,
+} from '../gate2/wbsCatalogEdit';
+import {
+  resolveGate2CopyRoles,
+  resolveGate2WaitingMessage,
+  shortGate2RoleLabel,
+} from './gate2ReviewCopy';
 
 function resolveAiContainer(pack) {
   if (pack?.aiAnalysis && typeof pack.aiAnalysis === 'object') return pack.aiAnalysis;
@@ -62,18 +73,6 @@ function dependencyEmptySoftHintKey(pack) {
 function unwrapPool(res) {
   return res?.data?.data ?? res?.data ?? res;
 }
-const ROLE_LABEL = {
-  po: 'PO',
-  tech: 'Tech Lead',
-  pm: 'PM',
-  product_owner: 'PO',
-  tech_lead: 'Tech Lead',
-  project_manager: 'PM',
-  business_analyst: 'BA',
-  qa: 'QA',
-  tester: 'Tester',
-};
-
 function resolvePackRefId(raw) {
   if (raw && typeof raw === 'object') return String(raw._id || raw.id || '').trim();
   return String(raw || '').trim();
@@ -110,7 +109,7 @@ const GATE2_TABLE_CONFIG = {
 };
 
 /**
- * Gate 2 — review song song theo phần, rồi PM tổng hợp, PO duyệt cuối.
+ * Gate 2 — review theo gateReviewPolicy (song song / tuần tự), rồi vai trò tổng hợp → Tổng duyệt.
  */
 export default function Phase2Gate2ReviewPanel({
   reviewView = 'waitingParallel',
@@ -120,6 +119,7 @@ export default function Phase2Gate2ReviewPanel({
   busy = false,
   canPromote = false,
   pack = null,
+  reviewPlan = null,
   decisions: controlledDecisions = null,
   setDecision: controlledSetDecision = null,
   t,
@@ -132,10 +132,12 @@ export default function Phase2Gate2ReviewPanel({
   onKeepOriginal,
   onEscalate,
   onResolveEscalation,
+  onResolveLineConflict,
   onPmConfirmPlan,
   onPoApprove,
   onPoReject,
 }) {
+  const copyRoles = useMemo(() => resolveGate2CopyRoles(reviewPlan, t), [reviewPlan, t]);
   const projectId = resolvePackProjectId(pack);
   const nameByUserId = useProjectMemberNames(projectId, resolvePackOrgId(pack));
   const bundle = useMemo(
@@ -295,18 +297,30 @@ export default function Phase2Gate2ReviewPanel({
           onOpenScheduleDetail: openScheduleDetail,
           onOpenTcDetail: openTcDetail,
         }),
-      getSelectOptions: (row, col, payload) =>
-        assignmentSelectOptions({
+      resolveWbsUiDepth,
+      getSelectOptions: (row, col, payload) => {
+        if (col?.field === 'level' && col?.editor === 'select') {
+          return wbsLevelSelectOptions(t);
+        }
+        return assignmentSelectOptions({
           row,
           field: col?.field,
           payload,
           roleOptions,
           peopleByRole,
-        }),
-      patchCatalogValue: (row, col, prev, value) =>
-        patchAssignmentCatalogValue(row, col?.field, prev, value, { peopleByRole }),
+        });
+      },
+      patchCatalogValue: (row, col, prev, value) => {
+        if (col?.field === 'level') {
+          return patchWbsCatalogValue(row, col.field, prev, value);
+        }
+        if (col?.field === 'suggestedRoleKey' || col?.field === 'assigneeUserId') {
+          return patchAssignmentCatalogValue(row, col.field, prev, value, { peopleByRole });
+        }
+        return patchGate2EditedPayload(prev, col?.field, value);
+      },
     }),
-    [roleOptions, peopleByRole, openSprintScope, openScheduleDetail, openTcDetail]
+    [roleOptions, peopleByRole, openSprintScope, openScheduleDetail, openTcDetail, t]
   );
   const assignmentPoolFailed = peopleQueries.some((query) => query.isError);
 
@@ -336,52 +350,9 @@ export default function Phase2Gate2ReviewPanel({
     }));
   };
 
-  if (reviewView === 'howPending') {
-    return (
-      <p className="text-sm text-muted-foreground">
-        {labelOf(
-          t,
-          'requirements.gate2HowPending',
-          'Chờ AI Planning (HOW) xong trên tab Monitor — sau đó PM gửi duyệt Gate 2.'
-        )}
-      </p>
-    );
-  }
-
-  if (reviewView === 'waitingParallel' || reviewView === 'waitingPm' || reviewView === 'waitingTech') {
-    return (
-      <p className="text-sm text-muted-foreground">
-        {labelOf(
-          t,
-          'requirements.gate2WaitingParallel',
-          'Đang chờ các vai trò đã chọn review toàn bộ kế hoạch.'
-        )}
-      </p>
-    );
-  }
-
-  if (reviewView === 'waitingConsolidation') {
-    return (
-      <p className="text-sm text-muted-foreground">
-        {labelOf(
-          t,
-          'requirements.gate2WaitingConsolidation',
-          'Đã đủ review song song. Chờ PM tổng hợp xung đột rồi gửi PO xác nhận cuối.'
-        )}
-      </p>
-    );
-  }
-
-  if (reviewView === 'waitingPo') {
-    return (
-      <p className="text-sm text-muted-foreground">
-        {labelOf(
-          t,
-          'requirements.gate2WaitingPo',
-          'PM đã gửi bản tổng hợp. Chờ PO xác nhận cuối Gate 2.'
-        )}
-      </p>
-    );
+  const waitingMessage = resolveGate2WaitingMessage({ reviewView, reviewPlan, t });
+  if (waitingMessage) {
+    return <p className="text-sm text-muted-foreground">{waitingMessage}</p>;
   }
 
   if (reviewView === 'done') {
@@ -458,17 +429,14 @@ export default function Phase2Gate2ReviewPanel({
     activeRows = activeRows.filter((row) => row?.recordKind !== 'test_strategy');
   }
   const activeLabel = activeTab?.label || activeSection || '—';
-  const activeMissing = Boolean(activeTab?.missing) || activeRows.length === 0;
   const sectionHasIssue = (tab) => {
     if (!tab) return false;
-    const isMissing = Boolean(tab.missing) || !(bySection[tab.key]?.length || tab.count);
+    const isMissing = Boolean(tab.missing);
     const hasConflict = Boolean(tab.hasConflict) || Number(tab.conflictCount) > 0;
     return isMissing || hasConflict;
   };
   const activeHasIssue = sectionHasIssue(activeTab);
-  const missingSections = visibleTabs.filter(
-    (tab) => tab.missing || !(bySection[tab.key]?.length || tab.count)
-  );
+  const missingSections = visibleTabs.filter((tab) => Boolean(tab.missing));
   const missingCount = missingSections.length;
   const conflictSectionCount = visibleTabs.filter(
     (tab) => tab.hasConflict || Number(tab.conflictCount) > 0
@@ -523,14 +491,18 @@ export default function Phase2Gate2ReviewPanel({
             {labelOf(
               t,
               'requirements.gate2FinalBanner',
-              'Bản PM đã tổng hợp — PO xem và xác nhận cuối, hoặc từ chối để trả PM tổng hợp.'
+              'Bản {synthesis} đã tổng hợp — {final} xem và xác nhận cuối, hoặc từ chối để trả {synthesis} tổng hợp.',
+              { synthesis: copyRoles.synthesis, final: copyRoles.final }
             )}
           </p>
         </div>
       ) : null}
       {rejectReason ? (
         <p className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-900 dark:text-amber-200">
-          {labelOf(t, 'requirements.gate2LastReject', 'PO từ chối lần trước')}: {rejectReason}
+          {labelOf(t, 'requirements.gate2LastReject', '{final} từ chối lần trước', {
+            final: copyRoles.final,
+          })}
+          : {rejectReason}
         </p>
       ) : null}
       {allowDecide && pendingDecisionCount > 0 ? (
@@ -556,7 +528,7 @@ export default function Phase2Gate2ReviewPanel({
                   : 'border-border text-muted-foreground'
               }`}
             >
-              {ROLE_LABEL[track] || track}
+              {shortGate2RoleLabel(track, t) || track}
             </button>
           ))}
         </div>
@@ -566,24 +538,47 @@ export default function Phase2Gate2ReviewPanel({
           {labelOf(
             t,
             'requirements.gate2ReviewAllSections',
-            `${ROLE_LABEL[activeTrack] || activeTrack} review toàn bộ kế hoạch, không chia section.`
+            '{role} review toàn bộ kế hoạch, không chia section.',
+            { role: shortGate2RoleLabel(activeTrack, t) || activeTrack }
           )}
         </p>
       ) : null}
       {showConsolidation || showChangeConfirm ? (
-        <Gate2ConsolidationPanel
-          mode={showChangeConfirm ? 'confirm' : 'consolidate'}
-          assignSections={false}
-          proposals={proposals}
-          busy={busy}
-          t={t}
-          onPropose={onProposeChange}
-          onDecide={onDecideChange}
-          onKeepOriginal={onKeepOriginal}
-          onEscalate={onEscalate}
-          onResolveEscalation={onResolveEscalation}
-          onConfirmPlan={onPmConfirmPlan}
-        />
+        <>
+          <Gate2SynthesisConflictPanel
+            pack={pack}
+            busy={busy}
+            t={t}
+            nameByUserId={nameByUserId}
+            synthesisLabel={copyRoles.synthesis}
+            onResolveLineConflict={onResolveLineConflict}
+            onConfirmPlan={showConsolidation ? onPmConfirmPlan : undefined}
+            confirmDisabledExtra={
+              Array.isArray(proposals) &&
+              proposals.some((row) => {
+                const status = String(row?.status || '');
+                if (status === 'pending' || status === 'escalated') return true;
+                if (status === 'rejected' && !row?.resolution) return true;
+                return false;
+              })
+            }
+          />
+          <Gate2ConsolidationPanel
+            mode={showChangeConfirm ? 'confirm' : 'consolidate'}
+            assignSections={false}
+            proposals={proposals}
+            busy={busy}
+            t={t}
+            synthesisLabel={copyRoles.synthesis}
+            finalLabel={copyRoles.final}
+            onPropose={onProposeChange}
+            onDecide={onDecideChange}
+            onKeepOriginal={onKeepOriginal}
+            onEscalate={onEscalate}
+            onResolveEscalation={onResolveEscalation}
+            onConfirmPlan={undefined}
+          />
+        </>
       ) : null}
       <HowPlanSummaryChips pack={pack} t={t} />
 
@@ -596,7 +591,7 @@ export default function Phase2Gate2ReviewPanel({
         ariaLabel={labelOf(t, 'requirements.aiHitlMonitorHowSectionTabsAria', 'Các section HOW')}
       />
 
-      {activeSection && !activeMissing && activeRows.length ? (
+      {activeSection && activeRows.length > 0 ? (
         <>
           {activeSection === 'quality' ? (
             <p className="mb-2 text-xs text-muted-foreground">
@@ -609,6 +604,21 @@ export default function Phase2Gate2ReviewPanel({
           ) : null}
           {activeSection === 'dependencies' ? (
             <DependencyFlowPanel pack={pack} rows={activeRows} t={t} />
+          ) : null}
+          {activeSection === 'tasks' && allowDecide ? (
+            <p className="mb-2 text-xs text-muted-foreground">
+              {roleCatalogQ.isError
+                ? labelOf(
+                    t,
+                    'requirements.gate2AssignCatalogError',
+                    'Không tải được danh mục vai trò. Chọn lại khi danh mục sẵn sàng.'
+                  )
+                : labelOf(
+                    t,
+                    'requirements.gate2WbsEditPickHint',
+                    'Level và Role chọn từ danh sách hệ thống. Đổi Level sẽ cập nhật thụt lề UI theo cấp.'
+                  )}
+            </p>
           ) : null}
           {activeSection === 'assignments' && allowDecide ? (
             <p className="mb-2 text-xs text-muted-foreground">
@@ -679,12 +689,111 @@ export default function Phase2Gate2ReviewPanel({
             tableConfig={assignmentTableConfig}
           />
           <Gate2SprintScopePanel
-            row={sprintScopeRow}
+            row={(() => {
+              if (!sprintScopeRow) return null;
+              const id = getGate2RowId(sprintScopeRow);
+              const payload = decisions[id]?.editedPayload;
+              if (!payload || typeof payload !== 'object') return sprintScopeRow;
+              return {
+                ...sprintScopeRow,
+                ...payload,
+                // Keep original storyGroups catalog for toggle UI.
+                storyGroups: sprintScopeRow.storyGroups,
+              };
+            })()}
+            editable={
+              allowDecide &&
+              String(decisions[getGate2RowId(sprintScopeRow || {})]?.action || '').toLowerCase() ===
+                'edit' &&
+              String(sprintScopeRow?.kind || '') === 'sprint'
+            }
+            selectedPbiIds={
+              decisions[getGate2RowId(sprintScopeRow || {})]?.editedPayload?.pbiIds ??
+              sprintScopeRow?.pbiIds
+            }
+            selectedTaskIds={
+              decisions[getGate2RowId(sprintScopeRow || {})]?.editedPayload?.taskIds ??
+              sprintScopeRow?.taskIds
+            }
+            onChange={(partial) => {
+              if (!sprintScopeRow) return;
+              const id = getGate2RowId(sprintScopeRow);
+              const prev = decisions[id]?.editedPayload || seedGate2EditedPayload(
+                sprintScopeRow,
+                getGate2ColumnsForSection('releases', {})
+              );
+              setDecision(id, {
+                action: 'edit',
+                editedPayload: { ...prev, ...partial },
+              });
+            }}
+            onBeginEdit={
+              allowDecide && sprintScopeRow?.kind === 'sprint'
+                ? () => {
+                    const id = getGate2RowId(sprintScopeRow);
+                    const existing = decisions[id]?.editedPayload;
+                    setDecision(id, {
+                      action: 'edit',
+                      editedPayload:
+                        existing && typeof existing === 'object'
+                          ? existing
+                          : seedGate2EditedPayload(
+                              sprintScopeRow,
+                              getGate2ColumnsForSection('releases', {})
+                            ),
+                    });
+                  }
+                : null
+            }
             onClose={() => setSprintScopeRow(null)}
             t={t}
           />
           <Gate2TcDetailPanel
-            row={tcDetailRow}
+            row={(() => {
+              if (!tcDetailRow) return null;
+              const id = getGate2RowId(tcDetailRow);
+              const payload = decisions[id]?.editedPayload;
+              if (!payload || typeof payload !== 'object') return tcDetailRow;
+              return { ...tcDetailRow, ...payload };
+            })()}
+            editable={
+              allowDecide &&
+              String(decisions[getGate2RowId(tcDetailRow || {})]?.action || '').toLowerCase() ===
+                'edit'
+            }
+            onChange={(partial) => {
+              if (!tcDetailRow) return;
+              const id = getGate2RowId(tcDetailRow);
+              const prev =
+                decisions[id]?.editedPayload ||
+                seedGate2EditedPayload(
+                  tcDetailRow,
+                  getGate2ColumnsForSection('quality', {})
+                );
+              setDecision(id, {
+                action: 'edit',
+                editedPayload: { ...prev, ...partial },
+              });
+            }}
+            onBeginEdit={
+              allowDecide
+                ? () => {
+                    if (!tcDetailRow) return;
+                    const id = getGate2RowId(tcDetailRow);
+                    const existing = decisions[id]?.editedPayload;
+                    setDecision(id, {
+                      action: 'edit',
+                      editedPayload:
+                        existing && typeof existing === 'object'
+                          ? existing
+                          : seedGate2EditedPayload(
+                              tcDetailRow,
+                              getGate2ColumnsForSection('quality', {})
+                            ),
+                    });
+                  }
+                : null
+            }
             onClose={() => setTcDetailRow(null)}
             t={t}
           />

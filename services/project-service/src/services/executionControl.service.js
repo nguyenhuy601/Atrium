@@ -5,6 +5,7 @@
 
 const crypto = require('crypto');
 const Task = require('../models/Task');
+const Project = require('../models/Project');
 const ExecutionIssue = require('../models/ExecutionIssue');
 const ExecutionProposal = require('../models/ExecutionProposal');
 const ExecutionErrorRecord = require('../models/ExecutionErrorRecord');
@@ -12,6 +13,22 @@ const ExecutionApplyAction = require('../models/ExecutionApplyAction');
 const ProjectIncident = require('../models/ProjectIncident');
 const ProjectRisk = require('../models/ProjectRisk');
 const Sprint = require('../models/Sprint');
+
+/** JWT/admin often thiếu organizationId — lấy từ project ownership. */
+async function resolveProjectOrganizationId(projectId, organizationId) {
+  const fromArg = organizationId != null ? String(organizationId).trim() : '';
+  if (fromArg) return fromArg;
+  const row = await Project.findById(projectId).select('organizationId').lean();
+  const fromProject = row?.organizationId != null ? String(row.organizationId).trim() : '';
+  if (!fromProject) {
+    const err = new Error('organizationId required');
+    err.statusCode = 400;
+    err.errorCode = 'VALIDATION_REQUIRED';
+    err.messageUser = 'Thiếu organizationId của dự án.';
+    throw err;
+  }
+  return fromProject;
+}
 const {
   isExecutionControlEnabled,
   detectTaskSignals,
@@ -254,8 +271,9 @@ async function createIncident({
   affectedTaskIds,
   createdBy,
 }) {
+  const org = await resolveProjectOrganizationId(projectId, organizationId);
   const incident = await ProjectIncident.create({
-    organizationId,
+    organizationId: org,
     projectId,
     title,
     description: description || '',
@@ -269,7 +287,7 @@ async function createIncident({
   });
 
   const rootIssue = await openOrRefreshIssue({
-    organizationId,
+    organizationId: org,
     projectId,
     kind: 'INCIDENT',
     title: `Incident: ${title}`.slice(0, 240),
@@ -298,7 +316,7 @@ async function createIncident({
   }
 
   await enqueueOutboxEvent({
-    organizationId,
+    organizationId: org,
     projectId,
     eventType: 'incident.created',
     origin: 'manual_incident',

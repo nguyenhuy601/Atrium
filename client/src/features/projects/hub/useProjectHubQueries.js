@@ -103,6 +103,18 @@ export async function fetchProjectHubMembers(projectId) {
   return unwrapProjectMembersList(unwrapProjectPayload(res));
 }
 
+/** Opt-in forecast allocation — chỉ khi tab Members cần cột overload. */
+export async function fetchProjectHubMembersForecast(projectId) {
+  const pid = String(projectId || '').trim();
+  if (!pid) return [];
+  const res = await projectAPI.listMembers(pid, {
+    skipPermissionDeniedToast: true,
+    skipNotFoundToast: true,
+    view: 'forecastLoad',
+  });
+  return unwrapProjectMembersList(unwrapProjectPayload(res));
+}
+
 export async function fetchProjectHubAssignableMembers(boardId, apiCtx) {
   const bid = String(boardId || '').trim();
   if (!bid) return [];
@@ -143,8 +155,18 @@ export function ensureProjectHubMembers(queryClient, projectId) {
   const pid = String(projectId || '').trim();
   if (!pid || !queryClient) return Promise.resolve([]);
   return queryClient.ensureQueryData({
-    queryKey: queryKeys.projectHub.members(pid),
+    queryKey: queryKeys.projectHub.members(pid, 'roster'),
     queryFn: () => fetchProjectHubMembers(pid),
+    staleTime: STALE_PROJECT_MS,
+  });
+}
+
+export function ensureProjectHubMembersForecast(queryClient, projectId) {
+  const pid = String(projectId || '').trim();
+  if (!pid || !queryClient) return Promise.resolve([]);
+  return queryClient.ensureQueryData({
+    queryKey: queryKeys.projectHub.members(pid, 'forecastLoad'),
+    queryFn: () => fetchProjectHubMembersForecast(pid),
     staleTime: STALE_PROJECT_MS,
   });
 }
@@ -224,11 +246,22 @@ export function useProjectHubProject(projectId, { enabled = true } = {}) {
 export function useProjectHubMembers(projectId, { enabled = true } = {}) {
   const pid = String(projectId || '').trim();
   return useQuery({
-    queryKey: queryKeys.projectHub.members(pid),
+    queryKey: queryKeys.projectHub.members(pid, 'roster'),
     enabled: Boolean(pid) && enabled,
     staleTime: STALE_PROJECT_MS,
     refetchOnMount: false,
     queryFn: () => fetchProjectHubMembers(pid),
+  });
+}
+
+export function useProjectHubMembersForecast(projectId, { enabled = true } = {}) {
+  const pid = String(projectId || '').trim();
+  return useQuery({
+    queryKey: queryKeys.projectHub.members(pid, 'forecastLoad'),
+    enabled: Boolean(pid) && enabled,
+    staleTime: STALE_PROJECT_MS,
+    refetchOnMount: false,
+    queryFn: () => fetchProjectHubMembersForecast(pid),
   });
 }
 
@@ -343,7 +376,9 @@ export function useInvalidateProjectHub() {
         queryClient.invalidateQueries({ queryKey: [...queryKeys.projectHub.all, 'boards', pid] });
         queryClient.invalidateQueries({ queryKey: queryKeys.projectHub.sprints(pid) });
         queryClient.invalidateQueries({ queryKey: queryKeys.projectHub.planningItems(pid) });
-        queryClient.invalidateQueries({ queryKey: queryKeys.projectHub.members(pid) });
+        queryClient.invalidateQueries({
+          queryKey: [...queryKeys.projectHub.all, 'members', pid],
+        });
         queryClient.invalidateQueries({ queryKey: queryKeys.projectHub.changeRequestsAll(pid) });
         queryClient.invalidateQueries({ queryKey: queryKeys.projectHub.activity(pid) });
         queryClient.invalidateQueries({ queryKey: queryKeys.projectHub.files(pid) });

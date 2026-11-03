@@ -69,12 +69,22 @@ function enrichWithRequirementAnalysis(lite, snapshot, pack) {
  */
 async function runFrSectionDerive(opts = {}) {
   const env = opts.env || process.env;
+  const contextPackage =
+    opts.contextPackage ||
+    opts.frOpts?.contextPackage ||
+    opts.frOpts?.reuseContextPackage ||
+    null;
+  const corpus = opts.corpus;
   const prepared = await prepareFrSnapshotForPipeline({
     snapshot: opts.snapshot,
     pack: opts.pack || {},
     frOpts: opts.frOpts || {},
     env,
     generateJsonFn: opts.generateJsonFn,
+    snapshotId: opts.snapshotId,
+    runId: opts.runId,
+    contextPackage,
+    corpus,
   });
 
   if (prepared.failClosed) {

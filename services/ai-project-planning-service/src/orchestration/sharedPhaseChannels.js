@@ -38,6 +38,9 @@ const SHARED_PHASE_KEYS = Object.freeze([
   'completeness',
   'env',
   'generationId',
+  /** HOW selective re-run: expanded tool closure that must not count as done. */
+  'forceRerunSet',
+  'rerunTools',
   // WHAT-leaning shared (also on orchestrator for what branch)
   'frUnderstanding',
   'proposalFragment',
@@ -194,6 +197,8 @@ function buildSharedPhaseAnnotations(deps) {
     completeness: field(),
     env: field(),
     generationId: field(),
+    forceRerunSet: field(),
+    rerunTools: field(),
     frUnderstanding: field(),
     proposalFragment: field(),
     conflictAmbiguityGate: field(),

@@ -151,7 +151,7 @@ export default function WbsCheckpointBar({
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           className="mt-0.5 w-full rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
-          placeholder="VD: Bổ sung SSO theo yêu cầu đã xác nhận"
+          placeholder=""
         />
       </label>
 

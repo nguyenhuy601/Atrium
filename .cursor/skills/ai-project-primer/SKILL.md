@@ -57,13 +57,15 @@ Không nhầm với các pipeline AI chat/task đã **gỡ** (`ai-task-service` 
 
 ## SoT files (as-is → migrate)
 
-- As-is (đến Wave C): `services/project-service/src/utils/aiAnalysis/**`
-- To-be: `services/ai-project-planning-service/**`
+- Hub docs + poster: `docs/ai-project/README.md`, `docs/ai-project/diagrams/`
+- Runtime: `services/ai-project-planning-service/**`
 - FE: `client/src/features/requirements/aiAnalysisWizardConstants.js`
-- Jobs: `services/project-service/src/constants/aiAnalysisJobs.constants.js` (có thể mirror/shared constants sau Contract)
+- Jobs / constants: `services/project-service/src/constants/aiAnalysisJobs.constants.js` (có thể mirror/shared sau Contract)
+- Legacy as-is utils (nếu còn): `services/project-service/src/utils/aiAnalysis/**`
 - System map: `docs/ARCHITECTURE.md` (mục AI Project)
 - Main flow 3-layer: `docs/ai-project/main-flow-3layer.md`
 - 3 tracks pre-Agent Core: `docs/ai-project/pre-agent-core-3tracks.md`
+- Hybrid HITL: `docs/ai-project/hybrid-hitl-langgraph.md`
 - JEV design: `docs/ai-project/jev-control-layer.md`
 
 ## Constraints

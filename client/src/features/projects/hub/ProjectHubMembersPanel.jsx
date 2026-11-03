@@ -27,7 +27,9 @@ import {
   ensureProjectHubRoleCatalog,
   useInvalidateProjectHub,
   useProjectHubMembers,
+  useProjectHubMembersForecast,
 } from './useProjectHubQueries';
+import { isMemberForecastOverloaded } from './projectHubUtils';
 
 function unwrap(res) {
   return res?.data?.data ?? res?.data ?? res;
@@ -143,7 +145,11 @@ export default function ProjectHubMembersPanel({
     isError: rqMembersError,
     refetch: refetchMembers,
   } = useProjectHubMembers(projectIdStr, {
-    enabled: Boolean(projectIdStr),
+    enabled: Boolean(projectIdStr) && membersActive,
+  });
+
+  const { data: rqForecastMembers = [] } = useProjectHubMembersForecast(projectIdStr, {
+    enabled: Boolean(projectIdStr) && membersActive,
   });
 
   const [boardOnlyMembers, setBoardOnlyMembers] = useState([]);
@@ -193,6 +199,15 @@ export default function ProjectHubMembersPanel({
 
   const muted = 'text-muted-foreground';
   const titleCls = 'text-foreground';
+
+  const forecastByUserId = useMemo(() => {
+    const map = new Map();
+    for (const m of rqForecastMembers || []) {
+      const uid = asUserId(m);
+      if (uid && m?.forecastLoad) map.set(uid, m.forecastLoad);
+    }
+    return map;
+  }, [rqForecastMembers]);
 
   const members = projectIdStr ? rqMembers : boardOnlyMembers;
   const loading = projectIdStr
@@ -267,6 +282,7 @@ export default function ProjectHubMembersPanel({
           roles: roleKey ? [roleKey] : [],
           allocations: Array.isArray(m.allocations) ? m.allocations : m?.resource?.allocations || [],
           allocationStatus: m.allocationStatus || m?.resource?.allocationStatus || 'ok',
+          forecastLoad: m.forecastLoad || forecastByUserId.get(uid) || null,
           billable: Boolean(m.billable ?? m?.resource?.billable),
           joinDate: m.joinDate || m?.resource?.joinDate || null,
           leaveDate: m.leaveDate || m?.resource?.leaveDate || null,
@@ -285,10 +301,13 @@ export default function ProjectHubMembersPanel({
           prev.allocations = m.allocations || m.resource.allocations;
           prev.allocationStatus = m.allocationStatus || m.resource?.allocationStatus || prev.allocationStatus;
         }
+        if (!prev.forecastLoad) {
+          prev.forecastLoad = m.forecastLoad || forecastByUserId.get(uid) || null;
+        }
       }
     }
     return [...byUser.values()];
-  }, [members, orgById]);
+  }, [members, orgById, forecastByUserId]);
 
   const existingUserIds = useMemo(() => new Set(rows.map((r) => r.id)), [rows]);
 
@@ -998,9 +1017,14 @@ export default function ProjectHubMembersPanel({
                           <span className={`truncate text-sm font-semibold ${titleCls}`}>
                             {row.name}
                           </span>
-                          {row.allocationStatus === 'overallocated' ? (
+                          {isMemberForecastOverloaded(row) ? (
                             <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-destructive">
-                              {t('workspace.projectHubAllocOverBadge')}
+                              {row.forecastLoad?.status === 'overloaded'
+                                ? t('workspace.projectHubForecastOverBadge', {
+                                    pct: Math.round(Number(row.forecastLoad.utilizationPct) || 0),
+                                    hours: Number(row.forecastLoad.overloadHours) || 0,
+                                  })
+                                : t('workspace.projectHubAllocOverBadge')}
                             </span>
                           ) : null}
                           {row.billable ? (

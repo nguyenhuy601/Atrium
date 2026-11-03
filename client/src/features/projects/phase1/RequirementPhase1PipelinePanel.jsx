@@ -111,14 +111,23 @@ export default function RequirementPhase1PipelinePanel({
     const aiCtx = pack?.aiAnalysis?.analyses?.requirementAiContext;
     const knowledgeMeta = pack?.aiAnalysis?.analyses?.phase1Knowledge;
     const gateA = pack?.aiAnalysis?.analyses?.requirementTools?.gateA || aiCtx?.gateA;
-    const g4Ready =
+    const frItems = proposal?.generated?.functionalRequirements?.items;
+    const stage2Ready =
       phaseWhat?.status === 'ready' &&
-      (phaseWhat?.mode === 'g4' ||
-        phaseWhat?.mode === 'requirement' ||
-        Array.isArray(proposal?.generated?.functionalRequirements?.items));
-    if (g4Ready || (phaseWhat?.mode === 'tools_propose' && phaseWhat?.status === 'ready')) {
+      (phaseWhat?.mode === 'requirement' ||
+        phaseWhat?.mode === 'tools_propose' ||
+        Array.isArray(frItems));
+    if (stage2Ready) {
       const gate1Bundle = buildGate1ReviewBundle(pack, proposal);
       const reviewItems = gate1Bundle.items;
+      const frRequirementCount = Array.isArray(frItems)
+        ? frItems.length
+        : reviewItems.filter((r) => r.section === 'functionalRequirements').length;
+      const frRelationshipCount = Array.isArray(
+        proposal?.generated?.functionalRequirements?.relations
+      )
+        ? proposal.generated.functionalRequirements.relations.length
+        : 0;
       setStage2Meta((prev) => ({
         ...(prev || {}),
         done: true,
@@ -140,19 +149,10 @@ export default function RequirementPhase1PipelinePanel({
             pack?.aiAnalysis?.workbookDiagnostic?.intakeKind === 'customer_raw' ||
             pack?.aiAnalysis?.intakeKind === 'customer_raw'
         ),
-        g4RequirementCount: Array.isArray(
-          proposal?.generated?.functionalRequirements?.items
-        )
-          ? proposal.generated.functionalRequirements.items.length
-          : reviewItems.filter((r) => r.section === 'functionalRequirements').length ||
-            (Array.isArray(g4?.requirements) ? g4.requirements.length : 0),
-        g4RelationshipCount: Array.isArray(g4?.relationships)
-          ? g4.relationships.length
-          : Array.isArray(proposal?.generated?.functionalRequirements?.relations)
-            ? proposal.generated.functionalRequirements.relations.length
-            : 0,
-        llmCalls: Number(g4?.meta?.llmCalls) || prev?.llmCalls || 0,
-        partial: Boolean(g4?.meta?.partial),
+        frRequirementCount,
+        frRelationshipCount,
+        llmCalls: prev?.llmCalls || 0,
+        partial: Boolean(prev?.partial),
         status: String(pack?.status || ''),
         gateAPassed:
           gateA?.passed === true ||
@@ -178,14 +178,14 @@ export default function RequirementPhase1PipelinePanel({
           0,
         groundingPassCount: Number(phaseWhat.groundingPassCount) || prev?.groundingPassCount || 0,
         groundingFailCount: Number(phaseWhat.groundingFailCount) || prev?.groundingFailCount || 0,
-        contextPersisted: Boolean(aiCtx) || Boolean(g4) || Boolean(proposal),
+        contextPersisted: Boolean(aiCtx) || Boolean(proposal),
       }));
     } else if (phaseWhat?.status === 'pending') {
       setStage2Meta((prev) => ({
         ...(prev || {}),
         done: false,
         pending: true,
-        mode: phaseWhat?.mode || 'g4',
+        mode: phaseWhat?.mode || 'requirement',
         remoteRunId: phaseWhat?.remoteRunId || null,
       }));
     }
@@ -377,7 +377,7 @@ export default function RequirementPhase1PipelinePanel({
       setBusyStage(2);
       const res = await requirementAPI.startPhaseAiPlanning(organizationId, packId, {
         phase: 'what',
-        mode: 'g4',
+        mode: 'requirement',
         force: Boolean(stage2Meta?.done),
       });
       const data = unwrap(res);

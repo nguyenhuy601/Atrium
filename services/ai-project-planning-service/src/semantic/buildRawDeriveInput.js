@@ -90,8 +90,8 @@ function scopeSlice(pack) {
 }
 
 function slimRequirementUnderstanding(understanding) {
-  if (!g4 || typeof g4 !== 'object') return null;
-  const requirements = asArray(g4.requirements)
+  if (!understanding || typeof understanding !== 'object') return null;
+  const requirements = asArray(understanding.requirements)
     .slice(0, UNDERSTANDING_FR_CAP)
     .map((r) => ({
       id: String(r.id || r.frId || r.logicalId || '').trim(),
@@ -104,7 +104,7 @@ function slimRequirementUnderstanding(understanding) {
     }))
     .filter((r) => r.id || r.title);
 
-  const semanticItems = asArray(g4.semanticItems)
+  const semanticItems = asArray(understanding.semanticItems)
     .slice(0, UNDERSTANDING_FR_CAP)
     .map((item) => ({
       frId: String(item.frId || '').trim(),
@@ -121,12 +121,12 @@ function slimRequirementUnderstanding(understanding) {
 
   const facts = understanding.facts && typeof understanding.facts === 'object' ? understanding.facts : {};
   return {
-    requirementCount: requirements.length || asArray(g4.requirements).length,
+    requirementCount: requirements.length || asArray(understanding.requirements).length,
     requirements: requirements.length ? requirements : undefined,
     semanticItems: semanticItems.length ? semanticItems : undefined,
     factKeys: Object.keys(facts).slice(0, 20),
-    ambiguityCount: asArray(g4.ambiguities).length,
-    conflictCount: asArray(g4.conflicts).length,
+    ambiguityCount: asArray(understanding.ambiguities).length,
+    conflictCount: asArray(understanding.conflicts).length,
   };
 }
 
@@ -188,7 +188,7 @@ function buildRawDeriveInput(engineId, pack, opts = {}) {
   const scope = scopeSlice(pack);
   const understanding = opts.frUnderstanding || opts.understanding || null;
   const requirementUnderstanding = slimRequirementUnderstanding(understanding);
-  const evidenceRefs = slimEvidenceRefs(opts.evidence || g4?.evidence || null);
+  const evidenceRefs = slimEvidenceRefs(opts.evidence || understanding?.evidence || null);
 
   const base = {
     engineId: id,

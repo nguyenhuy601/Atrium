@@ -254,6 +254,14 @@ export function formatMemberEstimateHours(hours) {
   return Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
 }
 
+/** Hub roster: Forecast Project Allocation overload khi có forecastLoad; fallback Commitment. */
+export function isMemberForecastOverloaded(row) {
+  if (row?.forecastLoad != null) {
+    return String(row.forecastLoad.status || '').toLowerCase() === 'overloaded';
+  }
+  return String(row?.allocationStatus || '').toLowerCase() === 'overallocated';
+}
+
 /**
  * Lọc roster People Pulse.
  * @param {Array} rows
@@ -263,7 +271,7 @@ export function filterMemberPulseRows(rows = [], filter = 'all') {
   const list = Array.isArray(rows) ? rows : [];
   const key = String(filter || 'all');
   if (key === 'overallocated') {
-    return list.filter((r) => String(r?.allocationStatus || '').toLowerCase() === 'overallocated');
+    return list.filter((r) => isMemberForecastOverloaded(r));
   }
   if (key === 'noPlan') {
     return list.filter((r) => !Array.isArray(r?.allocations) || r.allocations.length === 0);
@@ -302,8 +310,8 @@ export function resolveMemberWorkOverloadBadge(row) {
  */
 export function sortMemberPulseRows(rows = []) {
   return [...(Array.isArray(rows) ? rows : [])].sort((a, b) => {
-    const aOver = String(a?.allocationStatus || '').toLowerCase() === 'overallocated' ? 0 : 1;
-    const bOver = String(b?.allocationStatus || '').toLowerCase() === 'overallocated' ? 0 : 1;
+    const aOver = isMemberForecastOverloaded(a) ? 0 : 1;
+    const bOver = isMemberForecastOverloaded(b) ? 0 : 1;
     if (aOver !== bOver) return aOver - bOver;
     const aWork = isMemberWorkOverloaded(a) ? 0 : 1;
     const bWork = isMemberWorkOverloaded(b) ? 0 : 1;

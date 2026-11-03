@@ -71,18 +71,27 @@ export function Phase1KindNavChip({
   organizationId,
   navigate,
   emphasize,
+  locked = false,
+  lockedHint = '',
 }) {
   const moduleSeg = resolvePath(kind);
+  const isLocked = Boolean(locked) || !moduleSeg;
   return (
     <button
       type="button"
-      disabled={!moduleSeg}
-      title={moduleSeg ? `${kind}: ${count ?? 0}` : undefined}
+      disabled={isLocked}
+      title={
+        locked && lockedHint
+          ? lockedHint
+          : moduleSeg
+            ? `${kind}: ${count ?? 0}`
+            : undefined
+      }
       className={`${kindChipClass(kind)} transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 ${
         emphasize ? 'ring-1 ring-amber-500/50' : ''
       }`}
       onClick={() => {
-        if (!moduleSeg) return;
+        if (isLocked || !moduleSeg) return;
         navigate(buildPhase1ModulePath(projectId, moduleSeg, { organizationId }));
       }}
     >

@@ -15,8 +15,6 @@ import {
   shouldShowWhatMonitorResults,
 } from './whatMonitorResultsVisibility';
 import HitlSectionTabList from './HitlSectionTabList';
-import FrCheckpointBar from './FrCheckpointBar';
-import { isWaitingFrConfirm } from './frCheckpointState';
 
 function labelOf(t, key, fallback, vars) {
   const value = typeof t === 'function' ? t(key, vars) : '';
@@ -162,21 +160,13 @@ function EmptySectionPanel({ t }) {
 }
 
 /**
- * Monitor WHAT results — read-only tables; FR checkpoint CTAs (always-on staged HITL).
+ * Monitor WHAT results — read-only tables (no in-run FR confirm CTAs).
  */
-export default function WhatMonitorResultsPanel({
-  pack = null,
-  t,
-  organizationId = null,
-  packId = null,
-  onRefresh = null,
-  canConfirmFr = true,
-}) {
+export default function WhatMonitorResultsPanel({ pack = null, t }) {
   const bundle = useMemo(() => buildWhatMonitorResultsBundle(pack), [pack]);
   const bySection = bundle.bySection || {};
   const sectionTabs = bundle.sections || [];
   const hasRows = (bundle.items || []).length > 0;
-  const showFrBar = isWaitingFrConfirm(pack);
 
   const [activeSection, setActiveSection] = useState('');
 
@@ -190,7 +180,7 @@ export default function WhatMonitorResultsPanel({
     });
   }, [sectionTabs, bySection]);
 
-  if (!hasRows && !showFrBar) return null;
+  if (!hasRows) return null;
 
   const activeRows = bySection[activeSection] || [];
   const activeTab = sectionTabs.find((tab) => tab.key === activeSection);
@@ -213,41 +203,28 @@ export default function WhatMonitorResultsPanel({
         )}
       </p>
 
-      <FrCheckpointBar
-        pack={pack}
-        organizationId={organizationId}
-        packId={packId}
+      <HitlSectionTabList
+        tabs={sectionTabs}
+        activeKey={activeSection}
+        onSelect={setActiveSection}
+        tabHasIssue={(tab) => sectionHasIssue(tab, bySection)}
         t={t}
-        onRefresh={onRefresh}
-        canConfirmFr={canConfirmFr}
+        ariaLabel={labelOf(
+          t,
+          'requirements.aiHitlMonitorWhatSectionTabsAria',
+          'Các section WHAT'
+        )}
       />
 
-      {hasRows ? (
-        <>
-          <HitlSectionTabList
-            tabs={sectionTabs}
-            activeKey={activeSection}
-            onSelect={setActiveSection}
-            tabHasIssue={(tab) => sectionHasIssue(tab, bySection)}
-            t={t}
-            ariaLabel={labelOf(
-              t,
-              'requirements.aiHitlMonitorWhatSectionTabsAria',
-              'Các section WHAT'
-            )}
-          />
-
-          {!activeMissing && activeRows.length ? (
-            <ReadOnlyResultsTable
-              section={activeSection}
-              rows={activeRows}
-              t={t}
-              headerTone={activeHasIssue ? 'warn' : 'ok'}
-            />
-          ) : activeSection ? (
-            <EmptySectionPanel t={t} />
-          ) : null}
-        </>
+      {!activeMissing && activeRows.length ? (
+        <ReadOnlyResultsTable
+          section={activeSection}
+          rows={activeRows}
+          t={t}
+          headerTone={activeHasIssue ? 'warn' : 'ok'}
+        />
+      ) : activeSection ? (
+        <EmptySectionPanel t={t} />
       ) : null}
     </section>
   );

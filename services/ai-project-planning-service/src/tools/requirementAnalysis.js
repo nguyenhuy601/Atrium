@@ -74,10 +74,22 @@ function nonEmpty(v) {
   return String(v || '').trim().length > 0;
 }
 
+/**
+ * Hard incomplete_fields for Integrity Gate (Monitor / Gate1 amber).
+ * Priority is coverage-only — missing priority alone must not paint FR warn.
+ * Description may live only in title/name (frSectionToPackRows leaves desc empty for short FR).
+ */
 const CHECKLIST = Object.freeze([
-  { key: 'description', label: 'Description' },
-  { key: 'ac', label: 'Acceptance criteria', alt: ['acceptanceCriteria'] },
-  { key: 'priority', label: 'Priority' },
+  {
+    key: 'description',
+    label: 'Description',
+    alt: ['desc', 'text', 'title', 'name'],
+  },
+  {
+    key: 'ac',
+    label: 'Acceptance criteria',
+    alt: ['acceptanceCriteria', 'acceptance_condition', 'acceptance'],
+  },
 ]);
 
 function fieldPresent(fr, item) {

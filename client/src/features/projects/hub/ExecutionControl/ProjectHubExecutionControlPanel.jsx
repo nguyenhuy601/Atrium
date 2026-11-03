@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAppStrings } from '../../../../locales/appStrings';
 import projectAPI from '../../../../services/api/projectAPI';
+import {
+  EvidenceList,
+  FollowUpResultsList,
+  GoalImpactBlock,
+  ProposalActionsList,
+  ProposalEvidenceRefs,
+} from './executionControlDisplay';
 
 /**
  * Control Tower MVP — issue → evidence → goal impact → proposal → approve → follow-up.
@@ -15,6 +22,7 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
   const [error, setError] = useState('');
   const [incidentForm, setIncidentForm] = useState({ title: '', description: '', kind: 'other' });
   const [busy, setBusy] = useState(false);
+  const [scanSummary, setScanSummary] = useState('');
 
   const load = useCallback(async () => {
     if (!projectId || !listActive) return;
@@ -90,11 +98,21 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
 
   const runScan = async () => {
     setBusy(true);
+    setScanSummary('');
     try {
-      await projectAPI.scanExecutionControl(projectId, {});
+      // defaultCapacityToDue cho phép AT_RISK khi remaining đã confirm > capacity.
+      const res = await projectAPI.scanExecutionControl(projectId, {
+        defaultCapacityToDue: 8,
+      });
+      const payload = res?.data?.data || res?.data || {};
+      const scanned = Number(payload.scanned) || 0;
+      const withIssues = Array.isArray(payload.results)
+        ? payload.results.filter((r) => (r?.issues || []).length > 0).length
+        : 0;
+      setScanSummary(`Đã quét ${scanned} task · ${withIssues} có issue`);
       await load();
     } catch (err) {
-      setError(err?.message || 'scan_failed');
+      setError(err?.response?.data?.messageUser || err?.message || 'scan_failed');
     } finally {
       setBusy(false);
     }
@@ -119,6 +137,11 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
       {error ? (
         <p className="text-xs text-destructive" role="alert">
           {error}
+        </p>
+      ) : null}
+      {scanSummary ? (
+        <p className="text-xs text-muted-foreground" data-testid="execution-control-scan-summary">
+          {scanSummary}
         </p>
       ) : null}
       {loading ? <p className="text-xs text-muted-foreground">…</p> : null}
@@ -222,19 +245,20 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
               </div>
               <section>
                 <h4 className="font-semibold">{t('workspace.executionControlEvidence')}</h4>
-                <pre className="mt-1 max-h-32 overflow-auto rounded bg-muted/40 p-2 text-[10px]">
-                  {JSON.stringify(detail.evidence || [], null, 2)}
-                </pre>
+                <EvidenceList
+                  evidence={detail.evidence}
+                  t={t}
+                  emptyLabel={t('workspace.executionControlEvidenceEmpty')}
+                />
               </section>
               <section>
                 <h4 className="font-semibold">{t('workspace.executionControlGoalImpact')}</h4>
-                <pre className="mt-1 rounded bg-muted/40 p-2 text-[10px]">
-                  {JSON.stringify(detail.goalImpact || {}, null, 2)}
-                </pre>
-                <p className="mt-1 text-muted-foreground">
-                  impactStatus: {detail.impactStatus || '—'} · intervention:{' '}
-                  {detail.interventionLevel || '—'}
-                </p>
+                <GoalImpactBlock
+                  goalImpact={detail.goalImpact}
+                  impactStatus={detail.impactStatus}
+                  interventionLevel={detail.interventionLevel}
+                  t={t}
+                />
               </section>
               <section>
                 <h4 className="font-semibold">{t('workspace.executionControlProposals')}</h4>
@@ -244,7 +268,10 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
                   (detail.proposals || []).map((p) => (
                     <div key={String(p._id)} className="mt-2 rounded border border-border p-2">
                       <p>
-                        rev {p.proposalRevision} · {p.status}
+                        {t('workspace.executionControlProposalRev', {
+                          rev: p.proposalRevision ?? '—',
+                        })}{' '}
+                        · {p.status}
                         {p.interventionLevel ? ` · ${p.interventionLevel}` : ''}
                       </p>
                       {p.situation?.narrativeLines?.length ? (
@@ -259,9 +286,12 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
                           </ul>
                           {p.situation.gapHours != null ? (
                             <p className="text-[11px] text-muted-foreground">
-                              remaining {p.situation.remainingHours ?? '—'}h · capacity{' '}
-                              {p.situation.availableCapacityToDueHours ?? '—'}h · gap{' '}
-                              {p.situation.gapHours}h · impact {p.situation.impactStatus}
+                              {t('workspace.executionControlSituationMetrics', {
+                                remaining: p.situation.remainingHours ?? '—',
+                                capacity: p.situation.availableCapacityToDueHours ?? '—',
+                                gap: p.situation.gapHours,
+                                impact: p.situation.impactStatus || '—',
+                              })}
                             </p>
                           ) : null}
                         </div>
@@ -273,27 +303,16 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
                           <summary className="cursor-pointer text-[11px] font-medium">
                             {t('workspace.executionControlProposalEvidence')}
                           </summary>
-                          <pre className="mt-1 max-h-28 overflow-auto rounded bg-muted/40 p-2 text-[10px]">
-                            {JSON.stringify(p.evidenceRefs, null, 2)}
-                          </pre>
+                          <ProposalEvidenceRefs refs={p.evidenceRefs} t={t} />
                         </details>
                       ) : null}
                       {Array.isArray(p.actions) && p.actions.length ? (
-                        <details className="mt-1">
+                        <details className="mt-1" open>
                           <summary className="cursor-pointer text-[11px] font-medium">
                             {t('workspace.executionControlProposalActions')} (
                             {p.actions.length})
                           </summary>
-                          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11px] text-muted-foreground">
-                            {p.actions.map((a) => (
-                              <li key={a.actionId || a.op}>
-                                <span className="font-medium">{a.op}</span>
-                                {String(a.op || '').startsWith('recommend_')
-                                  ? ` — ${a.payload?.message || t('workspace.executionControlRecommendOnly')}`
-                                  : ''}
-                              </li>
-                            ))}
-                          </ul>
+                          <ProposalActionsList actions={p.actions} t={t} />
                         </details>
                       ) : null}
                       {p.status === 'pending_approval' ? (
@@ -327,9 +346,11 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
               </section>
               <section>
                 <h4 className="font-semibold">{t('workspace.executionControlFollowUp')}</h4>
-                <pre className="mt-1 rounded bg-muted/40 p-2 text-[10px]">
-                  {JSON.stringify(detail.followUpResults || [], null, 2)}
-                </pre>
+                <FollowUpResultsList
+                  results={detail.followUpResults}
+                  t={t}
+                  emptyLabel={t('workspace.executionControlFollowUpEmpty')}
+                />
                 <button
                   type="button"
                   className="vh-motion-btn mt-2 rounded border border-border px-2 py-1"

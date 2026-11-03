@@ -54,30 +54,37 @@ function commitmentPctForUser(memberRows, asOfMs, availableHours) {
   return { commitmentPct: allocatedPct, committedHours };
 }
 
-async function loadTaskPlannedForUser(userId, { fromMs, toMs } = {}) {
+async function loadTaskPlannedForUser(userId, { fromMs, toMs, projectId = null } = {}) {
   const uid = asOid(userId);
   if (!uid) return [];
   const filter = {
+    isActive: { $ne: false },
     $or: [{ assigneeId: uid }, { 'assignees.userId': uid }],
   };
+  const pid = asOid(projectId);
+  if (pid) {
+    filter.projectId = pid;
+  }
   if (fromMs != null && toMs != null) {
     filter.$and = [
       {
         $or: [
           { dueDate: { $gte: new Date(fromMs), $lte: new Date(toMs) } },
           { startDate: { $gte: new Date(fromMs), $lte: new Date(toMs) } },
+          { startDate: null, dueDate: null },
         ],
       },
     ];
   }
   const tasks = await Task.find(filter)
-    .select('estimateHours startDate dueDate assigneeId assignees')
+    .select('estimateHours startDate dueDate assigneeId assignees projectId')
     .lean()
     .catch(() => []);
   return (tasks || []).map((t) => ({
     effortHours: Number(t.estimateHours) || 0,
     startDate: t.startDate,
     dueDate: t.dueDate || t.startDate,
+    projectId: t.projectId ? String(t.projectId) : null,
   }));
 }
 
@@ -145,7 +152,7 @@ async function getUserForecastCapacity({
     : budgetsAll;
 
   const [tasks, meetings, memberRows] = await Promise.all([
-    loadTaskPlannedForUser(uid, { fromMs, toMs }),
+    loadTaskPlannedForUser(uid, { fromMs, toMs, projectId }),
     loadPlannedMeetingsForUser(uid, { fromMs, toMs }),
     ProjectMember.find({ userId: uid, status: 'active' }).select('allocations projectId').lean(),
   ]);
@@ -368,4 +375,6 @@ module.exports = {
   evaluateAssignmentFeasibility,
   recomputeForecastForUsers,
   loadCalendarPack,
+  loadTaskPlannedForUser,
+  loadPlannedMeetingsForUser,
 };

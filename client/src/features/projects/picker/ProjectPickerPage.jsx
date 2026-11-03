@@ -21,7 +21,6 @@ import useOrgProjectsList from '../../../hooks/useOrgProjectsList';
 import useTaskWorkspaceScope from '../../../hooks/useTaskWorkspaceScope';
 import { resolveLandingCreateActions } from '../landing/projectsLandingCreateActions';
 import { resolveAiProjectEntryPath } from '../phase1/aiHitl/aiHitlNavState';
-import { loadLinkedPackForAiNav } from '../phase1/aiHitl/loadLinkedPackForAiNav';
 import { useRouteDeniedNotice } from '../../../config/routeDeniedNotice';
 
 function isMyProject(project) {
@@ -92,20 +91,12 @@ export default function ProjectPickerPage() {
       writeStoredLastProjectId(projectId);
       try {
         const boardId = String(project?.defaultBoardId || project?.boards?.[0]?._id || '').trim();
-        const phase = String(project?.deliveryPhase || '').trim().toLowerCase();
-        let pack = null;
-        if (!phase || phase === 'requirement_analysis') {
-          try {
-            pack = await loadLinkedPackForAiNav(orgId, projectId);
-          } catch {
-            pack = null;
-          }
-        }
+        // Không await pack — ModuleRoute guard pack khi RA; tránh block navigate.
         navigate(
           resolveAiProjectEntryPath({
             projectId,
             project,
-            pack,
+            pack: null,
             boardId,
             organizationId: orgId,
           })

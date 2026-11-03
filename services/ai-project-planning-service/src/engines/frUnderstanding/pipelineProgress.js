@@ -37,6 +37,7 @@ const SUBSTEPS = {
 
 const FLAG_KEYS = {
   missing_actor: 'missingActor',
+  missing_outcome: 'missingOutcome',
   missing_ac: 'missingAc',
   thin_text: 'thinText',
   ambiguous: 'ambiguous',
@@ -51,6 +52,7 @@ function substepMeta(substep) {
 function emptyQuality() {
   return {
     missingActor: 0,
+    missingOutcome: 0,
     missingAc: 0,
     thinText: 0,
     ambiguous: 0,
@@ -59,6 +61,35 @@ function emptyQuality() {
     potentialConflict: 0,
     highImpact: 0,
   };
+}
+
+function nonEmptyText(v) {
+  return String(v || '').trim().length > 0;
+}
+
+function frActorsList(fr, signal) {
+  if (Array.isArray(signal?.actors) && signal.actors.length) {
+    return signal.actors.map(String).filter((s) => s.trim());
+  }
+  if (Array.isArray(fr?.actors) && fr.actors.length) {
+    return fr.actors.map(String).filter((s) => s.trim());
+  }
+  if (nonEmptyText(fr?.actor)) return [String(fr.actor).trim()];
+  return [];
+}
+
+/** Soft H1-aligned flags: actor + behavior/outcome description (not AC). */
+function deriveFrContentFlags(fr, signal) {
+  const flags = [];
+  if (!frActorsList(fr, signal).length) flags.push('missing_actor');
+  const outcome =
+    nonEmptyText(fr?.description) ||
+    nonEmptyText(fr?.requirement) ||
+    nonEmptyText(fr?.behavior) ||
+    nonEmptyText(fr?.desc) ||
+    (Array.isArray(signal?.actions) && signal.actions.some((a) => nonEmptyText(a)));
+  if (!outcome) flags.push('missing_outcome');
+  return flags;
 }
 
 function clipList(value) {
@@ -103,33 +134,58 @@ function buildGatePreview(input = {}) {
     )
   );
   const flagged = [];
+  const mergedFlagsByFr = new Map();
   for (const signal of signals) {
-    const flags = Array.isArray(signal?.flags) ? signal.flags : [];
+    const frId = String(signal?.frId || '');
+    const base = Array.isArray(signal?.flags) ? signal.flags.map(String) : [];
+    const fr = frById.get(frId);
+    const derived = fr ? deriveFrContentFlags(fr, signal) : [];
+    const flags = [...new Set([...base, ...derived])];
+    if (frId) mergedFlagsByFr.set(frId, flags);
     for (const flag of flags) {
       const key = FLAG_KEYS[flag];
       if (key) quality[key] += 1;
     }
     if (!flags.length || flagged.length >= FLAGGED_CAP) continue;
-    const fr = frById.get(String(signal.frId || ''));
     const title = (fr && (fr.title || fr.name)) || '';
     flagged.push({
-      frId: String(signal.frId || ''),
+      frId,
       title: String(title).slice(0, 160),
-      flags: flags.map((flag) => String(flag)),
+      flags,
     });
+  }
+  // FRs with no signal row — still soft-warn actor / outcome
+  for (const fr of functionalRequirements) {
+    const frId = String(fr?.id || '');
+    if (!frId || mergedFlagsByFr.has(frId)) continue;
+    const flags = deriveFrContentFlags(fr, null);
+    if (!flags.length) continue;
+    mergedFlagsByFr.set(frId, flags);
+    for (const flag of flags) {
+      const key = FLAG_KEYS[flag];
+      if (key) quality[key] += 1;
+    }
+    if (flagged.length < FLAGGED_CAP) {
+      flagged.push({
+        frId,
+        title: String(fr?.title || fr?.name || '').slice(0, 160),
+        flags,
+      });
+    }
   }
   const rows = functionalRequirements.slice(0, ROW_CAP).map((fr) => {
     const frId = String(fr?.id || '');
     const signal = signalById.get(frId) || {};
+    const flags = mergedFlagsByFr.get(frId) || signal.flags || [];
     return slimRow({
       frId,
       title: fr?.title || fr?.name || '',
-      description: fr?.description || '',
-      actors: signal.actors,
+      description: fr?.description || fr?.requirement || '',
+      actors: frActorsList(fr, signal),
       actions: signal.actions,
       objects: signal.objects,
       fields: signal.fields,
-      flags: signal.flags,
+      flags,
       candidate: candidateIds.has(frId),
     });
   });
@@ -151,7 +207,8 @@ function buildGatePreview(input = {}) {
     skippedCount: Number(counts.clear) || clear.length,
     quality,
     byReason: {
-      missing_actor: Number(byReason.missing_actor) || 0,
+      missing_actor: Number(byReason.missing_actor) || quality.missingActor || 0,
+      missing_outcome: Number(byReason.missing_outcome) || quality.missingOutcome || 0,
       missing_ac: Number(byReason.missing_ac) || 0,
       potential_conflict: Number(byReason.potential_conflict) || affectedFrCount,
       high_impact: Number(byReason.high_impact) || 0,

@@ -140,6 +140,8 @@ const HowPhaseState = Annotation.Root({
   completeness: field(),
   generationId: field(),
   env: field(),
+  forceRerunSet: field(),
+  rerunTools: field(),
 });
 
 async function persistNode(state, currentNode, onCheckpoint, extra = {}) {

@@ -187,6 +187,8 @@ async function confirmAiAnalysisJob({
   proposal = null,
   proposalId = '',
   decision = '',
+  conflictId = '',
+  chosenRoleKey = '',
   forceApprove = false,
   overrideReason = '',
 }) {
@@ -293,7 +295,7 @@ async function confirmAiAnalysisJob({
 
   if (!effectiveAction) {
     const err = new Error(
-      'Gate 2 confirm cần action=track_submit|propose_change|decide_change|pm_confirm_plan|po_approve|po_reject'
+      'Gate 2 confirm cần action=track_submit|propose_change|decide_change|resolve_line_conflict|pm_confirm_plan|po_approve|po_reject'
     );
     err.statusCode = 400;
     err.errorCode = 'GATE2_ACTION_REQUIRED';
@@ -309,6 +311,7 @@ async function confirmAiAnalysisJob({
     'keep_original',
     'escalate',
     'resolve_escalation',
+    'resolve_line_conflict',
     'pm_confirm_plan',
   ]);
   if (COLLAB_ACTIONS.has(effectiveAction)) {
@@ -326,6 +329,8 @@ async function confirmAiAnalysisJob({
       proposal,
       proposalId,
       decision,
+      conflictId,
+      chosenRoleKey,
     });
   }
 
@@ -517,6 +522,7 @@ const COLLAB_PERMISSION = Object.freeze({
   propose_change: 'planning:pm_review',
   keep_original: 'planning:pm_review',
   escalate: 'planning:pm_review',
+  resolve_line_conflict: 'planning:pm_review',
   pm_confirm_plan: 'planning:pm_review',
   resolve_escalation: 'planning:po_review',
 });
@@ -535,6 +541,8 @@ async function applyCollaborativeGate2({
   proposal,
   proposalId,
   decision,
+  conflictId = '',
+  chosenRoleKey = '',
 }) {
   const { applyGate2CollaborativeAction } = require('../utils/aiAnalysis/gate2ChangeProposals');
   const { TRACK_PERMISSION } = require('../utils/aiAnalysis/gate2ReviewOwnership');
@@ -573,7 +581,14 @@ async function applyCollaborativeGate2({
       }
       await assertPlanningGate2Permission({ userId, projectId, permission: perm });
     }
-  } else if (container?.gate2?.reviewPlan?.finalRoleKey && (act === 'pm_confirm_plan' || act === 'propose_change' || act === 'keep_original' || act === 'escalate')) {
+  } else if (
+    container?.gate2?.reviewPlan?.finalRoleKey &&
+    (act === 'pm_confirm_plan' ||
+      act === 'propose_change' ||
+      act === 'keep_original' ||
+      act === 'escalate' ||
+      act === 'resolve_line_conflict')
+  ) {
     const synthesis = String(container.gate2.reviewPlan.synthesisRoleKey || '').trim().toLowerCase();
     if (synthesis) {
       await assertUserHoldsProjectRole({ userId, projectId, roleKey: synthesis });
@@ -596,6 +611,8 @@ async function applyCollaborativeGate2({
     decision,
     track,
     techRequired,
+    conflictId,
+    chosenRoleKey,
   });
   container.gate2 = applied.gate2;
   if (act === 'track_submit' || act === 'pm_submit' || act === 'tech_submit') {
@@ -662,6 +679,16 @@ async function applyCollaborativeGate2({
     });
   }
 
+  if (Array.isArray(applied.notifyLineRejected) && applied.notifyLineRejected.length) {
+    void notifyGate2LineRejected({
+      projectId: String(projectId || ''),
+      organizationId,
+      actorUserId: userId,
+      packId: String(packId),
+      items: applied.notifyLineRejected,
+    });
+  }
+
   return {
     phase: 'how',
     job: 'phase_how',
@@ -671,18 +698,67 @@ async function applyCollaborativeGate2({
   };
 }
 
+async function notifyGate2LineRejected({
+  projectId,
+  organizationId,
+  actorUserId,
+  packId,
+  items = [],
+}) {
+  const { notifySystemKind, projectHubActionUrl } = require('../clients/notification.client');
+  const { AI_HITL_ACTION_PATH } = require('../utils/phase1GatePolicy');
+  for (const item of items) {
+    const uid = String(item?.userId || '').trim();
+    if (!uid) continue;
+    const logicalId = String(item?.data?.logicalId || '').trim();
+    const sectionKey = String(item?.data?.sectionKey || '').trim();
+    const qs = new URLSearchParams();
+    if (packId) qs.set('packId', String(packId));
+    qs.set('tab', 'review');
+    if (logicalId) qs.set('logicalId', logicalId);
+    if (sectionKey) qs.set('section', sectionKey);
+    const pathSuffix = `${AI_HITL_ACTION_PATH}?${qs.toString()}`;
+    const actionUrl = projectId
+      ? projectHubActionUrl({
+          projectId,
+          organizationId,
+          pathSuffix,
+        })
+      : undefined;
+    try {
+      await notifySystemKind({
+        userIds: [uid],
+        kind: String(item.kind || 'ai_hitl_gate2_line_rejected'),
+        title: item.title || 'Gate 2 — dòng bị từ chối khi tổng hợp',
+        content: item.content || '',
+        data: {
+          projectId: String(projectId || ''),
+          organizationId: String(organizationId || ''),
+          packId: String(packId || ''),
+          ...(item.data && typeof item.data === 'object' ? item.data : {}),
+        },
+        actionUrl,
+        excludeUserId: actorUserId,
+      });
+    } catch {
+      /* best-effort inbox */
+    }
+  }
+}
+
 /**
  * Gate2 HITL — planning:pm_review / planning:tech_review / planning:po_review.
  */
 async function assertUserHoldsProjectRole({ userId, projectId, roleKey }) {
   const key = String(roleKey || '').trim().toLowerCase();
   const { resolveUserProjectPermissions } = require('./projectAccess.service');
+  const { roleKeysMatch } = require('../utils/project/projectRoleKeyMatch');
   const resolved = await resolveUserProjectPermissions({ userId, projectId });
   if (resolved.isOrgAdmin) return resolved;
   const keys = (Array.isArray(resolved.roles) ? resolved.roles : [])
-    .map((role) => String(role?.key || '').trim().toLowerCase())
+    .map((role) => String(role?.key || '').trim())
     .filter(Boolean);
-  if (!key || !keys.includes(key)) {
+  if (!key || !roleKeysMatch(keys, key)) {
     const err = new Error('Bạn không giữ vai trò được chọn để duyệt bước này.');
     err.statusCode = 403;
     err.errorCode = 'GATE2_ROLE_REQUIRED';
@@ -710,8 +786,11 @@ async function notifyProjectRole({
     const roles = roleIds.length
       ? await ProjectRole.find({ _id: { $in: roleIds } }).select('_id key').lean()
       : [];
+    const { roleKeysMatch } = require('../utils/project/projectRoleKeyMatch');
     const matchIds = new Set(
-      roles.filter((row) => String(row.key || '').toLowerCase() === roleKey).map((row) => String(row._id))
+      roles
+        .filter((row) => roleKeysMatch([row.key], roleKey))
+        .map((row) => String(row._id))
     );
     const userIds = [...new Set(
       members
@@ -998,6 +1077,26 @@ async function applyRemotePhaseRunResult({
     }
     if (incoming.planning) container.planning = incoming.planning;
     if (incoming.resource) container.resource = incoming.resource;
+    // WHAT FR checkpoint stamp — revisions/currentRevisionIds must reach Pack for confirm CTA.
+    if (incoming.requirements && typeof incoming.requirements === 'object') {
+      const prevReq =
+        container.requirements && typeof container.requirements === 'object'
+          ? container.requirements
+          : {};
+      const nextReq = incoming.requirements;
+      container.requirements = {
+        ...prevReq,
+        ...nextReq,
+        revisions: {
+          ...(prevReq.revisions || {}),
+          ...(nextReq.revisions || {}),
+        },
+        currentRevisionIds: {
+          ...(prevReq.currentRevisionIds || {}),
+          ...(nextReq.currentRevisionIds || {}),
+        },
+      };
+    }
     if (incoming.analyses) {
       const {
         g4Understanding: _dropLegacyG4,
@@ -1284,9 +1383,7 @@ async function resumeInRunHitl({
   } = require('../utils/aiAnalysis/inRunHitlKinds');
   const kindNorm = normalizeInRunKind(kind || 'clarify');
   if (!isInRunHitlKind(kindNorm)) {
-    const err = new Error(
-      'kind must be clarify, edit_draft, wbs_confirm, or fr_confirm'
-    );
+    const err = new Error('kind must be clarify, edit_draft, or wbs_confirm');
     err.statusCode = 400;
     err.errorCode = 'IN_RUN_HITL_KIND_INVALID';
     throw err;
@@ -1384,74 +1481,6 @@ async function resumeInRunHitl({
     }
   }
 
-  // fr_confirm: pin FR baseline on Pack SoT (always-on WHAT checkpoint) before/alongside resume
-  let frBaseline = null;
-  if (kindNorm === 'fr_confirm') {
-    const action = String(resumeBody.action || resumeBody.decision || 'confirm')
-      .trim()
-      .toLowerCase();
-    if (action === 'confirm' || action === 'fr_confirm' || action === 'approve') {
-      const { pinFrBaselineOnContainer } = require('../utils/aiAnalysis/frBaselinePin');
-      const pinned = pinFrBaselineOnContainer(container, {
-        revisionId: resumeBody.frRevisionId || resumeBody.revisionId || null,
-        actorUserId: String(userId),
-        requestId: resumeBody.requestId || resumeBody.idempotencyKey || null,
-      });
-      pack.aiAnalysis = pinned.container;
-      pack.markModified('aiAnalysis');
-      await pack.save();
-      frBaseline = {
-        revisionId: pinned.revisionId,
-        duplicated: pinned.duplicated,
-      };
-      resumeBody.action = 'confirm';
-      resumeBody.frRevisionId = pinned.revisionId;
-      resumeBody.actorUserId = String(userId);
-    } else if (action === 'save_edit' || action === 'edit') {
-      const {
-        appendFrPackChangeEvent,
-        getCurrentFrRevisionId,
-      } = require('../utils/aiAnalysis/frBaselinePin');
-      const baseRevisionId =
-        resumeBody.baseRevisionId || getCurrentFrRevisionId(container);
-      if (
-        resumeBody.baseRevisionId &&
-        getCurrentFrRevisionId(container) &&
-        String(resumeBody.baseRevisionId) !== String(getCurrentFrRevisionId(container))
-      ) {
-        const err = new Error('baseRevisionId does not match current FR revision');
-        err.statusCode = 409;
-        err.errorCode = 'REVISION_CONFLICT';
-        throw err;
-      }
-      const appended = appendFrPackChangeEvent(container, {
-        action: 'human_edit',
-        artifactKind: 'fr',
-        baseRevisionId,
-        newRevisionId: resumeBody.newRevisionId || null,
-        actor: { userId: String(userId), role: resumeBody.role || 'BA' },
-        reason: resumeBody.reason || '',
-        changes: Array.isArray(resumeBody.changes) ? resumeBody.changes : [],
-        impactAssessmentId: resumeBody.impactAssessmentId || null,
-        requestId: resumeBody.requestId || resumeBody.idempotencyKey || null,
-      });
-      pack.aiAnalysis = appended.container;
-      pack.markModified('aiAnalysis');
-      await pack.save();
-      return {
-        accepted: true,
-        remote: false,
-        action: 'fr_save_edit',
-        kind: kindNorm,
-        runId: bound,
-        requestId: appended.requestId,
-        duplicated: appended.duplicated,
-        governanceGate: false,
-        note: 'FR edit recorded on Pack — confirm separately to resume UC/Data',
-      };
-    }
-  }
-
   const s2s = await aiProjectPlanningClient.resumeRun(bound, {
     action: 'in_run_hitl',
     kind: kindNorm,
@@ -1474,7 +1503,6 @@ async function resumeInRunHitl({
     httpStatus: s2s.status === 202 ? 202 : 200,
     governanceGate: false,
     wbsBaseline: packPin,
-    frBaseline,
     note: 'In-run HITL only — Gate 1/2 remain Pack HTTP stamps',
   };
 }
@@ -1558,6 +1586,7 @@ async function startPhaseAiPlanningRun({
   mode = '',
   feedback = '',
   impactScope = [],
+  rerunTools = [],
   action = '',
   decision = '',
   runId = '',
@@ -1814,6 +1843,67 @@ async function startPhaseAiPlanningRun({
     };
   }
 
+  // HOW force / selective re-run BEFORE pending stamp so we can supersede prior toolExecutions.
+  let howForceRerunSet = [];
+  if (phaseJob === 'phase_how' && force) {
+    const {
+      resolveForceRerunSet,
+    } = require('../utils/aiAnalysis/howRerunClosure');
+    const { invalidateHowArtifacts } = require('../utils/aiAnalysis/invalidateHowArtifacts');
+    const seedTools = Array.isArray(rerunTools)
+      ? rerunTools.map((s) => String(s || '').trim()).filter(Boolean)
+      : [];
+    howForceRerunSet = resolveForceRerunSet({ force: true, rerunTools: seedTools });
+    const fullHowRerun = seedTools.length === 0;
+    const needsGate2Reset = fullHowRerun || howForceRerunSet.includes('WbsTool');
+    if (needsGate2Reset) {
+      const prevGate2 =
+        container.gate2 && typeof container.gate2 === 'object' ? { ...container.gate2 } : {};
+      container.gate2 = {
+        ...prevGate2,
+        reviewLane: 'pm',
+        reviewLaneUpdatedAt: new Date().toISOString(),
+        reviewDecisions: {},
+        reviewComplete: false,
+        submittedBy: null,
+        submittedAt: null,
+        resetAt: new Date().toISOString(),
+        resetReason: fullHowRerun ? 'phase_how_force_rerun' : 'phase_how_selective_rerun',
+        resetBy: userId != null ? String(userId) : null,
+      };
+      // eslint-disable-next-line no-console
+      console.info('[phase_how] reset Gate2 review state on force re-run', {
+        packId: String(packId),
+        fullHowRerun,
+      });
+    }
+
+    const invalidated = invalidateHowArtifacts(container, howForceRerunSet);
+    container = invalidated.container;
+    // eslint-disable-next-line no-console
+    console.info(
+      `[phase_how] packId=${packId} rerunSet=${seedTools.join(',') || '(full)'} expanded=${howForceRerunSet.join(',')} cleared=${invalidated.cleared.join('|') || '-'}`
+    );
+
+    const forceScopes = Array.isArray(impactScope)
+      ? impactScope.map((s) => String(s || '').trim()).filter(Boolean)
+      : [];
+    if (
+      seedTools.length === 0 &&
+      forceScopes.length &&
+      !howForceRerunSet.includes('DependencyTool') &&
+      forceScopes.some((s) =>
+        ['WBS', 'wbs', 'structure', 'backlog', 'requirement', 'dependency', 'dependencies'].includes(
+          String(s)
+        )
+      )
+    ) {
+      const analyses = { ...(container.analyses || {}) };
+      delete analyses.dependency;
+      container.analyses = analyses;
+    }
+  }
+
   const expectedRunId = new RequirementPack.db.base.Types.ObjectId().toString();
   container.phaseRuns = {
     ...(container.phaseRuns || {}),
@@ -1828,59 +1918,6 @@ async function startPhaseAiPlanningRun({
       ...(clientKey ? { clientIdempotencyKey: clientKey } : {}),
     },
   };
-  // HOW force re-run: reset Gate2 lane → PM must re-submit after new plan
-  if (phaseJob === 'phase_how' && force) {
-    const prevGate2 =
-      container.gate2 && typeof container.gate2 === 'object' ? { ...container.gate2 } : {};
-    container.gate2 = {
-      ...prevGate2,
-      reviewLane: 'pm',
-      reviewLaneUpdatedAt: new Date().toISOString(),
-      reviewDecisions: {},
-      reviewComplete: false,
-      submittedBy: null,
-      submittedAt: null,
-      resetAt: new Date().toISOString(),
-      resetReason: 'phase_how_force_rerun',
-      resetBy: userId != null ? String(userId) : null,
-    };
-    // eslint-disable-next-line no-console
-    console.info('[phase_how] reset Gate2 review state on force re-run', {
-      packId: String(packId),
-    });
-
-    // Full force (no impactScope): drop prior HOW analysis so tools re-run.
-    // Stale analyses.dependency.executionTerminal made DependencyTool look "done"
-    // and HOW skipped it — pack kept FAILED while wall-clock looked like a new run.
-    const forceScopes = Array.isArray(impactScope)
-      ? impactScope.map((s) => String(s || '').trim()).filter(Boolean)
-      : [];
-    const fullHowRerun = forceScopes.length === 0;
-    const needsDependencyReset =
-      fullHowRerun ||
-      forceScopes.some((s) =>
-        ['WBS', 'wbs', 'structure', 'backlog', 'requirement', 'dependency', 'dependencies'].includes(
-          String(s)
-        )
-      );
-    if (needsDependencyReset) {
-      const analyses = { ...(container.analyses || {}) };
-      delete analyses.dependency;
-      if (fullHowRerun) {
-        delete analyses.assignment;
-        delete analyses.schedule;
-        delete analyses.risk;
-        delete analyses.risks;
-      }
-      container.analyses = analyses;
-      // eslint-disable-next-line no-console
-      console.info('[phase_how] clear HOW analyses on force re-run', {
-        packId: String(packId),
-        fullHowRerun,
-        clearedDependency: true,
-      });
-    }
-  }
 
   // WHAT re-run: drop prior Gate1 proposal so Review UI cannot show stale Duyệt data
   if (phaseJob === 'phase_what') {
@@ -2027,6 +2064,14 @@ async function startPhaseAiPlanningRun({
     pipelineVersion: snapshotObject?.pipelineVersion ?? PIPELINE_VERSION,
     inputFingerprint:
       toolData.inputFingerprint || `${phaseJob}:${snapshotId}`,
+    ...(phaseJob === 'phase_how' && howForceRerunSet.length
+      ? {
+          rerunTools: Array.isArray(rerunTools)
+            ? rerunTools.map((s) => String(s || '').trim()).filter(Boolean)
+            : [],
+          forceRerunSet: howForceRerunSet,
+        }
+      : {}),
     ...(howScheduleRefresh
       ? {
           feedback:

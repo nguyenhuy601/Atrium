@@ -978,7 +978,7 @@ export default function ProjectHubShell({
     if (id && id !== tab) setTabState(id);
   }, [activeModule]);
 
-  const [visitedTabs, setVisitedTabs] = useState(() => ({ overview: true }));
+  const [visitedTabs, setVisitedTabs] = useState(() => ({}));
   const prevHubProjectIdRef = useRef('');
   const [membersEpoch, setMembersEpoch] = useState(0);
   const [apiActivity, setApiActivity] = useState(null);
@@ -1017,7 +1017,9 @@ export default function ProjectHubShell({
     data: overviewPayload = null,
     isLoading: overviewLoading,
     refetch: refetchOverview,
-  } = useProjectHubOverview(projectId, { enabled: useOverviewAggregate });
+  } = useProjectHubOverview(projectId, {
+    enabled: useOverviewAggregate && tab === 'overview',
+  });
   const { data: projectQueryData = null } = useProjectHubProject(projectId);
   const projectPayload = projectQueryData ?? overviewPayload?.project ?? null;
   // Fail-closed: không mở CTA manage khi thiếu capabilities payload (tránh canManage fallback lệch role).
@@ -1039,7 +1041,7 @@ export default function ProjectHubShell({
     } else {
       setTab('overview');
     }
-    setVisitedTabs({ [nextTab]: true, overview: true });
+    setVisitedTabs({ [nextTab]: true });
     setApiActivity(null);
     setActivityLoading(false);
     setActivityError(false);
@@ -1111,8 +1113,7 @@ export default function ProjectHubShell({
     enabled:
       Boolean(projectId) &&
       hubCaps.canViewMembers &&
-      (overviewVisibility.canViewMemberBreakdown ||
-        tab === 'members' ||
+      (tab === 'members' ||
         Boolean(visitedTabs.members) ||
         tab === 'changeRequests' ||
         Boolean(visitedTabs.changeRequests)),
@@ -1125,11 +1126,14 @@ export default function ProjectHubShell({
     (tab === 'overview' && overviewVisibility.canViewActivity) ||
     (tab === 'activity' && hubCaps.canViewActivityTab);
   const needsFiles = tab === 'files' && hubCaps.canViewFiles;
+  // Page-scoped: sprints theo tab hiện tại (không sticky visitedTabs.board).
   const needsSprints =
     Boolean(hubCaps.canViewSprints) &&
     (tab === 'board' ||
-      Boolean(visitedTabs.board) ||
-      (capsReady &&
+      tab === 'list' ||
+      tab === 'timeline' ||
+      (tab === 'overview' &&
+        capsReady &&
         (overviewVisibility.canViewSprintContext || Boolean(hubCaps.canCompleteProject))));
 
   const needsChartWorkItems = tab === 'overview' && overviewVisibility.canViewTaskMetrics;
@@ -1632,7 +1636,16 @@ export default function ProjectHubShell({
     </div>
   ) : null;
 
-  if (!hasBoard) {
+  /** Ops / collab tabs that must render without a selected kanban board (suite deep-link). */
+  const boardlessOpsTab =
+    tab === 'settings' ||
+    tab === 'members' ||
+    tab === 'activity' ||
+    tab === 'files' ||
+    tab === 'changeRequests' ||
+    tab === 'chat';
+
+  if (!hasBoard && !boardlessOpsTab) {
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div
@@ -1876,6 +1889,17 @@ export default function ProjectHubShell({
             planningError={planningError}
           />
         </div>
+        ) : null}
+        {tab === 'planning' && hideTabBar && capsReady && !hubCaps.canViewBacklog ? (
+          <div className="flex min-h-[8rem] items-center justify-center p-4 text-sm text-muted-foreground">
+            {t('workspace.projectHubPlanningDenied')}
+          </div>
+        ) : null}
+        {tab === 'planning' && hideTabBar && !capsReady ? (
+          <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            <span>{t('common.loading')}</span>
+          </div>
         ) : null}
         {showPlanningPanel ? (
         <div
@@ -2125,6 +2149,17 @@ export default function ProjectHubShell({
         {tab === 'files' && hubCaps.canViewFiles ? <FilesPanel files={files} isDarkMode={isDarkMode} t={t} /> : null}
         {tab === 'activity' && hubCaps.canViewActivityTab ? (
           <ActivityPanel activity={activity} locale={locale} isDarkMode={isDarkMode} t={t} />
+        ) : null}
+        {tab === 'activity' && hideTabBar && capsReady && !hubCaps.canViewActivityTab ? (
+          <div className="flex min-h-[8rem] items-center justify-center p-4 text-sm text-muted-foreground">
+            {t('workspace.projectHubActivityDenied')}
+          </div>
+        ) : null}
+        {tab === 'activity' && hideTabBar && !capsReady ? (
+          <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            <span>{t('common.loading')}</span>
+          </div>
         ) : null}
         {tab === 'settings' &&
         (hubCaps.canViewSettings ||

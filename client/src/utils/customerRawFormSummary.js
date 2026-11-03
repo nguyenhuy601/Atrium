@@ -6,6 +6,24 @@ export function isCustomerRawFormOk(formValidation) {
   return Boolean(formValidation && formValidation.ok === true);
 }
 
+export function readContentWarnings(formValidation) {
+  const w = formValidation?.contentWarnings;
+  if (!w || typeof w !== 'object') {
+    return { missingActor: 0, missingOutcome: 0, rowCount: 0, samples: [] };
+  }
+  return {
+    missingActor: Number(w.missingActor) || 0,
+    missingOutcome: Number(w.missingOutcome) || 0,
+    rowCount: Number(w.rowCount) || 0,
+    samples: Array.isArray(w.samples) ? w.samples : [],
+  };
+}
+
+export function hasContentWarnings(formValidation) {
+  const w = readContentWarnings(formValidation);
+  return w.missingActor > 0 || w.missingOutcome > 0;
+}
+
 export function formatCustomerRawFormIssues(formValidation, t) {
   if (!formValidation || formValidation.ok) return [];
   const issues = [];
@@ -26,8 +44,35 @@ export function formatCustomerRawFormIssues(formValidation, t) {
   return issues;
 }
 
+/** Soft content gaps — never block template OK. */
+export function formatCustomerRawContentWarnings(formValidation, t) {
+  const w = readContentWarnings(formValidation);
+  const lines = [];
+  if (w.missingActor > 0) {
+    lines.push(
+      (t('workspace.phase1RawFormWarnMissingActor') || 'Thiếu User/Actor: {count} dòng').replace(
+        '{count}',
+        String(w.missingActor)
+      )
+    );
+  }
+  if (w.missingOutcome > 0) {
+    lines.push(
+      (
+        t('workspace.phase1RawFormWarnMissingOutcome') ||
+        'Thiếu mô tả hành vi (Requirement): {count} dòng'
+      ).replace('{count}', String(w.missingOutcome))
+    );
+  }
+  return lines;
+}
+
 export function formatCustomerRawFormTooltip(formValidation, t) {
   if (isCustomerRawFormOk(formValidation)) {
+    const soft = formatCustomerRawContentWarnings(formValidation, t);
+    if (soft.length) {
+      return `${t('workspace.phase1RawFormOkTooltip')}; ${soft.join('; ')}`;
+    }
     return t('workspace.phase1RawFormOkTooltip');
   }
   const issues = formatCustomerRawFormIssues(formValidation, t);

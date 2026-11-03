@@ -37,6 +37,57 @@ function asList(value) {
   return [];
 }
 
+/** Heavy dep edges (integration / non-schedulable / explicit blocking). */
+function isRiskBlockingDependencyEdge(row) {
+  if (!row || typeof row !== 'object') return false;
+  return Boolean(
+    row.blocking ||
+      row.critical ||
+      String(row.requiredAt || '').toUpperCase() === 'INTEGRATION' ||
+      row.schedulable === false
+  );
+}
+
+/** Prefer accepted schedulable `edges`; else proposalEdges (same source Risk historically used). */
+function selectDependencyEdgesForRisk(depAnalysis) {
+  if (!depAnalysis || typeof depAnalysis !== 'object') return [];
+  const edges = asList(depAnalysis.edges);
+  if (edges.length) return edges;
+  return asList(depAnalysis.proposalEdges);
+}
+
+/**
+ * Map real dependency edges into Risk trigger rows.
+ * - kind `blockingDep`: INTEGRATION / blocking / critical / non-schedulable
+ * - kind `dep`: FS/FULL (và cạnh lịch thường khác) — vẫn là dữ liệu thật để phân tích Risk
+ */
+function buildRiskTriggersFromDependencyEdges(edges) {
+  const out = [];
+  const list = Array.isArray(edges) ? edges : [];
+  for (let index = 0; index < list.length; index += 1) {
+    const row = list[index];
+    if (!row || typeof row !== 'object') continue;
+    const from = String(row.from || row.successorTaskId || '').trim();
+    const to = String(row.to || row.predecessorTaskId || '').trim();
+    if (!from && !to) continue;
+    const heavy = isRiskBlockingDependencyEdge(row);
+    out.push({
+      id: rowId(row, ['id'], `${heavy ? 'BDEP' : 'DEP'}-${index + 1}`),
+      kind: heavy ? 'blockingDep' : 'dep',
+      text: clip(`${from} -> ${to}`, 80),
+      from,
+      to,
+      requiredAt: row.requiredAt || null,
+      depType: row.depType || row.type || null,
+      blocking: Boolean(row.blocking),
+      critical: Boolean(row.critical),
+      schedulable: row.schedulable,
+      demotedFromIntegration: Boolean(row.demotedFromIntegration),
+    });
+  }
+  return out;
+}
+
 function idList(row, keys) {
   const out = [];
   for (const key of keys) {
@@ -278,17 +329,20 @@ function buildCatalog(opts, scope) {
         text: clip(row.title || row.name, 160),
       })
     );
-  const blockingDeps = asList(container?.analyses?.dependency?.edges)
-    .filter((row) => row.blocking || row.critical)
-    .map((row, index) =>
-      stamp(scope, {
-        id: rowId(row, ['id'], `BDEP-${index + 1}`),
-        kind: 'blockingDep',
-        reviewStatus: 'RUN',
-        scope: 'run',
-        text: clip(`${row.from || ''} -> ${row.to || ''}`, 80),
-      })
-    );
+  const depAnalysis =
+    container?.analyses?.dependency && typeof container.analyses.dependency === 'object'
+      ? container.analyses.dependency
+      : {};
+  // Risk triggers: mọi cạnh dependency thật (FS/FULL lẫn blocking/INTEGRATION), không chỉ heavy.
+  const depTriggers = buildRiskTriggersFromDependencyEdges(
+    selectDependencyEdgesForRisk(depAnalysis)
+  ).map((fields) =>
+    stamp(scope, {
+      ...fields,
+      reviewStatus: 'RUN',
+      scope: 'run',
+    })
+  );
 
   const schedulePlan = container?.planning?.schedulePlan || {};
   const sprints = asList(schedulePlan.sprints).map((row) =>
@@ -340,7 +394,7 @@ function buildCatalog(opts, scope) {
     durations,
     dependencies,
     roles,
-    triggers: [...caps, ...gaps, ...archHigh, ...blockingDeps],
+    triggers: [...caps, ...gaps, ...archHigh, ...depTriggers],
     sprints,
     releases,
     coefficients: [],
@@ -519,4 +573,7 @@ module.exports = {
   layerAllows,
   missingSlotsFor,
   buildCatalog,
+  isRiskBlockingDependencyEdge,
+  selectDependencyEdgesForRisk,
+  buildRiskTriggersFromDependencyEdges,
 };

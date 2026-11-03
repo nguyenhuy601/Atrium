@@ -6,6 +6,8 @@ Nền tảng **cộng tác nội bộ** (chat, voice/meeting, task, tài liệu,
 
 Đặc tả / luồng nghiệp vụ: [`docs/spec-pack/`](docs/spec-pack/), [`docs/luong nghiep vu/00-overview.md`](docs/luong%20nghiep%20vu/00-overview.md) (theo nhóm suite).
 
+**AI Project** (Two-Phase HITL): [`docs/ai-project/README.md`](docs/ai-project/README.md) · sơ đồ tổng quát [`docs/ai-project/diagrams/00-overview-poster.svg`](docs/ai-project/diagrams/00-overview-poster.svg).
+
 ---
 
 ## Mục đích sản phẩm
@@ -34,19 +36,20 @@ flowchart LR
   subgraph edge [Edge_dev]
     NGX[Nginx_voicehub.local]
   end
-  subgraph swarm [Docker_Swarm_app]
+  subgraph swarm [Docker_Swarm]
     GW[api-gateway]
-    MS[auth_user_org_chat_voice_...]
+    MS[auth_user_org_chat_voice_project_...]
+    AIPS[ai-project-planning]
     SOCK[socket-service]
-  end
-  subgraph extra [Compose_extra]
-    AI[ollama_minio_meili_workers]
+    INFRA[ollama_minio_qdrant]
   end
   SPA -->|HTTPS_same_origin| NGX
   NGX -->|/api_/socket.io_/uploads| GW
   GW --> MS
+  GW --> AIPS
   GW -->|WS_proxy| SOCK
-  MS -.->|overlay| AI
+  MS -->|S2S_AI| AIPS
+  AIPS -.->|overlay| INFRA
 ```
 
 1. **Browser** → `https://voicehub.local` (Nginx) → gateway `:3000` (`/api`, `/socket.io`, `/uploads`, voice signaling theo cấu hình).
@@ -76,9 +79,9 @@ Chi tiết: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/MIGRATION.md`
 | Edge / identity | `api-gateway`, `auth-service`, `user-service` |
 | Org / social | `organization-service`, `role-permission-service` |
 | Chat / realtime | `chat-service`, `socket-service` |
-| Work | `project-service`, `project-worker` |
+| Work | `project-service`, `project-worker` (pack, Gate HTTP, materialize) |
 | Voice | `voice-service` (mediasoup; UDP media publish ra host) |
-| AI | `ai-project-planning-service`, `ai-project-planning-llm-jobs-worker` |
+| AI Project | `ai-project-planning-service`, `ai-project-planning-llm-jobs-worker` |
 | Notify / webhook | `notification-service`, `notification-dispatch-worker`, `webhook-service`, `webhook-delivery-worker` |
 
 ### Compose extra (AI / storage)
@@ -105,8 +108,8 @@ Infra HA (staging): Mongo Atlas, Redis Sentinel, Rabbit cluster — xem [`docs/A
 | Frontend | React 18, Vite, React Router (suite shell), Tailwind, Axios, Socket.IO client, mediasoup-client |
 | Backend | Node.js + Express (microservices); Python (webhook / một số worker) |
 | Dữ liệu / queue | MongoDB, Redis, RabbitMQ |
-| Media / AI | mediasoup, MinIO, Ollama, Qdrant |
-| Triển khai | **Swarm** app + **Compose extra**; Compose full stack vẫn có cho local |
+| Media / AI | mediasoup, MinIO, Ollama, kho vector (truy hồi ngữ nghĩa), **Alibaba Cloud API** (chat LLM AI Project) |
+| Triển khai | **Swarm** (app + infra AI); Compose full stack vẫn có cho local |
 
 Cấu hình: file **`.env`** (root + từng service). Không dùng `.env.example` làm luồng chuẩn.
 
@@ -246,6 +249,30 @@ Chi tiết Compose: [`docs/DOCKER-COMPOSE.md`](docs/DOCKER-COMPOSE.md).
 
 ---
 
+## AI Project (hai giai đoạn, có người duyệt)
+
+Lập kế hoạch dự án có người duyệt: **WHAT** (SRS) → Gate 1 → **HOW** (WBS/lịch) → Gate 2 → tạo project.
+
+```mermaid
+flowchart LR
+  FE[Trinh_duyet] --> GW[API_Gateway]
+  GW --> PS[Dich_vu_Project]
+  PS -->|Cong_duyet_Pack| Pack[(Pack)]
+  PS -->|Khoi_chay_noi_bo| AI[Dich_vu_AI_Planning]
+  AI --> ORCH[Dieu_phoi_WHAT_HOW]
+  AI --> RAG[Truy_hoi_ngu_nghia]
+```
+
+| Thành phần | Việc làm |
+|------------|----------|
+| **Dịch vụ Project** | Pack, Gate 1/2, khởi chạy phân tích, tạo project từ kế hoạch đã duyệt |
+| **Dịch vụ AI Planning** | Điều phối agent WHAT/HOW, chat LLM (**Alibaba Cloud API**), công cụ phân tích, truy hồi ngữ nghĩa |
+| **Gate vs trong lần chạy** | Gate = duyệt Pack; trong lần chạy có thể tạm dừng hỏi người (không thay Gate) |
+
+Hub + sơ đồ: [`docs/ai-project/README.md`](docs/ai-project/README.md) · [`docs/ai-project/diagrams/`](docs/ai-project/diagrams/).
+
+---
+
 ## Frontend (`client/`)
 
 - Entry: [`client/src/main.jsx`](client/src/main.jsx) — providers + `App`.
@@ -260,6 +287,7 @@ Chi tiết Compose: [`docs/DOCKER-COMPOSE.md`](docs/DOCKER-COMPOSE.md).
 | Tài liệu | Nội dung |
 |----------|----------|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Kiến trúc + realtime + HA phases |
+| [`docs/ai-project/README.md`](docs/ai-project/README.md) | AI Project Two-Phase HITL + sơ đồ |
 | [`docs/MIGRATION.md`](docs/MIGRATION.md) | Compose vs Swarm; stabilization |
 | [`docs/STRUCTURE.md`](docs/STRUCTURE.md) | Cây thư mục |
 | [`docs/README.md`](docs/README.md) | Hub `docs/` |

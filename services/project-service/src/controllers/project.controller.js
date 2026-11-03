@@ -271,7 +271,14 @@ async function listMembers(req, res) {
     const userId = asUserId(req);
     const { projectId } = req.params;
     if (!userId) return unauthorized(res);
-    const data = await projectService.listProjectMembersForUser({ userId, projectId });
+    const view = String(req.query?.view || '').trim() || null;
+    const weekKey = String(req.query?.weekKey || '').trim() || null;
+    const data = await projectService.listProjectMembersForUser({
+      userId,
+      projectId,
+      view,
+      weekKey,
+    });
     return res.json({ success: true, data });
   } catch (err) {
     return sendErrorFromCatch(res, err, err.statusCode || 400, 'Không thể tải members', 'PROJECT_MEMBERS_FAILED');

@@ -221,10 +221,17 @@ export default function Phase1OverviewPage({ projectId, organizationId, delivery
         action={
           <button
             type="button"
-            className="rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium hover:bg-muted"
-            onClick={() =>
-              navigate(buildPhase1ModulePath(projectId, 'analysis-bg', { organizationId }))
+            disabled={!capabilities.canViewAnalysis}
+            title={
+              capabilities.canViewAnalysis
+                ? undefined
+                : t('workspace.phase1AnalysisCapLockedHint')
             }
+            className="rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => {
+              if (!capabilities.canViewAnalysis) return;
+              navigate(buildPhase1ModulePath(projectId, 'analysis-bg', { organizationId }));
+            }}
           >
             {t('workspace.phase1OpenAnalysis')}
           </button>
@@ -240,6 +247,8 @@ export default function Phase1OverviewPage({ projectId, organizationId, delivery
               projectId={projectId}
               organizationId={organizationId}
               navigate={navigate}
+              locked={!capabilities.canViewAnalysis}
+              lockedHint={t('workspace.phase1AnalysisCapLockedHint')}
             />
           ))}
         </div>

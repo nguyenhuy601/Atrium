@@ -98,8 +98,14 @@ function isGate1ConflictAmbiguityEnforceEnabled(env = process.env) {
 
 /** Labels from RequirementAnalysisTool / requirementGaps → content field keys. */
 const MISSING_LABEL_FIELD_KEYS = {
-  'Acceptance criteria': ['ac', 'acceptanceCriteria'],
-  Description: ['description', 'desc'],
+  'Acceptance criteria': [
+    'ac',
+    'acceptanceCriteria',
+    'acceptance_condition',
+    'acceptance',
+  ],
+  // Short FR may only store prose in title/name (pack contract avoids duplicating desc).
+  Description: ['description', 'desc', 'text', 'title', 'name'],
   Priority: ['priority'],
   Actor: ['actor', 'actors', 'primaryActor'],
   'Error handling': ['errorHandling', 'error_handling'],
@@ -265,7 +271,11 @@ function filterIntegrityBlockingByBaReview(pack, blocking) {
       continue;
     }
 
-    const stillMissing = missing.filter((label) => isMissingLabelStillEmpty(label, fields));
+    // Priority alone is coverage soft-gap — do not hard-block Gate1.
+    const stillMissing = missing.filter(
+      (label) =>
+        String(label) !== 'Priority' && isMissingLabelStillEmpty(label, fields)
+    );
     if (!stillMissing.length) continue;
     out.push({ ...block, missing: stillMissing });
   }

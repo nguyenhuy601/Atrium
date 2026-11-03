@@ -159,22 +159,41 @@ async function generateJsonViaOpenAi(opts, env, model, http) {
     promptEvalCount: Number(chat.usage?.promptTokens) || 0,
     evalCount: Number(chat.usage?.completionTokens) || 0,
   };
+  // Prefer model actually used after reactive DashScope quota fallback.
+  const usedModel = String(chat.model || model || '').trim() || model;
 
   if (!chat.ok) {
     return {
       ok: false,
-      model,
+      model: usedModel,
       data: null,
       error: chat.error || 'openai_error',
       usage,
+      modelsAttempted: chat.modelsAttempted,
+      fallbackUsed: Boolean(chat.fallbackUsed),
     };
   }
 
   const data = extractJsonPayload(chat.text);
   if (data == null) {
-    return { ok: false, model, data: null, error: 'ollama_json_parse', usage };
+    return {
+      ok: false,
+      model: usedModel,
+      data: null,
+      error: 'ollama_json_parse',
+      usage,
+      modelsAttempted: chat.modelsAttempted,
+      fallbackUsed: Boolean(chat.fallbackUsed),
+    };
   }
-  return { ok: true, model, data, usage };
+  return {
+    ok: true,
+    model: usedModel,
+    data,
+    usage,
+    modelsAttempted: chat.modelsAttempted,
+    fallbackUsed: Boolean(chat.fallbackUsed),
+  };
 }
 
 function buildUsageFromOllama(body) {

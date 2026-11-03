@@ -931,6 +931,109 @@ async function listProjects({
   return result;
 }
 
+/**
+ * Lightweight project read for overview / members — no attachProjectCapabilities,
+ * no tech-reviewer scan, no full boards[] embed.
+ * @returns {Promise<{ project: object, informationLevel: string, defaultBoardId: string|null, access: object|null }>}
+ */
+async function loadProjectReadContext({ userId, projectId }) {
+  const { makeProjectNotFoundError } = require('../utils/project/projectNotFoundError');
+  const { resolveUserProjectPermissions } = require('./projectAccess.service');
+  const project = await Project.findById(projectId).lean();
+  if (!project || project.isActive === false) {
+    throw makeProjectNotFoundError();
+  }
+
+  const resolved = await resolveUserProjectPermissions({ userId, projectId });
+  let informationLevel = String(resolved.informationLevel || 'details').toLowerCase();
+  let access = null;
+  let defaultBoardDoc = null;
+
+  const useV2 = isProjectVisibilityV2Enabled();
+  if (useV2) {
+    const visibilityCtx = await fetchProjectVisibilityContext(project.organizationId, userId);
+    const membershipRows = await ProjectMembership.find({
+      projectId: project._id,
+      userId,
+    })
+      .select('projectRoleId')
+      .lean();
+    const roleIds = membershipRows.map((r) => r.projectRoleId).filter(Boolean);
+    const ProjectRole = require('../models/ProjectRole');
+    const roleDocs = roleIds.length
+      ? await ProjectRole.find({ _id: { $in: roleIds } }).select('key').lean()
+      : [];
+    const projectRoleKeys = roleDocs.map((r) => String(r.key || '').trim()).filter(Boolean);
+    const isMember =
+      membershipRows.length > 0 ||
+      projectRoleKeys.length > 0 ||
+      String(project.createdBy) === String(userId);
+    if (
+      !isOrgElevatedMembershipRole(visibilityCtx.membershipRole) &&
+      !isMember
+    ) {
+      throw makeProjectNotFoundError();
+    }
+    access = resolveProjectAccess({
+      actor: {
+        userId: String(userId),
+        isOrgMember: visibilityCtx.isOrgMember,
+        membershipRole: visibilityCtx.membershipRole,
+        organizationRoleKeys: visibilityCtx.organizationRoleKeys,
+        headedDepartmentIds: visibilityCtx.headedDepartmentIds,
+        memberDepartmentIds: visibilityCtx.memberDepartmentIds,
+      },
+      project,
+      membership: {
+        isMember,
+        projectRoleKeys,
+      },
+      orgPolicy: visibilityCtx.policy,
+    });
+    if (!access.discover) {
+      throw makeProjectNotFoundError();
+    }
+    informationLevel = String(access.informationLevel || informationLevel || 'details').toLowerCase();
+  } else {
+    const boardService = require('./taskBoard.service');
+    defaultBoardDoc = await TaskBoard.findOne({ projectId, isActive: true })
+      .sort({ createdAt: 1 })
+      .select('_id')
+      .lean();
+    if (defaultBoardDoc) {
+      const ok = await boardService.ensureBoardViewAccess(defaultBoardDoc._id, userId);
+      if (!ok && String(project.createdBy) !== String(userId)) {
+        throw makeProjectNotFoundError();
+      }
+    } else if (String(project.createdBy) !== String(userId)) {
+      throw makeProjectNotFoundError();
+    }
+  }
+
+  let defaultBoardId = null;
+  if (informationLevel !== 'summary') {
+    if (!defaultBoardDoc) {
+      defaultBoardDoc = await TaskBoard.findOne({ projectId, isActive: true })
+        .sort({ createdAt: 1 })
+        .select('_id')
+        .lean();
+    }
+    defaultBoardId = defaultBoardDoc ? String(defaultBoardDoc._id) : null;
+  }
+
+  return {
+    project: {
+      ...project,
+      projectId: String(project._id),
+      defaultBoardId,
+      access: access || { informationLevel },
+    },
+    informationLevel,
+    defaultBoardId,
+    access,
+  };
+}
+
 async function getProject({ userId, projectId }) {
   const { makeProjectNotFoundError } = require('../utils/project/projectNotFoundError');
   await alignOneProjectStatusToPhase(projectId);
@@ -1062,12 +1165,10 @@ async function attachProjectCapabilities(payload, userId, projectId) {
   let hasAnalysisTechReviewer = false;
   let hasPlanningTechReviewer = false;
   try {
-    const {
-      projectHasAnalysisTechReviewer,
-      projectHasPlanningTechReviewer,
-    } = require('../utils/phase1GatePolicy');
-    hasAnalysisTechReviewer = await projectHasAnalysisTechReviewer(projectId);
-    hasPlanningTechReviewer = await projectHasPlanningTechReviewer(projectId);
+    const { projectTechReviewerFlags } = require('../utils/phase1GatePolicy');
+    const flags = await projectTechReviewerFlags(projectId);
+    hasAnalysisTechReviewer = Boolean(flags?.hasAnalysisTechReviewer);
+    hasPlanningTechReviewer = Boolean(flags?.hasPlanningTechReviewer);
   } catch {
     /* non-blocking */
   }
@@ -1148,8 +1249,8 @@ async function attachProjectCapabilities(payload, userId, projectId) {
   };
 }
 
-async function listProjectMembersForUser({ userId, projectId }) {
-  const project = await getProject({ userId, projectId });
+async function listProjectMembersForUser({ userId, projectId, view = null, weekKey = null } = {}) {
+  const { makeProjectNotFoundError } = require('../utils/project/projectNotFoundError');
   const { isProjectRbacEnabled } = require('../utils/project/projectPermissionMatrix');
   if (isProjectRbacEnabled()) {
     const { assertUserAnyProjectPermission } = require('./projectAccess.service');
@@ -1160,8 +1261,18 @@ async function listProjectMembersForUser({ userId, projectId }) {
       message: 'Không có quyền xem thành viên dự án (members:view)',
     });
   }
+  const project = await Project.findById(projectId)
+    .select('_id organizationId createdBy isActive')
+    .lean();
+  if (!project || project.isActive === false) {
+    throw makeProjectNotFoundError();
+  }
+  // Non-RBAC path still needs discoverability — reuse light read context.
+  if (!isProjectRbacEnabled()) {
+    await loadProjectReadContext({ userId, projectId });
+  }
   const { listProjectMemberships } = require('./projectTeam.service');
-  const rows = await listProjectMemberships(projectId);
+  let rows = await listProjectMemberships(projectId);
   const { omitMemberEmails, canSeeMemberEmails } = require('../utils/project/projectMemberEmailOmit');
   let membershipRole = '';
   try {
@@ -1177,7 +1288,20 @@ async function listProjectMembersForUser({ userId, projectId }) {
     canAdminProject: canAdmin,
     membershipRole,
   });
-  return allowEmail ? rows : omitMemberEmails(rows);
+  rows = allowEmail ? rows : omitMemberEmails(rows);
+
+  const viewKey = String(view || '').trim().toLowerCase();
+  if (viewKey === 'forecastload') {
+    const { enrichMembersWithForecastLoad } = require('./projectMemberForecastLoad.service');
+    rows = await enrichMembersWithForecastLoad({
+      projectId: project._id || project.id || projectId,
+      organizationId: project.organizationId,
+      members: rows,
+      weekKey,
+    });
+  }
+
+  return rows;
 }
 
 async function userCanAdminProject(userId, project) {
@@ -1808,8 +1932,10 @@ async function countPlanningByType({ projectId }) {
 }
 
 async function getProjectOverview({ userId, projectId }) {
-  const project = await getProject({ userId, projectId });
-  const informationLevel = String(project.access?.informationLevel || 'details').toLowerCase();
+  const { project, informationLevel, defaultBoardId: ctxBoardId } = await loadProjectReadContext({
+    userId,
+    projectId,
+  });
   const {
     buildProjectOverviewAggregate,
     slimOverviewProject,
@@ -1817,9 +1943,7 @@ async function getProjectOverview({ userId, projectId }) {
   const { resolveFeatureBoardListId } = require('../utils/work/planningBoardStatus');
   const { serializePriorityConfig } = require('../utils/project/priorityConfig');
 
-  const defaultBoardId = String(
-    project.defaultBoardId || project.boards?.[0]?._id || ''
-  ).trim();
+  const defaultBoardId = String(ctxBoardId || project.defaultBoardId || '').trim();
   let lists = [];
   let cards = [];
   let sprints = [];
@@ -1894,8 +2018,14 @@ async function getProjectOverview({ userId, projectId }) {
   });
   aggregate.planningPulse = planningPulse;
 
+  // Caps/CTA từ GET ?view=hub — omit capabilities / boards trên overview slim.
   return {
-    project: slimOverviewProject({ ...project, priorityConfig }),
+    project: slimOverviewProject({
+      ...project,
+      priorityConfig,
+      capabilities: undefined,
+      boards: undefined,
+    }),
     ...aggregate,
   };
 }

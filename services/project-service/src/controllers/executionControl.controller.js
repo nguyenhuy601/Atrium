@@ -152,14 +152,29 @@ async function scanProject(req, res) {
   try {
     const Task = require('../models/Task');
     const Sprint = require('../models/Sprint');
+    const Project = require('../models/Project');
+    const projectId = req.params.projectId;
+    // JWT/admin thường không có organizationId — resolve từ project (cùng pattern createIncident).
+    let organizationId = orgId(req);
+    if (!organizationId) {
+      const project = await Project.findById(projectId).select('organizationId').lean();
+      organizationId = project?.organizationId ? String(project.organizationId) : null;
+    }
+    if (!organizationId) {
+      return sendServiceError(res, 400, {
+        errorCode: 'VALIDATION_REQUIRED',
+        message: 'organizationId required',
+        messageUser: 'Thiếu organizationId của dự án.',
+      });
+    }
     const tasks = await Task.find({
-      projectId: req.params.projectId,
-      organizationId: orgId(req),
+      projectId,
+      organizationId,
       isActive: true,
     })
       .limit(500)
       .lean();
-    const sprints = await Sprint.find({ projectId: req.params.projectId }).lean();
+    const sprints = await Sprint.find({ projectId }).lean();
     const sprintById = new Map(sprints.map((s) => [String(s._id), s]));
     const results = [];
     for (const task of tasks) {

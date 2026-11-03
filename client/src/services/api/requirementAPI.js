@@ -186,6 +186,11 @@ export const requirementAPI = {
       withOrg(organizationId)
     ),
 
+  /**
+   * Start / re-run WHAT or HOW.
+   * HOW selective: { phase:'how', force:true, rerunTools:['WbsTool'] } — server expands cascade.
+   * Full HOW: { phase:'how', force:true } (no rerunTools).
+   */
   startPhaseAiPlanning: (organizationId, packId, body = {}, options = {}) => {
     const idempotencyKey =
       options.idempotencyKey ||
@@ -225,7 +230,7 @@ export const requirementAPI = {
       `/projects/requirements/${encodeURIComponent(packId)}/ai-analysis/phase-run`,
       {
         phase: 'what',
-        mode: 'g4',
+        mode: 'requirement',
         action: 'resume_data_gate',
         decision,
         runId,
@@ -237,10 +242,9 @@ export const requirementAPI = {
     ),
 
   /**
-   * In-run HITL resume (clarify | edit_draft | wbs_confirm | fr_confirm). Not Gate 1/2 stamp.
+   * In-run HITL resume (clarify | edit_draft | wbs_confirm). Not Gate 1/2 stamp.
    * wbs_confirm + resume.action=confirm pins WBS baseline then resumes HOW.
-   * fr_confirm + resume.action=confirm pins FR baseline then resumes WHAT (UC/Data).
-   * *_confirm + resume.action=save_edit records Pack change event only.
+   * wbs_confirm + resume.action=save_edit records Pack change event only.
    */
   resumeInRunHitl: (organizationId, packId, { runId, kind, resume = {}, phase = 'how' }) =>
     apiClient.post(

@@ -281,8 +281,8 @@ function buildBgDeriveInput(pack, opts = {}) {
 
   const requirements = selectFrForBg(merged, brqAll).map(({ _requestId, ...rest }) => rest);
   const understanding = opts.frUnderstanding || opts.understanding || null;
-  const businessThemes = buildBusinessThemes(requirements, g4);
-  const evidenceRefs = asArray(opts.evidence || g4?.evidence)
+  const businessThemes = buildBusinessThemes(requirements, understanding);
+  const evidenceRefs = asArray(opts.evidence || understanding?.evidence)
     .slice(0, BG_EVIDENCE_REF_CAP)
     .map(slimEvidenceRefOnly)
     .filter((e) => e.refId || e.frId);

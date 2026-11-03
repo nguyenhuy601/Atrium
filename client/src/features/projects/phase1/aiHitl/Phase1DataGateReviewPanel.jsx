@@ -6,6 +6,7 @@ const SCROLL_GAP = 40;
 
 const QUALITY = [
   ['missingActor', 'requirements.phase1QualityMissingActor', 'Thiếu actor'],
+  ['missingOutcome', 'requirements.phase1QualityMissingOutcome', 'Thiếu mô tả hành vi'],
   ['missingAc', 'requirements.phase1QualityMissingAc', 'Thiếu AC'],
   ['thinText', 'requirements.phase1QualityThinText', 'Mô tả mỏng'],
   ['ambiguous', 'requirements.phase1QualityAmbiguous', 'Mơ hồ'],
@@ -52,6 +53,42 @@ function cellText(row, key, t) {
   return value ? String(value) : '';
 }
 
+function hasActor(row) {
+  if (Array.isArray(row?.actors) && row.actors.some((a) => String(a || '').trim())) return true;
+  return Boolean(String(row?.actor || '').trim());
+}
+
+function hasOutcome(row) {
+  return Boolean(
+    String(row?.description || '').trim() ||
+      String(row?.requirement || '').trim() ||
+      (Array.isArray(row?.actions) && row.actions.some((a) => String(a || '').trim()))
+  );
+}
+
+/** Prefer BE quality; fill actor/outcome from rows or import contentWarnings. */
+function resolveQuality(preview, rows, formValidation) {
+  const base = preview?.quality && typeof preview.quality === 'object' ? { ...preview.quality } : {};
+  let missingActor = Number(base.missingActor) || 0;
+  let missingOutcome = Number(base.missingOutcome) || 0;
+  if ((!missingActor || !missingOutcome) && Array.isArray(rows) && rows.length) {
+    let fromActor = 0;
+    let fromOutcome = 0;
+    for (const row of rows) {
+      if (!hasActor(row)) fromActor += 1;
+      if (!hasOutcome(row)) fromOutcome += 1;
+    }
+    if (!missingActor) missingActor = fromActor;
+    if (!missingOutcome) missingOutcome = fromOutcome;
+  }
+  const warnings = formValidation?.contentWarnings;
+  if (warnings && typeof warnings === 'object') {
+    if (!missingActor) missingActor = Number(warnings.missingActor) || 0;
+    if (!missingOutcome) missingOutcome = Number(warnings.missingOutcome) || 0;
+  }
+  return { ...base, missingActor, missingOutcome };
+}
+
 /**
  * Data Gate review body — reusable in modal or AI HITL page.
  * @param {{ active?: boolean }} props — when false, resets pagination (page: pass true when visible)
@@ -59,6 +96,7 @@ function cellText(row, key, t) {
 export default function Phase1DataGateReviewPanel({
   active = true,
   preview,
+  formValidation = null,
   busy = false,
   t,
   onLoadPage,
@@ -68,7 +106,6 @@ export default function Phase1DataGateReviewPanel({
   className = '',
 }) {
   const data = preview || {};
-  const quality = data.quality || {};
   const previewSeed = gatePreviewSeedKey(preview);
   const [rows, setRows] = useState([]);
   const [rowTotal, setRowTotal] = useState(0);
@@ -132,6 +169,8 @@ export default function Phase1DataGateReviewPanel({
     if (remaining <= SCROLL_GAP) appendPage(offsetRef.current);
   }, [appendPage]);
 
+  const quality = resolveQuality(data, rows, formValidation);
+
   return (
     <div className={className}>
       <p className="text-sm text-muted-foreground">
@@ -167,11 +206,20 @@ export default function Phase1DataGateReviewPanel({
         )}
       </p>
       <ul className="mt-3 flex flex-wrap gap-1.5">
-        {QUALITY.map(([key, i18nKey, fallback]) => (
-          <li key={key} className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground">
-            {labelOf(t, i18nKey, fallback)}: {Number(quality[key]) || 0}
-          </li>
-        ))}
+        {QUALITY.map(([key, i18nKey, fallback]) => {
+          const count = Number(quality[key]) || 0;
+          const softWarn = (key === 'missingActor' || key === 'missingOutcome') && count > 0;
+          return (
+            <li
+              key={key}
+              className={`rounded-full px-2 py-0.5 text-xs text-foreground ${
+                softWarn ? 'bg-amber-500/20' : 'bg-muted'
+              }`}
+            >
+              {labelOf(t, i18nKey, fallback)}: {count}
+            </li>
+          );
+        })}
       </ul>
       <div
         ref={scrollerRef}
