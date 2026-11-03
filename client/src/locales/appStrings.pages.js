@@ -344,7 +344,10 @@ export const pageStrings = {
       projectHubTabSettings: 'Cài đặt',
       projectHubTabChangeRequests: 'Yêu cầu thay đổi',
       projectHubTabExecutionControl: 'Giám sát thực thi',
-      executionControlScan: 'Quét dự án',
+      executionControlScan: 'Quét thủ công',
+      executionControlScanHint: 'Dự phòng — hệ thống đã tự quét khi cập nhật task và định kỳ.',
+      executionControlAutoHint:
+        'Tự phát hiện khi cập nhật board / remaining và quét định kỳ task quá hạn.',
       executionControlIssues: 'Issues',
       executionControlEmpty: 'Chưa có issue',
       executionControlRisks: 'Rủi ro',
@@ -7983,7 +7986,10 @@ export const pageStrings = {
       projectHubTabSettings: 'Settings',
       projectHubTabChangeRequests: 'Change Request',
       projectHubTabExecutionControl: 'Execution Control',
-      executionControlScan: 'Scan project',
+      executionControlScan: 'Manual scan',
+      executionControlScanHint: 'Fallback — the system already scans on task updates and on a schedule.',
+      executionControlAutoHint:
+        'Auto-detects on board/remaining updates and periodically scans overdue tasks.',
       executionControlIssues: 'Issues',
       executionControlEmpty: 'No issues yet',
       executionControlRisks: 'Risks',

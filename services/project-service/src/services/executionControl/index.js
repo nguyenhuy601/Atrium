@@ -12,6 +12,8 @@ const sprintGoal = require('./sprintGoal');
 const scopeChange = require('./scopeChange');
 const costVariance = require('./costVariance');
 const proposeHeuristic = require('./proposeHeuristic');
+const triggers = require('./triggers');
+const outboxProcessor = require('./outboxProcessor');
 
 module.exports = {
   ...constants,
@@ -28,4 +30,6 @@ module.exports = {
   ...scopeChange,
   ...costVariance,
   ...proposeHeuristic,
+  ...triggers,
+  ...outboxProcessor,
 };

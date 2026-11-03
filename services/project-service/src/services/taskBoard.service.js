@@ -2166,6 +2166,21 @@ async function moveTaskCard({ userId, card, cardId, toListId, position, index, o
       actorId: userId,
       changes: diffTaskFields(beforeMove, { listId: moved.listId, status: moved.status }),
     }).catch((err) => logger.warn('[task-board] work history failed: %s', err.message));
+    // Status/list change → EC scan
+    if (String(beforeMove.status || '') !== String(moved.status || '')) {
+      try {
+        const { enqueueTaskScanTriggerBestEffort } = require('./executionControl/triggers');
+        enqueueTaskScanTriggerBestEffort({
+          organizationId: board.organizationId,
+          projectId: board.projectId,
+          taskId: cardId,
+          origin: 'board',
+          reason: 'moveCard:status',
+        });
+      } catch {
+        /* EC optional */
+      }
+    }
   }
   return { ...moved, kind: 'task' };
 }
@@ -2599,6 +2614,34 @@ async function updateCard({
       actorId: userId,
       changes: diffTaskPatch(beforeDoc, next),
     });
+    // Execution Control: board mutate → outbox (worker scan)
+    try {
+      const {
+        shouldEnqueueFromPatch,
+        enqueueTaskScanTriggerBestEffort,
+      } = require('./executionControl/triggers');
+      const keys = Object.keys(next);
+      if (shouldEnqueueFromPatch(keys)) {
+        enqueueTaskScanTriggerBestEffort({
+          organizationId: board.organizationId,
+          projectId: board.projectId,
+          taskId: cardId,
+          origin: 'board',
+          reason: `updateCard:${keys.filter((k) =>
+            [
+              'dueDate',
+              'status',
+              'remainingHours',
+              'assigneeId',
+              'estimateHours',
+              'sprintId',
+            ].includes(k)
+          ).join(',')}`,
+        });
+      }
+    } catch {
+      /* EC optional */
+    }
   }
   return decorateCardScheduleWarnings(board.projectId, out);
 }

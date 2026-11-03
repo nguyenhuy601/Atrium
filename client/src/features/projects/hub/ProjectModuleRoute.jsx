@@ -3,7 +3,6 @@ import { useCallback, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import ProjectHubPage from '../../../pages/Projects/ProjectHubPage';
-import CollaborateRequirementsPage from '../../requirements/CollaborateRequirementsPage';
 import SpaceCalendarModule from '../../spaceModules/SpaceCalendarModule';
 import SpaceDocumentsModule from '../../spaceModules/SpaceDocumentsModule';
 import SpaceProjectChatModule from '../../spaceModules/SpaceProjectChatModule';
@@ -230,8 +229,6 @@ export default function ProjectModuleRoute() {
     );
   } else if (module === 'documents') {
     body = <SpaceDocumentsModule />;
-  } else if (module === 'requirements') {
-    body = <CollaborateRequirementsPage />;
   } else if (hubTab) {
     body = (
       <ProjectHubPage

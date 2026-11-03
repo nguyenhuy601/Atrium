@@ -37,7 +37,6 @@ export const PROJECT_MODULE_KEYS = [
   'change-requests',
   'execution-control',
   'test-cases',
-  'requirements',
   'files',
   'chat',
   'calendar',
@@ -109,7 +108,6 @@ export const MODULE_TO_HUB_TAB = {
   files: 'files',
   activity: 'activity',
   settings: 'settings',
-  requirements: 'requirements',
   calendar: 'calendar',
   documents: 'documents',
 };
@@ -313,7 +311,6 @@ export function getProjectsPostSelectNavItems(projectId, opts = {}) {
       'test-cases',
       PROJECT_MENU_GROUPS.WORK
     ),
-    item('requirements', 'nav.requirements', 'requirements', PROJECT_MENU_GROUPS.WORK),
     item('members', 'workspace.projectHubTabMembers', 'members', PROJECT_MENU_GROUPS.OPS),
     item('files', 'workspace.projectHubTabFiles', 'files', PROJECT_MENU_GROUPS.WORK),
     item('activity', 'workspace.projectHubTabReport', 'activity', PROJECT_MENU_GROUPS.OPS),

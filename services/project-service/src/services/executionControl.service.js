@@ -81,6 +81,19 @@ async function confirmTaskRemaining(taskId, { remainingHours, userId, organizati
     origin: 'board',
     payload: { taskId: String(task._id) },
   });
+  // Đồng thời coalesce scan_requested để worker detect AT_RISK ngay.
+  try {
+    const { enqueueTaskScanTrigger } = require('./executionControl/triggers');
+    await enqueueTaskScanTrigger({
+      organizationId,
+      projectId: task.projectId,
+      taskId: task._id,
+      origin: 'board',
+      reason: 'remaining_confirmed',
+    });
+  } catch {
+    /* non-fatal */
+  }
   return task;
 }
 
@@ -226,7 +239,11 @@ async function scanTask(task, ctx = {}) {
     issues.push(issue);
   }
 
-  if (shouldStartAnalyzeFromOrigin(ctx.origin || 'scheduler')) {
+  // Worker path sets enqueueAnalyze:false để tránh vòng scan→analyze→scan.
+  if (
+    ctx.enqueueAnalyze !== false &&
+    shouldStartAnalyzeFromOrigin(ctx.origin || 'scheduler')
+  ) {
     await enqueueOutboxEvent({
       organizationId: task.organizationId,
       projectId: task.projectId,

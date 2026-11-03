@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Check, Download, FolderPlus, Trash2, X } from 'lucide-react';
+import { Check, Download, FolderPlus, X } from 'lucide-react';
 
 import GradientButton from '../../components/Shared/GradientButton';
 import BrandPageLoader from '../../components/Shared/BrandPageLoader';
@@ -27,7 +27,7 @@ function unwrap(res) {
 }
 
 /**
- * Drawer to review a requirement pack (Tree + Excel) with optional approve/reject / create project / AI Analysis.
+ * Drawer to review a requirement pack (Tree + Excel) with optional approve/reject / create project / AI planning.
  */
 export default function RequirementPackReviewDrawer({
   open = false,
@@ -38,7 +38,6 @@ export default function RequirementPackReviewDrawer({
   canRunAiPlanning = false,
   onClose = null,
   onChanged = null,
-  onDeletePack = null,
 }) {
   const { t } = useAppStrings();
   const { requestNote, noteDialog } = useReviewNotePrompt();
@@ -89,8 +88,7 @@ export default function RequirementPackReviewDrawer({
   const showApprove =
     canApprove && pack?.status === 'under_review' && reviewLane === REVIEW_LANE.PO;
   const showCreateProject = canCreateFromPack && pack?.status === 'approved';
-  const showDelete = canApprove && pack?.status === 'approved';
-  const showFooter = showApprove || showCreateProject || showDelete;
+  const showFooter = showApprove || showCreateProject;
   /** HOW phase panel only after Gate 1 (approved) — not during Gate 1 review. */
   const showHowPhase =
     canRunAiPlanning &&
@@ -456,17 +454,6 @@ export default function RequirementPackReviewDrawer({
               >
                 <FolderPlus className="h-4 w-4" />
                 {t('requirements.createProject')}
-              </GradientButton>
-            ) : null}
-            {showDelete && typeof onDeletePack === 'function' ? (
-              <GradientButton
-                variant="shell"
-                disabled={busy}
-                onClick={() => onDeletePack(pack)}
-                className="px-4 py-2 text-sm text-destructive"
-              >
-                <Trash2 className="h-4 w-4" />
-                {t('requirements.deletePack')}
               </GradientButton>
             ) : null}
           </footer>

@@ -146,7 +146,6 @@ const MODULE_ICONS = {
   board: LayoutGrid,
   timeline: GanttChart,
   changeRequests: FileSpreadsheet,
-  requirements: FileSpreadsheet,
   files: FileText,
   chat: MessageCircle,
   calendar: Calendar,

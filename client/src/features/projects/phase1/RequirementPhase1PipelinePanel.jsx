@@ -6,10 +6,7 @@ import { requirementAPI } from '../../../services/api/requirementAPI';
 import { useAppStrings } from '../../../locales/appStrings';
 import { resolveApiErrorMessage } from '../../../utils/resolveApiErrorMessage';
 import { buildPhase1ModulePath } from './nav/phase1NavConfig';
-import {
-  buildCollaborateRequirementsPath,
-  buildProjectsAiHitlPath,
-} from '../../../utils/suitePathUtils';
+import { buildProjectsAiHitlPath } from '../../../utils/suitePathUtils';
 import RequirementHitlJourney from '../../requirements/RequirementHitlJourney';
 import { waitForPhaseWhatJob } from './hooks/usePhaseWhatRunMonitor';
 import Phase1AiRequirementProgress from './Phase1AiRequirementProgress';
@@ -611,22 +608,6 @@ export default function RequirementPhase1PipelinePanel({
         >
           <ListChecks className="h-4 w-4" />
           {t('requirements.understandingEditArtifacts')}
-        </button>
-        <button
-          type="button"
-          disabled={!organizationId || !packId}
-          onClick={() =>
-            navigate(
-              buildCollaborateRequirementsPath(organizationId, {
-                packId,
-                projectId,
-              })
-            )
-          }
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted/50 disabled:opacity-40"
-        >
-          <Eye className="h-4 w-4" />
-          {t('requirements.phase1PreviewCta')}
         </button>
         {!gate1Done && stage2Meta?.done ? (
           <button

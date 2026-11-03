@@ -8,7 +8,6 @@ import {
   ChevronsRight,
   ClipboardList,
   FileText,
-  FileSpreadsheet,
   Home,
   LayoutDashboard,
   MessageCircle,
@@ -44,12 +43,10 @@ import {
   isImmersiveCompanyModulePath,
   buildCollaborateCalendarPath,
   buildCollaborateDocumentsPath,
-  buildCollaborateRequirementsPath,
   buildCollaborateTasksPath,
   getDefaultPathForSuite,
 } from '../../utils/suitePathUtils';
 import { COMPANY_SPACE_LEVEL } from '../../utils/companySpaceLevel';
-import useRequirementAccess from '../../hooks/useRequirementAccess';
 import VoiceHubAIPanel from './VoiceHubAIPanel';
 import { VH_NAV_CHEVRON } from '../../motion/classes';
 import useMotionPresence from '../../motion/useMotionPresence';
@@ -334,11 +331,6 @@ export default function FigmaNavigationSidebar({
   };
   // Approvers include IC project roles (TL/QA) — inbox ACL is server-side (canAct / requester)
   const showApprovalInbox = suiteProp === 'collaborate' || suiteProp === 'company';
-  const collaborateOrgId = suiteProp === 'collaborate' ? activeOrgId : '';
-  const { access: requirementAccess } = useRequirementAccess(collaborateOrgId);
-  // SoT: access API showCollaborateNav (Position.code / org role / project role — không jobTitle FE).
-  const showRequirementsNav =
-    suiteProp === 'collaborate' && Boolean(requirementAccess?.showCollaborateNav);
   const myStructureRole = String(
     company?.myStructureRole || activeWorkspace?.myStructureRole || ''
   ).toLowerCase();
@@ -504,15 +496,6 @@ export default function FigmaNavigationSidebar({
           badge: 0,
         });
       }
-      if (showRequirementsNav) {
-        items.push({
-          key: 'requirements',
-          icon: FileSpreadsheet,
-          label: t('nav.requirements'),
-          path: buildCollaborateRequirementsPath(activeOrgId),
-          badge: 0,
-        });
-      }
       // Legacy collaborate also exposed projects — company suite does not.
       if (suiteProp === 'collaborate') {
         items.splice(2, 0, {
@@ -550,7 +533,6 @@ export default function FigmaNavigationSidebar({
     isTeamLevel,
     isSingleCompany,
     showApprovalInbox,
-    showRequirementsNav,
     showAdminSuite,
     adminNavLabel,
     adminNavPath,
@@ -621,9 +603,6 @@ export default function FigmaNavigationSidebar({
       }
       if (item.key === 'documents') {
         return path === '/app/collaborate/documents' || path === '/app/company/documents';
-      }
-      if (item.key === 'requirements') {
-        return path.includes('/requirements');
       }
       if (item.key === 'calendar') {
         return path === '/app/collaborate/calendar' || path === '/app/company/calendar';

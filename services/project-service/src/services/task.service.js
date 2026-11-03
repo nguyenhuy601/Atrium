@@ -452,6 +452,28 @@ class TaskService {
         });
       }
 
+      // Execution Control: task mutate → outbox
+      if (task.projectId && task.organizationId) {
+        try {
+          const {
+            shouldEnqueueFromPatch,
+            enqueueTaskScanTriggerBestEffort,
+          } = require('./executionControl/triggers');
+          const keys = Object.keys(updateFields);
+          if (shouldEnqueueFromPatch(keys)) {
+            enqueueTaskScanTriggerBestEffort({
+              organizationId: task.organizationId,
+              projectId: task.projectId,
+              taskId,
+              origin: 'board',
+              reason: `updateTask:${keys.slice(0, 6).join(',')}`,
+            });
+          }
+        } catch {
+          /* EC optional */
+        }
+      }
+
       logger.info(`Task updated: ${taskId}`);
       return await toClientTask(updated);
     } catch (error) {

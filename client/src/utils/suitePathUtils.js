@@ -372,16 +372,9 @@ export function buildCollaborateWorkspacePath(opts = {}) {
   return buildCompanyWorkspacePath(opts);
 }
 
-export function buildCollaborateRequirementsPath(orgId = '', query = {}) {
-  const projectId = String(query?.projectId || '').trim();
-  if (projectId) {
-    return buildProjectsModulePath(projectId, 'requirements', { organizationId: orgId });
-  }
-  const base = appendOrgQuery('/app/projects/requirements', orgId);
-  const packId = String(query?.packId || '').trim();
-  if (!packId) return base;
-  const sep = base.includes('?') ? '&' : '?';
-  return `${base}${sep}packId=${encodeURIComponent(packId)}`;
+/** @deprecated Collaborate Requirements page removed — redirects to project picker. */
+export function buildCollaborateRequirementsPath(orgId = '', _query = {}) {
+  return buildProjectsPickerPath(orgId);
 }
 
 export function buildCollaborateOrgNotificationsPath(orgId = '') {
@@ -563,7 +556,7 @@ export function mapCollaboratePathToDualSuite(pathname, search = '') {
     return buildProjectsPickerPath(orgId);
   }
   if (path.startsWith('/app/collaborate/requirements')) {
-    return appendOrgQuery('/app/projects/requirements', orgId);
+    return buildProjectsPickerPath(orgId);
   }
   return `/app/company/home${qs()}`;
 }

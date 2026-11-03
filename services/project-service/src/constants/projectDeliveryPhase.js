@@ -46,7 +46,6 @@ const DEVELOPMENT_MODULES = Object.freeze([
   'timeline',
   'change-requests',
   'test-cases',
-  'requirements',
   'members',
   'files',
   'activity',
@@ -99,7 +98,6 @@ const REQUIREMENT_ANALYSIS_MODULES = Object.freeze([
   'traceability',
   'analysis-reviews',
   'srs-baselines',
-  'requirements',
   /** Planning visible but locked at FE until Start Planning */
   ...PLANNING_SUBMODULES,
   ...COLLAB_MIN,
@@ -121,7 +119,6 @@ const DELIVERY_PLANNING_MODULES = Object.freeze([
   'customer-baselines',
   'customer-planning',
   'delivery-planning',
-  'requirements',
   ...PLANNING_SUBMODULES,
   'planning',
   'timeline',

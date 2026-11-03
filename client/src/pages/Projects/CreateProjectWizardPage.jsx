@@ -8,7 +8,6 @@ import {
   buildProjectsModulePath,
   buildProjectsAiHitlPath,
   buildProjectsPickerPath,
-  buildCollaborateRequirementsPath,
   readStoredLastOrganizationId,
 } from '../../utils/suitePathUtils';
 import { useWorkspace } from '../../context/WorkspaceContext';
@@ -117,8 +116,6 @@ export default function CreateProjectWizardPage() {
       goAiHitl({ projectId, boardId, packId });
     } else if (projectId) {
       goPhase1Overview({ projectId, boardId, packId });
-    } else if (packId) {
-      navigate(buildCollaborateRequirementsPath(organizationId, { packId }), { replace: true });
     } else {
       navigate(projectsPickerPath, { replace: true });
     }

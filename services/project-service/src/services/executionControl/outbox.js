@@ -40,13 +40,21 @@ async function enqueueOutboxEvent({
 
 /**
  * Claim pending events for worker (at-least-once).
+ * Atomically pending → published để nhiều replica không lấy trùng.
  */
 async function claimPendingEvents({ limit = 20 } = {}) {
-  const rows = await ExecutionOutbox.find({ status: 'pending' })
-    .sort({ createdAt: 1 })
-    .limit(limit)
-    .lean();
-  return rows;
+  const max = Math.max(1, Math.min(100, Math.floor(Number(limit) || 20)));
+  const claimed = [];
+  for (let i = 0; i < max; i += 1) {
+    const doc = await ExecutionOutbox.findOneAndUpdate(
+      { status: 'pending' },
+      { $set: { status: 'published' }, $inc: { attempts: 1 } },
+      { sort: { createdAt: 1 }, returnDocument: 'after' }
+    ).lean();
+    if (!doc) break;
+    claimed.push(doc);
+  }
+  return claimed;
 }
 
 async function markOutboxProcessed(eventId, { failed = false, error = '' } = {}) {
@@ -59,7 +67,9 @@ async function markOutboxProcessed(eventId, { failed = false, error = '' } = {})
         $set: { status: 'processed', processedAt: new Date() },
         $inc: { attempts: 1 },
       };
-  return ExecutionOutbox.findOneAndUpdate({ eventId }, update, { new: true }).lean();
+  return ExecutionOutbox.findOneAndUpdate({ eventId }, update, {
+    returnDocument: 'after',
+  }).lean();
 }
 
 /** RULE-EC-08: system_apply / forecast_recompute should not re-propose unless new kind / follow-up fail */

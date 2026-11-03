@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStrings } from '../../../../locales/appStrings';
 import projectAPI from '../../../../services/api/projectAPI';
+import {
+  isScrollNearBottom,
+  listViewportNeedsMoreRoots,
+  nextRootLimit,
+} from '../projectHubListLazy';
 import {
   EvidenceList,
   FollowUpResultsList,
@@ -8,6 +13,9 @@ import {
   ProposalActionsList,
   ProposalEvidenceRefs,
 } from './executionControlDisplay';
+
+/** Infinite scroll Issues (client reveal) — row ngắn hơn List tree root. */
+const EXECUTION_ISSUE_PAGE_SIZE = 15;
 
 /**
  * Control Tower MVP — issue → evidence → goal impact → proposal → approve → follow-up.
@@ -23,6 +31,8 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
   const [incidentForm, setIncidentForm] = useState({ title: '', description: '', kind: 'other' });
   const [busy, setBusy] = useState(false);
   const [scanSummary, setScanSummary] = useState('');
+  const [visibleIssueLimit, setVisibleIssueLimit] = useState(EXECUTION_ISSUE_PAGE_SIZE);
+  const issuesScrollRef = useRef(null);
 
   const load = useCallback(async () => {
     if (!projectId || !listActive) return;
@@ -45,6 +55,63 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Soft poll — worker/scheduler có thể tạo issue nền; không phụ thuộc nút Quét.
+  useEffect(() => {
+    if (!listActive || !projectId) return undefined;
+    const id = setInterval(() => {
+      void load();
+    }, 30000);
+    return () => clearInterval(id);
+  }, [listActive, projectId, load]);
+
+  useEffect(() => {
+    setVisibleIssueLimit(EXECUTION_ISSUE_PAGE_SIZE);
+  }, [projectId]);
+
+  const visibleIssues = useMemo(
+    () => (Array.isArray(issues) ? issues : []).slice(0, visibleIssueLimit),
+    [issues, visibleIssueLimit]
+  );
+  const issueTotal = Array.isArray(issues) ? issues.length : 0;
+  const hasMoreIssues = visibleIssueLimit < issueTotal;
+
+  // Scroll gần đáy khung Issues → reveal thêm page.
+  useEffect(() => {
+    if (!listActive) return undefined;
+    const el = issuesScrollRef.current;
+    if (!el) return undefined;
+    const onScroll = () => {
+      if (!hasMoreIssues) return;
+      if (!isScrollNearBottom(el, 80)) return;
+      setVisibleIssueLimit((prev) => nextRootLimit(prev, issueTotal, EXECUTION_ISSUE_PAGE_SIZE));
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [listActive, hasMoreIssues, issueTotal]);
+
+  // Viewport chưa tràn → auto reveal để có thanh kéo (cùng pattern List).
+  useEffect(() => {
+    if (!listActive || !hasMoreIssues) return undefined;
+    const el = issuesScrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const revealIfShort = () => {
+      if (
+        !listViewportNeedsMoreRoots({
+          scrollHeight: el.scrollHeight,
+          clientHeight: el.clientHeight,
+          hasMoreRoots: true,
+        })
+      ) {
+        return;
+      }
+      setVisibleIssueLimit((prev) => nextRootLimit(prev, issueTotal, EXECUTION_ISSUE_PAGE_SIZE));
+    };
+    revealIfShort();
+    const observer = new ResizeObserver(() => revealIfShort());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [listActive, hasMoreIssues, issueTotal, visibleIssueLimit, visibleIssues.length]);
 
   const openIssue = async (id) => {
     setSelected(id);
@@ -121,14 +188,20 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-bold text-foreground">
-          {t('workspace.projectHubTabExecutionControl')}
-        </h3>
+        <div className="min-w-0">
+          <h3 className="text-sm font-bold text-foreground">
+            {t('workspace.projectHubTabExecutionControl')}
+          </h3>
+          <p className="text-[11px] text-muted-foreground">
+            {t('workspace.executionControlAutoHint')}
+          </p>
+        </div>
         <button
           type="button"
-          className="vh-motion-btn rounded-md border border-border px-3 py-1.5 text-xs"
+          className="vh-motion-btn shrink-0 rounded-md border border-border px-3 py-1.5 text-xs"
           disabled={busy}
           onClick={runScan}
+          title={t('workspace.executionControlScanHint')}
         >
           {t('workspace.executionControlScan')}
         </button>
@@ -147,88 +220,104 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
       {loading ? <p className="text-xs text-muted-foreground">…</p> : null}
 
       <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-2">
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto rounded-md border border-border p-2">
-          <p className="text-xs font-semibold text-muted-foreground">
+        <div className="flex min-h-0 flex-col gap-2 overflow-hidden rounded-md border border-border p-2">
+          <p className="shrink-0 text-xs font-semibold text-muted-foreground">
             {t('workspace.executionControlIssues')}
+            {issueTotal > 0 ? (
+              <span className="ml-1 font-normal">
+                ({Math.min(visibleIssueLimit, issueTotal)}/{issueTotal})
+              </span>
+            ) : null}
           </p>
-          {(issues || []).length === 0 ? (
+          {issueTotal === 0 ? (
             <p className="text-xs text-muted-foreground">{t('workspace.executionControlEmpty')}</p>
           ) : (
-            <ul className="space-y-1">
-              {issues.map((iss) => (
-                <li key={String(iss._id)}>
-                  <button
-                    type="button"
-                    className={`vh-motion-row w-full rounded px-2 py-1.5 text-left text-xs ${
-                      selected === String(iss._id) ? 'bg-muted' : ''
-                    }`}
-                    onClick={() => openIssue(String(iss._id))}
-                  >
-                    <span className="font-medium">{iss.kind}</span>
-                    <span className="mx-1 text-muted-foreground">·</span>
-                    <span>{iss.status}</span>
-                    <div className="truncate text-muted-foreground">{iss.title}</div>
-                    {iss.needsData ? (
-                      <span className="text-[10px] text-amber-700">NEEDS_DATA</span>
-                    ) : null}
-                    {iss.impactStatus && iss.impactStatus !== 'FULL' ? (
-                      <span className="ml-1 text-[10px] text-amber-700">{iss.impactStatus}</span>
-                    ) : null}
-                  </button>
+            <div
+              ref={issuesScrollRef}
+              className="min-h-0 flex-1 overflow-y-auto"
+              data-testid="execution-control-issues-scroll"
+            >
+              <ul className="space-y-1">
+                {visibleIssues.map((iss) => (
+                  <li key={String(iss._id)}>
+                    <button
+                      type="button"
+                      className={`vh-motion-row w-full rounded px-2 py-1.5 text-left text-xs ${
+                        selected === String(iss._id) ? 'bg-muted' : ''
+                      }`}
+                      onClick={() => openIssue(String(iss._id))}
+                    >
+                      <span className="font-medium">{iss.kind}</span>
+                      <span className="mx-1 text-muted-foreground">·</span>
+                      <span>{iss.status}</span>
+                      <div className="truncate text-muted-foreground">{iss.title}</div>
+                      {iss.needsData ? (
+                        <span className="text-[10px] text-amber-700">NEEDS_DATA</span>
+                      ) : null}
+                      {iss.impactStatus && iss.impactStatus !== 'FULL' ? (
+                        <span className="ml-1 text-[10px] text-amber-700">{iss.impactStatus}</span>
+                      ) : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {hasMoreIssues ? (
+                <p className="py-2 text-center text-[10px] text-muted-foreground">…</p>
+              ) : null}
+            </div>
+          )}
+
+          <div className="shrink-0 space-y-2 border-t border-border pt-2">
+            <p className="text-xs font-semibold text-muted-foreground">
+              {t('workspace.executionControlRisks')}
+            </p>
+            <ul className="max-h-28 space-y-1 overflow-y-auto">
+              {(risks || []).map((r) => (
+                <li
+                  key={String(r._id)}
+                  className="flex items-center justify-between gap-2 rounded px-2 py-1 text-xs"
+                >
+                  <span className="truncate">
+                    {r.title} <span className="text-muted-foreground">({r.status})</span>
+                  </span>
+                  {r.status !== 'occurred' && r.status !== 'closed' ? (
+                    <button
+                      type="button"
+                      className="vh-motion-btn shrink-0 rounded border border-border px-2 py-0.5"
+                      disabled={busy}
+                      onClick={() => confirmRisk(String(r._id))}
+                    >
+                      {t('workspace.executionControlConfirmRisk')}
+                    </button>
+                  ) : null}
                 </li>
               ))}
             </ul>
-          )}
 
-          <p className="mt-3 text-xs font-semibold text-muted-foreground">
-            {t('workspace.executionControlRisks')}
-          </p>
-          <ul className="space-y-1">
-            {(risks || []).map((r) => (
-              <li
-                key={String(r._id)}
-                className="flex items-center justify-between gap-2 rounded px-2 py-1 text-xs"
+            <form onSubmit={submitIncident} className="space-y-1 border-t border-border pt-2">
+              <p className="text-xs font-semibold">{t('workspace.executionControlReportIncident')}</p>
+              <input
+                className="w-full rounded border border-border bg-background px-2 py-1 text-xs"
+                placeholder={t('workspace.executionControlIncidentTitle')}
+                value={incidentForm.title}
+                onChange={(ev) => setIncidentForm((s) => ({ ...s, title: ev.target.value }))}
+              />
+              <textarea
+                className="w-full rounded border border-border bg-background px-2 py-1 text-xs"
+                rows={2}
+                placeholder={t('workspace.executionControlIncidentDesc')}
+                value={incidentForm.description}
+                onChange={(ev) => setIncidentForm((s) => ({ ...s, description: ev.target.value }))}
+              />
+              <button
+                type="submit"
+                className="vh-motion-btn rounded-md border border-border px-3 py-1 text-xs"
+                disabled={busy}
               >
-                <span className="truncate">
-                  {r.title} <span className="text-muted-foreground">({r.status})</span>
-                </span>
-                {r.status !== 'occurred' && r.status !== 'closed' ? (
-                  <button
-                    type="button"
-                    className="vh-motion-btn shrink-0 rounded border border-border px-2 py-0.5"
-                    disabled={busy}
-                    onClick={() => confirmRisk(String(r._id))}
-                  >
-                    {t('workspace.executionControlConfirmRisk')}
-                  </button>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-
-          <form onSubmit={submitIncident} className="mt-3 space-y-1 border-t border-border pt-2">
-            <p className="text-xs font-semibold">{t('workspace.executionControlReportIncident')}</p>
-            <input
-              className="w-full rounded border border-border bg-background px-2 py-1 text-xs"
-              placeholder={t('workspace.executionControlIncidentTitle')}
-              value={incidentForm.title}
-              onChange={(ev) => setIncidentForm((s) => ({ ...s, title: ev.target.value }))}
-            />
-            <textarea
-              className="w-full rounded border border-border bg-background px-2 py-1 text-xs"
-              rows={2}
-              placeholder={t('workspace.executionControlIncidentDesc')}
-              value={incidentForm.description}
-              onChange={(ev) => setIncidentForm((s) => ({ ...s, description: ev.target.value }))}
-            />
-            <button
-              type="submit"
-              className="vh-motion-btn rounded-md border border-border px-3 py-1 text-xs"
-              disabled={busy}
-            >
-              {t('workspace.executionControlSubmitIncident')}
-            </button>
-          </form>
+                {t('workspace.executionControlSubmitIncident')}
+              </button>
+            </form>
+          </div>
         </div>
 
         <div className="min-h-0 overflow-y-auto rounded-md border border-border p-3 text-xs">
