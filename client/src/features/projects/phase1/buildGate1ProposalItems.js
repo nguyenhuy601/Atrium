@@ -254,21 +254,6 @@ export function buildGate1ProposalItems(opts = {}) {
     enrichFrAcFromPack(bySection, pack);
   }
 
-  // FR may be empty while other sections exist (empty fragment wiped FR). Always backfill FR.
-  if (!(bySection.functionalRequirements || []).length) {
-    const frs = Array.isArray(pack?.functionalRequirements) ? pack.functionalRequirements : [];
-    const gateRows = Array.isArray(pack?.liveRun?.gatePreview?.rows)
-      ? pack.liveRun.gatePreview.rows
-      : [];
-    const source = frs.length ? frs : gateRows;
-    if (source.length) {
-      bySection.functionalRequirements = source.map((row, i) =>
-        mapItem(row, 'functionalRequirements', i, epicById)
-      );
-      enrichFrAcFromPack(bySection, pack);
-    }
-  }
-
 
 
   const gapBySection = Object.fromEntries(

@@ -56,6 +56,7 @@ export function resolveMonitorHeroText(activity, currentIds, t) {
  *   heroText: string,
  *   showSpinner?: boolean,
  *   t: function,
+ *   variant?: 'inline' | 'overlay',
  * }} props
  */
 export default function MonitorRunLoadingCard({
@@ -65,6 +66,7 @@ export default function MonitorRunLoadingCard({
   heroText,
   showSpinner = true,
   t,
+  variant = 'inline',
 }) {
   const safeTotal = Number(total) > 0 ? Number(total) : 0;
   const safeDone = Math.max(0, Math.min(Number(done) || 0, safeTotal || Number(done) || 0));
@@ -75,10 +77,14 @@ export default function MonitorRunLoadingCard({
           .replace('{done}', String(safeDone))
           .replace('{total}', String(safeTotal))
       : '';
+  const shellClass =
+    variant === 'overlay'
+      ? 'px-0 py-0'
+      : 'mt-3 rounded-lg border border-border/70 bg-muted/30 px-3 py-3';
 
   return (
     <div
-      className="mt-3 rounded-lg border border-border/70 bg-muted/30 px-3 py-3"
+      className={shellClass}
       role="status"
       aria-live="polite"
       aria-busy={showSpinner ? 'true' : undefined}

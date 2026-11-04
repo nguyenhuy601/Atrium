@@ -225,6 +225,7 @@ function LoginPage({ landingDemo = false } = {}) {
                   clearFieldError('password');
                 }}
                 className={`${fieldErrors.password ? inputInvalid : inputBase} pr-14`}
+                placeholder={t('login.placeholderPwd')}
                 autoComplete="current-password"
                 aria-invalid={fieldErrors.password ? 'true' : 'false'}
                 aria-describedby={passwordDescribedBy}

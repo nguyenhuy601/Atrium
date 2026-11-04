@@ -45,7 +45,12 @@ function NoAccessState() {
 
 export default function SystemConfigHubPanel({ orgId }) {
   const { t } = useAppStrings();
-  const { organization, refreshOrganization, orgId: ctxOrgId } = useCompanyAdminContext();
+  const {
+    organization,
+    organizationLoading,
+    refreshOrganization,
+    orgId: ctxOrgId,
+  } = useCompanyAdminContext();
   const { hasGrant } = useGrantScopes(orgId || ctxOrgId);
   const canConfigure = hasGrant('organization.structure.update') || hasGrant('organization.policy.update');
 
@@ -79,6 +84,9 @@ export default function SystemConfigHubPanel({ orgId }) {
           return <EffortEstimationSettingsPanel organizationId={orgId} />;
         }
         if (!canConfigure) return <NoAccessState />;
+        if (organizationLoading || !organization) {
+          return <p className="text-sm text-muted-foreground">{t('common.loading')}</p>;
+        }
         const lockTab = activeTab === TAB_STRUCTURE ? 'structure' : 'general';
         return <SettingsEmbed organization={organization} lockTab={lockTab} onUpdated={refreshOrganization} />;
       }}

@@ -338,6 +338,8 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
                   evidence={detail.evidence}
                   t={t}
                   emptyLabel={t('workspace.executionControlEvidenceEmpty')}
+                  resetKey={selected}
+                  listActive={listActive}
                 />
               </section>
               <section>

@@ -16,7 +16,14 @@ const {
 const { buildWhatRetrieveQuery } = require('./formatRetrievedContext');
 const { preGenerateContextCheck } = require('./preGenerateContextCheck');
 
-async function maybeIngest({ snapshot, snapshotId, corpus, mode, forceIngest }) {
+async function maybeIngest({
+  snapshot,
+  snapshotId,
+  corpus,
+  mode,
+  forceIngest,
+  priorCorpusHash,
+}) {
   if (forceIngest === false) return { skippedIngest: true };
   if (!(mode === 'qdrant' || mode === 'hybrid') || !snapshotId) {
     return { skippedIngest: true };
@@ -26,11 +33,34 @@ async function maybeIngest({ snapshot, snapshotId, corpus, mode, forceIngest }) 
     snapshot,
     snapshotId,
     corpus,
+    priorCorpusHash: priorCorpusHash || null,
   });
+}
+
+function emptyStubContextPackage({ query, mode, scope, taskPurpose, phase }) {
+  return {
+    query,
+    citations: [],
+    assembledAt: new Date().toISOString(),
+    mode: mode || 'stub',
+    stub: true,
+    retrievalStatus: 'ok',
+    evidenceStatus: 'insufficient',
+    cpQuality: 'insufficient',
+    scope,
+    skippedIngest: true,
+    cacheKey: buildRetrieveCacheKey({
+      ...(scope || {}),
+      query,
+      mode: mode || 'stub',
+      taskPurpose: taskPurpose || phase,
+    }),
+  };
 }
 
 /**
  * Prepare corpus + optional ingest + base contextPackage for a phase.
+ * Fast Start P1: conditional RAG — skip when not required; reuse artifact when query+corpus match.
  * @param {{
  *   phase: 'what'|'how',
  *   snapshot: object,
@@ -39,6 +69,10 @@ async function maybeIngest({ snapshot, snapshotId, corpus, mode, forceIngest }) 
  *   query?: string,
  *   env?: object,
  *   skipIngest?: boolean,
+ *   skipRetrieve?: boolean,
+ *   ragRequired?: boolean,
+ *   reuseContextPackage?: object|null,
+ *   priorCorpusHash?: string|null,
  * }} input
  */
 async function preparePhaseRagContext(input = {}) {
@@ -61,9 +95,113 @@ async function preparePhaseRagContext(input = {}) {
     scope,
   });
 
+  const query =
+    String(input.query || '').trim() ||
+    (phase === 'what'
+      ? buildWhatRetrieveQuery({
+          snapshot,
+          pack,
+          taskPurpose: input.taskPurpose || 'requirements',
+        })
+      : 'how planning');
+
+  const ragRequired =
+    input.ragRequired !== false && mode !== 'off' && mode !== 'stub';
+
+  // Explicit reuse from prior run / loop1 — no ingest, no retrieve.
+  if (
+    input.reuseContextPackage &&
+    typeof input.reuseContextPackage === 'object' &&
+    !input.forceRefreshContext
+  ) {
+    return {
+      corpus,
+      contextPackage: {
+        ...input.reuseContextPackage,
+        skippedIngest: true,
+        reused: true,
+      },
+      scope,
+      snapshotId,
+      phase,
+      retrievalStatus: input.reuseContextPackage.retrievalStatus || 'ok',
+      artifactRef: null,
+    };
+  }
+
+  if (!ragRequired) {
+    return {
+      corpus,
+      contextPackage: emptyStubContextPackage({
+        query,
+        mode,
+        scope,
+        taskPurpose: input.taskPurpose,
+        phase,
+      }),
+      scope,
+      snapshotId,
+      phase,
+      retrievalStatus: 'ok',
+      artifactRef: null,
+    };
+  }
+
+  const { computeCorpusContentHash } = require('./corpusContentHash');
+  const { embedVersion } = require('../runtime/ollamaEmbed');
+  const corpusContentHash = computeCorpusContentHash({
+    snapshotId,
+    embeddingVersion: embedVersion(env),
+    frs: Array.isArray(input.frOverride) ? input.frOverride : [],
+    docs: corpus,
+  });
+
+  const {
+    getPhaseContextArtifact,
+    putPhaseContextArtifact,
+  } = require('../knowledge/phaseContextArtifact');
+  const cachedArt = await getPhaseContextArtifact({
+    snapshotId,
+    corpusHash: corpusContentHash,
+    phase,
+    queryKey: query,
+    env,
+  });
+  if (cachedArt.hit && cachedArt.artifact?.contextPackage) {
+    console.info(
+      '[preparePhaseRagContext] artifact_hit phase=%s snapshotId=%s',
+      phase,
+      snapshotId
+    );
+    return {
+      corpus,
+      contextPackage: {
+        ...cachedArt.artifact.contextPackage,
+        skippedIngest: true,
+        reused: true,
+        artifactHit: true,
+      },
+      scope,
+      snapshotId,
+      phase,
+      retrievalStatus: cachedArt.artifact.contextPackage.retrievalStatus || 'ok',
+      artifactRef: {
+        snapshotId,
+        corpusHash: corpusContentHash,
+        phase,
+      },
+      corpusContentHash,
+    };
+  }
+
   let retrievalStatus = 'ok';
   let ingestWarning = null;
   let ingestResult = null;
+
+  const skipIngest =
+    Boolean(input.skipIngest) ||
+    (input.priorCorpusHash &&
+      String(input.priorCorpusHash) === String(corpusContentHash));
 
   try {
     ingestResult = await maybeIngest({
@@ -71,7 +209,9 @@ async function preparePhaseRagContext(input = {}) {
       snapshotId,
       corpus,
       mode,
-      forceIngest: input.skipIngest ? false : true,
+      forceIngest: skipIngest ? false : true,
+      // Only pass a *prior* hash from outside — never the just-computed current hash.
+      priorCorpusHash: skipIngest ? corpusContentHash : input.priorCorpusHash || null,
     });
   } catch (ingestErr) {
     ingestWarning = String(ingestErr?.message || ingestErr);
@@ -83,50 +223,51 @@ async function preparePhaseRagContext(input = {}) {
     console.warn('[preparePhaseRagContext] ingest', ingestWarning);
   }
 
-  const query =
-    String(input.query || '').trim() ||
-    (phase === 'what'
-      ? buildWhatRetrieveQuery({
-          snapshot,
-          pack,
-          taskPurpose: input.taskPurpose || 'requirements',
-        })
-      : 'how planning');
-
   let contextPackage;
-  try {
-    contextPackage = await assembleContextPackageAsync({
+  if (input.skipRetrieve) {
+    contextPackage = emptyStubContextPackage({
       query,
-      corpus: filterDocsForGenerate(corpus),
-      snapshotId,
-      snapshot,
-      mode: retrievalStatus === 'failed' ? 'keyword' : mode,
-      env,
+      mode,
       scope,
+      taskPurpose: input.taskPurpose,
+      phase,
     });
-  } catch (retrieveErr) {
-    retrievalStatus = retrievalStatus === 'failed' ? 'failed' : 'degraded';
-    ingestWarning = String(retrieveErr?.message || retrieveErr);
+    contextPackage.skippedRetrieve = true;
+  } else {
     try {
       contextPackage = await assembleContextPackageAsync({
         query,
         corpus: filterDocsForGenerate(corpus),
         snapshotId,
         snapshot,
-        mode: 'keyword',
+        mode: retrievalStatus === 'failed' ? 'keyword' : mode,
         env,
         scope,
       });
-    } catch (kwErr) {
-      retrievalStatus = 'failed';
-      contextPackage = {
-        query,
-        citations: [],
-        assembledAt: new Date().toISOString(),
-        mode: 'keyword',
-        stub: true,
-      };
-      ingestWarning = String(kwErr?.message || kwErr);
+    } catch (retrieveErr) {
+      retrievalStatus = retrievalStatus === 'failed' ? 'failed' : 'degraded';
+      ingestWarning = String(retrieveErr?.message || retrieveErr);
+      try {
+        contextPackage = await assembleContextPackageAsync({
+          query,
+          corpus: filterDocsForGenerate(corpus),
+          snapshotId,
+          snapshot,
+          mode: 'keyword',
+          env,
+          scope,
+        });
+      } catch (kwErr) {
+        retrievalStatus = 'failed';
+        contextPackage = {
+          query,
+          citations: [],
+          assembledAt: new Date().toISOString(),
+          mode: 'keyword',
+          stub: true,
+        };
+        ingestWarning = String(kwErr?.message || kwErr);
+      }
     }
   }
 
@@ -143,6 +284,7 @@ async function preparePhaseRagContext(input = {}) {
     evidenceStatus,
     cpQuality,
     scope,
+    corpusContentHash,
     cacheKey: buildRetrieveCacheKey({
       ...scope,
       query,
@@ -152,8 +294,28 @@ async function preparePhaseRagContext(input = {}) {
     ...(ingestWarning ? { ingestWarning } : {}),
     ...(ingestResult?.skippedIngest != null
       ? { skippedIngest: ingestResult.skippedIngest }
-      : {}),
+      : skipIngest
+        ? { skippedIngest: true }
+        : {}),
   };
+
+  const artifactRef = {
+    snapshotId,
+    corpusHash: corpusContentHash,
+    phase,
+  };
+  putPhaseContextArtifact({
+    snapshotId,
+    corpusHash: corpusContentHash,
+    phase,
+    queryKey: query,
+    artifact: {
+      contextPackage,
+      corpusContentHash,
+      query,
+    },
+    env,
+  }).catch(() => {});
 
   return {
     corpus,
@@ -162,6 +324,8 @@ async function preparePhaseRagContext(input = {}) {
     snapshotId,
     phase,
     retrievalStatus,
+    artifactRef,
+    corpusContentHash,
   };
 }
 

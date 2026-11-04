@@ -235,9 +235,14 @@ function buildFeatureSlices(pack, { maxItems = 200 } = {}) {
   return slices;
 }
 
-function buildProjectContextSlice(pack) {
+/**
+ * Overview-only project context for packContentHash (RULE-FS-03).
+ * Never include requirementTools / skillCatalog / intakeCorpus / prepare timestamps.
+ * @param {object} pack
+ */
+function buildProjectContentContextSlice(pack) {
   const o = pack?.overview || {};
-  const base = {
+  return {
     name: truncate(o.requirementName || '', CONTEXT_MAX),
     objective: truncate(o.projectObjective || '', CONTEXT_MAX),
     platform: Array.isArray(o.platform)
@@ -247,6 +252,17 @@ function buildProjectContextSlice(pack) {
         : [],
     priority: truncate(o.priority || '', 32) || undefined,
   };
+}
+
+/**
+ * Project context for AI prompts — may enrich with requirement tools when enabled.
+ * Pass `{ forContentHash: true }` to force overview-only (stable snapshot bind).
+ * @param {object} pack
+ * @param {{ forContentHash?: boolean }} [opts]
+ */
+function buildProjectContextSlice(pack, opts = {}) {
+  const base = buildProjectContentContextSlice(pack);
+  if (opts.forContentHash === true) return base;
   try {
     const {
       isRequirementAiContextEnabled,
@@ -268,6 +284,7 @@ module.exports = {
   expandFrIdSetWithSlices,
   buildModuleSlices,
   buildFeatureSlices,
+  buildProjectContentContextSlice,
   buildProjectContextSlice,
   truncate,
 };

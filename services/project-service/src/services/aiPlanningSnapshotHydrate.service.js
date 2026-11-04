@@ -7,12 +7,13 @@ const RequirementPack = require('../models/RequirementPack');
 const { buildPackObjectFromSnapshot } = require('../utils/aiAnalysis/pipeline/buildPipeline');
 
 /**
- * @param {{ snapshotId: string, packId: string, organizationId: string }} opts
+ * @param {{ snapshotId: string, packId: string, organizationId: string, projection?: string }} opts
  */
 async function hydrateAnalysisSnapshotForPlanning({
   snapshotId,
   packId,
   organizationId,
+  projection = 'full',
 }) {
   const sid = String(snapshotId || '').trim();
   const pid = String(packId || '').trim();
@@ -73,7 +74,7 @@ async function hydrateAnalysisSnapshotForPlanning({
     packId: pid,
   };
 
-  return {
+  const payload = {
     snapshotId: String(snapshotDoc._id),
     packId: pid,
     organizationId: orgId,
@@ -85,6 +86,8 @@ async function hydrateAnalysisSnapshotForPlanning({
       ? { overlayFrFromLive: true, overlayFrCount: overlayFrList.length }
       : { overlayFrFromLive: false },
   };
+  const { applyHydrateProjection } = require('../utils/aiAnalysis/hydrateProjection');
+  return applyHydrateProjection(payload, projection);
 }
 
 module.exports = {

@@ -290,6 +290,12 @@ function buildHowPhaseGraph(hooks = {}) {
     onProgress?.({ node: 'prepareHowContext', phase: 'how' });
     const { preparePhaseRagContext } = require('../retrieval/preparePhaseRagContext');
     const query = buildHowBacklogRetrieveQuery(state.pack || {});
+    const priorCp =
+      state.contextPackage &&
+      typeof state.contextPackage === 'object' &&
+      Array.isArray(state.contextPackage.citations)
+        ? state.contextPackage
+        : null;
     const prepared = await preparePhaseRagContext({
       phase: 'how',
       snapshot: state.snapshot,
@@ -297,6 +303,8 @@ function buildHowPhaseGraph(hooks = {}) {
       pack: state.pack,
       query,
       taskPurpose: 'how_backlog',
+      reuseContextPackage: priorCp,
+      priorCorpusHash: priorCp?.corpusContentHash || null,
     });
     const corpus = prepared.corpus;
     const contextPackage = prepared.contextPackage;

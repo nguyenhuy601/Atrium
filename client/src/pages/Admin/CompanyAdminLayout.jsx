@@ -63,12 +63,13 @@ export default function CompanyAdminLayout() {
     () => ({
       orgId,
       organization,
+      organizationLoading: loading,
       isFullAccess,
       memberCount,
       refreshOrganization,
       refreshStats,
     }),
-    [orgId, organization, isFullAccess, memberCount, refreshOrganization, refreshStats]
+    [orgId, organization, loading, isFullAccess, memberCount, refreshOrganization, refreshStats]
   );
 
   if (!isSystemAdmin && orgId && grantsLoading) {
@@ -99,15 +100,8 @@ export default function CompanyAdminLayout() {
     );
   }
 
-  if (loading) {
-    return (
-      <div className={`flex h-full min-h-0 items-center justify-center ${FIGMA_PAGE_SHELL}`}>
-        <p className="text-muted-foreground">{t('common.loading')}</p>
-      </div>
-    );
-  }
-
-  if (!organization) {
+  // Org detail load nền — không chặn Outlet/hub cards (chỉ cần orgId + grants).
+  if (!loading && !organization) {
     return (
       <div className={`flex h-full min-h-0 flex-col items-center justify-center gap-3 ${FIGMA_PAGE_SHELL}`}>
         <p className="text-muted-foreground">{t('organizationSettings.notFound')}</p>
@@ -124,7 +118,9 @@ export default function CompanyAdminLayout() {
       <div className={`flex h-full min-h-0 flex-1 flex-col overflow-hidden ${FIGMA_PAGE_SHELL} text-foreground`}>
         <header className="shrink-0 border-b border-border bg-card/40 px-4 py-4 md:px-8">
           <h1 className="text-xl font-bold">{t('companyAdmin.title')}</h1>
-          <p className="text-sm text-muted-foreground">{organization.name}</p>
+          <p className="text-sm text-muted-foreground">
+            {organization?.name || (loading ? t('common.loading') : '')}
+          </p>
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
           <PageMotion className="min-h-0 flex-1">

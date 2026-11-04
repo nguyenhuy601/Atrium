@@ -362,12 +362,22 @@ function buildWhatPhaseGraph(hooks = {}) {
       );
     }
     const { preparePhaseRagContext } = require('../retrieval/preparePhaseRagContext');
+    const priorCp =
+      (state.frOpts &&
+        state.frOpts.reuseContextPackage &&
+        typeof state.frOpts.reuseContextPackage === 'object' &&
+        state.frOpts.reuseContextPackage) ||
+      (state.contextPackage && typeof state.contextPackage === 'object'
+        ? state.contextPackage
+        : null);
     const prepared = await preparePhaseRagContext({
       phase: 'what',
       snapshot,
       snapshotId: state.snapshotId,
       pack: state.pack,
       taskPurpose: 'what_prepare',
+      reuseContextPackage: priorCp,
+      priorCorpusHash: priorCp?.corpusContentHash || null,
     });
     const corpus = prepared.corpus;
     const contextPackage = prepared.contextPackage;

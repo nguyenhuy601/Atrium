@@ -100,35 +100,15 @@ async function runFrSectionDerive(opts = {}) {
     frFromCrBacklogStructure,
   } = prepared;
 
-  let requirements = [];
-  let llmCalls = Number(frFromCrMeta?.llmCalls) || 0;
-
-  if (proposedById && proposedById.size) {
-    requirements = [...proposedById.values()];
-  } else {
-    const { listFrs } = require('../tools/requirementAnalysis');
-    const { isCustomerRequirementId } = require('../engines/frProposeFromCrLlm');
-    const rows = listFrs(snapshot || pack || {});
-    requirements = rows
-      .filter((row) => !isCustomerRequirementId(row?.id || row?.externalId || row?.logicalId))
-      .map((row, i) => ({
-        id: String(row.id || row.externalId || row.logicalId || `FR-${i + 1}`).trim(),
-        title: row.title || row.name || null,
-        name: row.name || row.title || null,
-        description: row.description || row.desc || null,
-        ac: row.ac || row.acceptanceCriteria || null,
-        priority: row.priority || null,
-        actors: row.actors || (row.actor ? [row.actor] : []),
-        parentEpicId: row.parentEpicId,
-        sourceCrIds: row.sourceCrIds,
-        sourceRefs: row.sourceRefs,
-        status: 'EXTRACTED',
-      }));
+  if (!proposedById || !proposedById.size) {
+    return failClosedProposedFr(
+      frFromCrMeta?.fallbackReason || 'missing_proposed_fr',
+      frFromCrMeta
+    );
   }
 
-  if (!requirements.length) {
-    return failClosedProposedFr('FR_EMPTY_AFTER_PREPARE', frFromCrMeta);
-  }
+  const requirements = [...proposedById.values()];
+  const llmCalls = Number(frFromCrMeta?.llmCalls) || 0;
 
   let lite = buildLiteFrUnderstanding(requirements, {
     llmCalls,

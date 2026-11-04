@@ -153,6 +153,7 @@ async function generateJsonViaOpenAi(opts, env, model, http) {
     model,
     env,
     axiosImpl: http,
+    retryOnTimeout: opts.retryOnTimeout,
   });
 
   const usage = {

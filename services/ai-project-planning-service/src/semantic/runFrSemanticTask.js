@@ -56,23 +56,14 @@ function failClosedProposedFr(reason, meta = null) {
 async function prepareFrSnapshotForPipeline(opts = {}) {
   const env = opts.env || process.env;
   const packIn = opts.pack || {};
-  const { isCustomerRawIntakePack } = require('./rawSectionDerivePolicy');
   const { isWhatFrFromCrFlagOn } = require('../contracts/frFromCrContract');
   const {
     listCustomerRawIntake,
     proposeFrFromCrWithLlm,
     overlayAnalyzedFr,
-    isCustomerRequirementId,
   } = require('../engines/frProposeFromCrLlm');
 
   const crIntake = listCustomerRawIntake(packIn, opts.snapshot, env);
-  const listedIds = []
-    .concat(packIn.functionalRequirements || [], opts.snapshot?.functionalRequirements || [])
-    .map((row) => String(row?.logicalId || row?.id || row?.externalId || '').trim())
-    .filter(Boolean);
-  const hasAnalyzedFr = listedIds.some((id) => !isCustomerRequirementId(id));
-  const customerRaw =
-    crIntake.length > 0 && (isCustomerRawIntakePack(packIn) || !hasAnalyzedFr);
 
   let snapshot = opts.snapshot;
   let pack = packIn;
@@ -89,20 +80,33 @@ async function prepareFrSnapshotForPipeline(opts = {}) {
   if (priorPartial) frOpts.priorPartial = priorPartial;
   delete frOpts.understandingPartial;
 
-  if (customerRaw && crIntake.length) {
-    if (!isWhatFrFromCrFlagOn(env)) {
-      return {
-        failClosed: failClosedProposedFr('WHAT_FR_FROM_CR_off'),
-        snapshot,
-        pack,
-        proposedById,
-        frFromCrMeta,
-        frFromCrEpics,
-        frFromCrBacklogStructure,
-        frOpts,
-      };
-    }
-    // Wave 1: bind all CR as required + retrieve supplement (2-step RAG)
+  if (!crIntake.length) {
+    return {
+      failClosed: failClosedProposedFr('empty_requirement_sheet'),
+      snapshot,
+      pack,
+      proposedById,
+      frFromCrMeta,
+      frFromCrEpics,
+      frFromCrBacklogStructure,
+      frOpts,
+    };
+  }
+
+  if (!isWhatFrFromCrFlagOn(env)) {
+    return {
+      failClosed: failClosedProposedFr('WHAT_FR_FROM_CR_off'),
+      snapshot,
+      pack,
+      proposedById,
+      frFromCrMeta,
+      frFromCrEpics,
+      frFromCrBacklogStructure,
+      frOpts,
+    };
+  }
+
+  // Always CR→FR LLM. Requirement ID comes from the sheet, any format.
     let taskContextPackage = opts.contextPackage || null;
     try {
       const { assembleTaskContext } = require('../retrieval/preparePhaseRagContext');
@@ -225,8 +229,7 @@ async function prepareFrSnapshotForPipeline(opts = {}) {
       proposed.backlogStructure && typeof proposed.backlogStructure === 'object'
         ? proposed.backlogStructure
         : null;
-    delete frOpts.priorPartial;
-  }
+  delete frOpts.priorPartial;
 
   return {
     snapshot,
@@ -361,10 +364,7 @@ async function attachDerivedBacklogStructure(proposalFragment, opts = {}, ctx = 
 async function finalizeFrSemanticFromPipeline(g4Out, opts = {}, ctx = {}) {
   const proposedById = ctx.proposedById instanceof Map ? ctx.proposedById : new Map();
   const frFromCrMeta = ctx.frFromCrMeta || null;
-  const {
-    mergeProposedFrRequirements,
-    isCustomerRequirementId,
-  } = require('../engines/frProposeFromCrLlm');
+  const { mergeProposedFrRequirements } = require('../engines/frProposeFromCrLlm');
 
   if ((g4Out?.paused || g4Out?.blocked) && !proposedById.size) {
     return {
@@ -420,10 +420,8 @@ async function finalizeFrSemanticFromPipeline(g4Out, opts = {}, ctx = {}) {
     console.info(
       `[fr-from-cr] proposalItems=${sem.requirements.length} g4Req=${g4Count}`
     );
-  } else if (Array.isArray(sem.requirements)) {
-    sem.requirements = sem.requirements.filter(
-      (row) => !isCustomerRequirementId(row?.id || row?.frId)
-    );
+  } else {
+    sem.requirements = [];
   }
   const validated = validateFunctionalRequirements({ frUnderstanding: sem });
   const proposalFragment = buildFunctionalRequirementProposal({

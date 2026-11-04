@@ -154,6 +154,7 @@ async function chatCompletionsTextOnce({
   temperature,
   http,
   wait,
+  retryOnTimeout = true,
 }) {
   let lastError = 'openai_error';
   for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt += 1) {
@@ -224,7 +225,7 @@ async function chatCompletionsTextOnce({
     } catch (err) {
       const code = err.code === 'ECONNABORTED' ? 'openai_timeout' : 'openai_error';
       lastError = code;
-      if (code === 'openai_timeout' && attempt < MAX_TRANSIENT_RETRIES) {
+      if (code === 'openai_timeout' && retryOnTimeout && attempt < MAX_TRANSIENT_RETRIES) {
         await wait(RETRY_DELAY_MS);
         continue;
       }
@@ -340,6 +341,7 @@ async function chatCompletionsText(opts = {}) {
       temperature,
       http,
       wait,
+      retryOnTimeout: opts.retryOnTimeout !== false,
     });
     lastResult = result;
 

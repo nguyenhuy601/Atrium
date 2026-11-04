@@ -632,6 +632,7 @@ async function startPhaseAiPlanning(req, res) {
       parentRunId: req.body?.parentRunId || '',
       contextProjectId: req.body?.projectId || null,
       locale: locale || undefined,
+      snapshotPolicy: req.body?.snapshotPolicy || 'reuse_if_valid',
       idempotencyKey,
     });
     const httpStatus = Number(data?.httpStatus) === 200 ? 200 : 202;

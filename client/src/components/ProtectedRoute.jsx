@@ -8,6 +8,7 @@
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import BrandPageLoader from './Shared/BrandPageLoader';
+import WarmOrgGrantScopes from './WarmOrgGrantScopes';
 import { useAppStrings } from '../locales/appStrings';
 
 /**
@@ -40,8 +41,13 @@ const ProtectedRoute = ({ children }) => {
     return <Navigate to="/login" replace />;
   }
 
-  // Đã đăng nhập → render component con
-  return children;
+  // Đã đăng nhập → warm org grants sớm (Admin Hub + Projects CTA)
+  return (
+    <>
+      <WarmOrgGrantScopes />
+      {children}
+    </>
+  );
 };
 
 export default ProtectedRoute;

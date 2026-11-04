@@ -19,23 +19,20 @@ function run(input = {}) {
   try {
     // Prefer precomputed fragment from FR analyze
     const fragment = input.ownedSectionProjection?.proposalFragment || input.proposalFragment;
-    const existingItems =
-      input.ownedSectionProjection?.items ||
-      input.context?.pack?.functionalRequirements ||
-      input.upstreamFragments?.functionalRequirements?.items;
 
     let rawItems = [];
-    // Empty fragment.items must not block pack/upstream FR (Gate1 showed 0 FR while pack had rows).
+    // FR list is the LLM proposal only. Sheet rows are intake, not a Gate1 FR dump.
     if (
       fragment?.section === 'functionalRequirements' &&
       Array.isArray(fragment.items) &&
       fragment.items.length
     ) {
       rawItems = fragment.items;
-    } else if (Array.isArray(existingItems) && existingItems.length) {
-      rawItems = existingItems;
-    } else if (Array.isArray(input.ownedSectionProjection?.rows) && input.ownedSectionProjection.rows.length) {
-      rawItems = input.ownedSectionProjection.rows;
+    } else if (
+      Array.isArray(input.ownedSectionProjection?.items) &&
+      input.ownedSectionProjection.items.length
+    ) {
+      rawItems = input.ownedSectionProjection.items;
     }
 
     const { isCustomerRequirementId } = require('../../engines/frProposeFromCrLlm');

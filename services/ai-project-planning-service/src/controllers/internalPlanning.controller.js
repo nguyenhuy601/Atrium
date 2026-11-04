@@ -552,8 +552,17 @@ async function processRunAsync(runId) {
         hydrateToolDataFromSnapshot,
       } = require('../knowledge/hydrateToolDataFromSnapshot');
       const hydrateWallStarted = Date.now();
-      const hydrated = await hydrateRunInputFromSnapshot(run);
-      const hydrateMs = Math.max(0, Date.now() - hydrateWallStarted);
+      const hydrated = await hydrateRunInputFromSnapshot(run, {
+        projection: run.job === 'phase_how' ? 'how' : 'what',
+        packContentHash:
+          run.input?.packContentHash ||
+          run.packContentHash ||
+          null,
+      });
+      const hydrateMs =
+        hydrated.hydrateMs != null
+          ? Number(hydrated.hydrateMs)
+          : Math.max(0, Date.now() - hydrateWallStarted);
       let runtimeSnapshot = hydrated.snapshot || {};
       const runtimePack = hydrated.pack || {};
       // Semantic Contract: ensure canonicalRaw visible on snapshot for frUnderstanding/section input

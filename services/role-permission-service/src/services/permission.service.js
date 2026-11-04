@@ -32,8 +32,9 @@ function getRbac() {
   return rbacService;
 }
 
-/** Cache mới: mã grantScopes. Mảng legacy `{resource, actions}` bỏ qua — nó gộp nhiều permission vào một resource. */
-function readCachedGrantCodes(raw) {
+const PERMISSION_CACHE_TTL_SEC = 300;
+
+function parsePermissionCache(raw) {
   if (!raw) return null;
   let parsed;
   try {
@@ -41,10 +42,53 @@ function readCachedGrantCodes(raw) {
   } catch {
     return null;
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.codes)) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  return parsed;
+}
+
+/**
+ * Cache codes-only (legacy) hoặc full `{ codes, grantScopes }`.
+ * Mảng legacy `{resource, actions}` bỏ qua — gộp nhiều permission vào một resource.
+ */
+function readCachedGrantCodes(raw) {
+  const parsed = parsePermissionCache(raw);
+  if (!parsed || !Array.isArray(parsed.codes)) return null;
+  return parsed.codes.map((code) => String(code || '').trim()).filter(Boolean);
+}
+
+/** Hit chỉ khi có `grantScopes` map — thiếu = miss (shape cũ chỉ `{ codes }`). */
+function readCachedGrantScopes(raw) {
+  const parsed = parsePermissionCache(raw);
+  if (
+    !parsed ||
+    !parsed.grantScopes ||
+    typeof parsed.grantScopes !== 'object' ||
+    Array.isArray(parsed.grantScopes)
+  ) {
     return null;
   }
-  return parsed.codes.map((code) => String(code || '').trim()).filter(Boolean);
+  const grantScopes = {};
+  for (const [code, scope] of Object.entries(parsed.grantScopes)) {
+    const key = String(code || '').trim().toLowerCase();
+    if (!key || !isValidMasterPermission(key)) continue;
+    grantScopes[key] = String(scope || 'ORGANIZATION').trim().toUpperCase();
+  }
+  return grantScopes;
+}
+
+function buildPermissionCachePayload(grantScopes) {
+  const packed = packUserPermissions(grantScopes);
+  return {
+    codes: Object.keys(packed.grantScopes),
+    grantScopes: packed.grantScopes,
+  };
+}
+
+async function writePermissionCache(redis, cacheKey, grantScopes) {
+  if (!redis || typeof redis.setex !== 'function') return;
+  const payload = buildPermissionCachePayload(grantScopes);
+  if (!payload.codes.length) return;
+  await redis.setex(cacheKey, PERMISSION_CACHE_TTL_SEC, JSON.stringify(payload));
 }
 
 function grantCodesAllow(codes, action) {
@@ -79,18 +123,19 @@ class PermissionService {
       }
 
       // Cutover: chỉ Position → Org Role → Permission (không UserRole/pack dual).
-      let masterGrants = [];
+      let grantScopes = {};
       try {
-        masterGrants = await getRbac().collectEffectiveMasterGrants(userId, serverId);
+        const access = await getRbac().collectEffectiveOrgAccess(userId, serverId);
+        grantScopes =
+          access?.grantScopes && typeof access.grantScopes === 'object' ? access.grantScopes : {};
       } catch (e) {
-        logger.warn('[permission] collectEffectiveMasterGrants failed', e.message);
+        logger.warn('[permission] collectEffectiveOrgAccess failed', e.message);
       }
 
+      const masterGrants = Object.keys(grantScopes);
       const allowed = grantCodesAllow(masterGrants, action);
 
-      if (redis && masterGrants.length) {
-        await redis.setex(cacheKey, 300, JSON.stringify({ codes: masterGrants }));
-      }
+      await writePermissionCache(redis, cacheKey, grantScopes);
 
       return {
         allowed,
@@ -159,9 +204,25 @@ class PermissionService {
         return packUserPermissions(all);
       }
 
+      const redis = getRedisClient();
+      const cacheKey = `permissions:${userId}:${serverId}`;
+      if (redis && typeof redis.get === 'function') {
+        try {
+          const cachedScopes = readCachedGrantScopes(await redis.get(cacheKey));
+          if (cachedScopes) {
+            return packUserPermissions(cachedScopes);
+          }
+        } catch (e) {
+          logger.warn('[permission] redis getUserPermissions cache read failed', e.message);
+        }
+      }
+
       try {
         const access = await getRbac().collectEffectiveOrgAccess(userId, serverId);
-        return packUserPermissions(access.grantScopes);
+        const grantScopes =
+          access?.grantScopes && typeof access.grantScopes === 'object' ? access.grantScopes : {};
+        await writePermissionCache(redis, cacheKey, grantScopes);
+        return packUserPermissions(grantScopes);
       } catch (_) {
         return packUserPermissions({});
       }
@@ -207,3 +268,8 @@ class PermissionService {
 
 module.exports = new PermissionService();
 module.exports.packUserPermissions = packUserPermissions;
+module.exports.readCachedGrantCodes = readCachedGrantCodes;
+module.exports.readCachedGrantScopes = readCachedGrantScopes;
+module.exports.buildPermissionCachePayload = buildPermissionCachePayload;
+module.exports.writePermissionCache = writePermissionCache;
+module.exports.PERMISSION_CACHE_TTL_SEC = PERMISSION_CACHE_TTL_SEC;

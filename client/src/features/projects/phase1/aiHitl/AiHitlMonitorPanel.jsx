@@ -17,9 +17,8 @@ import WhatMonitorResultsPanel from './WhatMonitorResultsPanel';
 import { shouldShowWhatMonitorResults } from './whatMonitorResultsVisibility';
 import { isHowRunWallTimedOut } from './WHAT_MONITOR_CONFIG';
 import HowRerunToolPicker from './HowRerunToolPicker';
-import MonitorRunLoadingCard, {
-  resolveMonitorHeroText,
-} from './MonitorRunLoadingCard';
+import AiRunProgressOverlay from './AiRunProgressOverlay';
+import { resolveMonitorHeroText } from './MonitorRunLoadingCard';
 import {
   countHowMacroProgress,
   countWhatMacroProgress,
@@ -275,16 +274,15 @@ function WhatMonitorBody({
         actionSlot={terminalFail ? rerunWhatButton : null}
         t={t}
       />
-      {showLoadingCard ? (
-        <MonitorRunLoadingCard
-          phaseLabel={phaseLabel}
-          done={progress.done}
-          total={progress.total}
-          heroText={heroText}
-          showSpinner={Boolean(vm.showSpinner)}
-          t={t}
-        />
-      ) : null}
+      <AiRunProgressOverlay
+        open={showLoadingCard}
+        phaseLabel={phaseLabel}
+        done={progress.done}
+        total={progress.total}
+        heroText={heroText}
+        showSpinner={Boolean(vm.showSpinner)}
+        t={t}
+      />
       {phaseDone &&
       !srsApproved &&
       !runBusy &&
@@ -303,7 +301,7 @@ function WhatMonitorBody({
 }
 
 /**
- * HOW Monitor — loading card for in-flight; summary when done (RULE-M01).
+ * HOW Monitor — progress overlay for in-flight; summary when done (RULE-M01).
  */
 function HowMonitorBody({
   liveRun,
@@ -393,16 +391,15 @@ function HowMonitorBody({
         actionSlot={null}
         t={t}
       />
-      {showLoadingCard ? (
-        <MonitorRunLoadingCard
-          phaseLabel={phaseLabel}
-          done={progress.done}
-          total={progress.total}
-          heroText={heroText}
-          showSpinner={Boolean(vm.showSpinner)}
-          t={t}
-        />
-      ) : null}
+      <AiRunProgressOverlay
+        open={showLoadingCard}
+        phaseLabel={phaseLabel}
+        done={progress.done}
+        total={progress.total}
+        heroText={heroText}
+        showSpinner={Boolean(vm.showSpinner)}
+        t={t}
+      />
       {howNotStarted ? startHowButton : null}
       {(phaseDone || howTerminalStopped || (!howNotStarted && !runBusy)) &&
       howRerunPicker
@@ -420,7 +417,7 @@ function HowMonitorBody({
 }
 
 /**
- * LangGraph / APS run monitor — loading card (live) or summary (done). RULE-M01.
+ * LangGraph / APS run monitor — progress overlay (live) or summary (done). RULE-M01.
  */
 export default function AiHitlMonitorPanel({
   liveRun = null,

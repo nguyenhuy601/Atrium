@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useAppStrings } from '../../../locales/appStrings';
 import { useShellLayout } from '../../../context/ShellLayoutContext';
@@ -22,6 +23,8 @@ import useTaskWorkspaceScope from '../../../hooks/useTaskWorkspaceScope';
 import { resolveLandingCreateActions } from '../landing/projectsLandingCreateActions';
 import { resolveAiProjectEntryPath } from '../phase1/aiHitl/aiHitlNavState';
 import { useRouteDeniedNotice } from '../../../config/routeDeniedNotice';
+import { queryKeys } from '../../../lib/queryKeys';
+import { fetchProjectHubProject } from '../hub/useProjectHubQueries';
 
 function isMyProject(project) {
   const mb = project?.myMembership;
@@ -36,6 +39,7 @@ export default function ProjectPickerPage() {
   const { t } = useAppStrings();
   const deniedMessage = useRouteDeniedNotice('project');
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const [enteringId, setEnteringId] = useState(null);
   const enteringLockRef = useRef(false);
@@ -90,6 +94,12 @@ export default function ProjectPickerPage() {
       showHeaderLoading(t('nav.projectsEntering'));
       writeStoredLastProjectId(projectId);
       try {
+        // Warm hub project (capabilities) trước/song song navigate — sidebar postItems.
+        void queryClient.prefetchQuery({
+          queryKey: queryKeys.projectHub.project(projectId),
+          queryFn: () => fetchProjectHubProject(projectId),
+          staleTime: 30_000,
+        });
         const boardId = String(project?.defaultBoardId || project?.boards?.[0]?._id || '').trim();
         // Không await pack — ModuleRoute guard pack khi RA; tránh block navigate.
         navigate(
@@ -107,7 +117,7 @@ export default function ProjectPickerPage() {
         hideHeaderLoading();
       }
     },
-    [hideHeaderLoading, navigate, orgId, showHeaderLoading, t]
+    [hideHeaderLoading, navigate, orgId, queryClient, showHeaderLoading, t]
   );
 
   const handleCreate = useCallback(() => {

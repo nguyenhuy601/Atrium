@@ -188,6 +188,8 @@ export const requirementAPI = {
 
   /**
    * Start / re-run WHAT or HOW.
+   * WHAT Fast Start: { phase:'what', mode:'requirement', snapshotPolicy:'reuse_if_valid' }
+   *   — BE preflight prepares when needed; do not chain prepare_only on Run path.
    * HOW selective: { phase:'how', force:true, rerunTools:['WbsTool'] } — server expands cascade.
    * Full HOW: { phase:'how', force:true } (no rerunTools).
    */

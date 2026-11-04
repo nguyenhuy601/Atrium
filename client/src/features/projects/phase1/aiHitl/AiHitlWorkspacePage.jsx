@@ -520,22 +520,18 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
   }, [startHowFirst]);
 
   /**
-   * Birth / manual start: prepare_only → FR (same sequence as Overview pipeline).
+   * Birth / manual start: single requirement run (Fast Start).
+   * BE preflight handles prepare when READY/STALE/MISSING — prepare_only stays on Understanding CTA.
    */
   const runWhatPipeline = useCallback(
     async ({ force = false, feedback = '', parentRunId = '', idempotencyKey = '' } = {}) => {
-      // Stage 1 — intake readiness (no LLM)
-      await requirementAPI.startPhaseAiPlanning(organizationId, packId, {
-        phase: 'what',
-        mode: 'prepare_only',
-      });
-      // Stage 2 — remote APS WHAT
       await requirementAPI.startPhaseAiPlanning(
         organizationId,
         packId,
         {
           phase: 'what',
           mode: 'requirement',
+          snapshotPolicy: 'reuse_if_valid',
           ...(force ? { force: true } : {}),
           ...(feedback ? { feedback } : {}),
           ...(parentRunId ? { parentRunId } : {}),
@@ -1520,7 +1516,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
     // Stay on Monitor — also sync ?tab= so URL deep-link cannot bounce back to Review.
     goMonitorTab();
     clearGate1DecisionsForReseed();
-    // Toast immediately — prepare_only + requirement run can take seconds; do not wait for both APIs.
+    // Toast immediately — BE preflight + remote run can take seconds.
     toast.success(t(successKey) || successFallback);
     try {
       await runWhatPipeline({ force, feedback, parentRunId, idempotencyKey });

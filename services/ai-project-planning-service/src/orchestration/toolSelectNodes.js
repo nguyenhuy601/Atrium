@@ -319,13 +319,17 @@ async function decideToolCalls(state, opts = {}) {
 
   const env = opts.env || state.env || process.env;
   const phase = opts.phase || 'what';
+
+  // WHAT already dispatches the full eligible set and Send ignores call args.
+  // The planner JSON does not change tool outputs; it only adds a serial wait.
+  if (phase === 'what') {
+    return decideWhatByEligible(state);
+  }
+
   const tools = describeToolsForPrompt(phase);
   const allowedToolNames = tools.map((t) => t.toolName);
 
   if (!isLlmEnabled(env) || String(env.LLM_PROVIDER || '').toLowerCase() === 'mock') {
-    if (phase === 'what') {
-      return decideWhatByEligible(state);
-    }
     return stubDecideToolCalls(state, tools, phase);
   }
 

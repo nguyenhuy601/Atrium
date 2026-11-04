@@ -2,6 +2,16 @@
  * Human-readable Execution Control detail blocks (no raw JSON dumps).
  */
 
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  isScrollNearBottom,
+  listViewportNeedsMoreRoots,
+  nextRootLimit,
+} from '../projectHubListLazy';
+
+/** Infinite scroll Bằng chứng (client reveal) — card cao hơn row Issues. */
+export const EXECUTION_EVIDENCE_PAGE_SIZE = 8;
+
 function formatDateTime(value) {
   if (value == null || value === '') return null;
   const d = value instanceof Date ? value : new Date(value);
@@ -195,22 +205,101 @@ export function EvidenceItemCard({ item, t }) {
   );
 }
 
-/** @param {{ evidence?: array, t: function, emptyLabel: string }} props */
-export function EvidenceList({ evidence, t, emptyLabel }) {
+/**
+ * @param {{
+ *   evidence?: array,
+ *   t: function,
+ *   emptyLabel: string,
+ *   resetKey?: string|number|null,
+ *   pageSize?: number,
+ *   listActive?: boolean,
+ * }} props
+ */
+export function EvidenceList({
+  evidence,
+  t,
+  emptyLabel,
+  resetKey = null,
+  pageSize = EXECUTION_EVIDENCE_PAGE_SIZE,
+  listActive = true,
+}) {
   const items = Array.isArray(evidence) ? evidence : [];
-  if (!items.length) {
+  const total = items.length;
+  const step = Math.max(1, Math.floor(Number(pageSize) || EXECUTION_EVIDENCE_PAGE_SIZE));
+  const [visibleLimit, setVisibleLimit] = useState(step);
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    setVisibleLimit(step);
+  }, [resetKey, step]);
+
+  const visibleItems = useMemo(() => items.slice(0, visibleLimit), [items, visibleLimit]);
+  const hasMore = visibleLimit < total;
+
+  useEffect(() => {
+    if (!listActive || !hasMore) return undefined;
+    const el = scrollRef.current;
+    if (!el) return undefined;
+    const onScroll = () => {
+      if (!isScrollNearBottom(el, 80)) return;
+      setVisibleLimit((prev) => nextRootLimit(prev, total, step));
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [listActive, hasMore, total, step]);
+
+  useEffect(() => {
+    if (!listActive || !hasMore) return undefined;
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const revealIfShort = () => {
+      if (
+        !listViewportNeedsMoreRoots({
+          scrollHeight: el.scrollHeight,
+          clientHeight: el.clientHeight,
+          hasMoreRoots: true,
+        })
+      ) {
+        return;
+      }
+      setVisibleLimit((prev) => nextRootLimit(prev, total, step));
+    };
+    revealIfShort();
+    const observer = new ResizeObserver(() => revealIfShort());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [listActive, hasMore, total, step, visibleLimit, visibleItems.length]);
+
+  if (!total) {
     return <p className="mt-1 text-muted-foreground">{emptyLabel}</p>;
   }
+
   return (
-    <ul className="mt-1 space-y-1.5">
-      {items.map((item, idx) => (
-        <EvidenceItemCard
-          key={`${item?.type || 'ev'}-${item?.id || item?.incidentId || idx}`}
-          item={item}
-          t={t}
-        />
-      ))}
-    </ul>
+    <div className="mt-1">
+      {total > step ? (
+        <p className="mb-1 text-[10px] text-muted-foreground">
+          {Math.min(visibleLimit, total)}/{total}
+        </p>
+      ) : null}
+      <div
+        ref={scrollRef}
+        className="max-h-56 min-h-0 overflow-y-auto"
+        data-testid="execution-control-evidence-scroll"
+      >
+        <ul className="space-y-1.5">
+          {visibleItems.map((item, idx) => (
+            <EvidenceItemCard
+              key={`${item?.type || 'ev'}-${item?.id || item?.incidentId || idx}`}
+              item={item}
+              t={t}
+            />
+          ))}
+        </ul>
+        {hasMore ? (
+          <p className="py-2 text-center text-[10px] text-muted-foreground">…</p>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

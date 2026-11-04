@@ -1596,6 +1596,7 @@ async function startPhaseAiPlanningRun({
   parentRunId: parentRunIdHint = '',
   contextProjectId = null,
   locale = '',
+  snapshotPolicy = 'reuse_if_valid',
 }) {
   const RequirementPack = require('../models/RequirementPack');
   const packMeta = await RequirementPack.findOne({
@@ -1708,19 +1709,39 @@ async function startPhaseAiPlanningRun({
     : null;
   let snapshotDoc = null;
   let packForPhase = pack;
-  if (isSnapshotPipelineEnabled()) {
-    const ensured = await ensureActiveAiAnalysisSnapshot({
+  let preparationState = 'READY';
+  let reusedSnapshot = false;
+  let preflightPackContentHash = null;
+
+  const policyNorm = String(snapshotPolicy || 'reuse_if_valid').trim().toLowerCase() || 'reuse_if_valid';
+
+  if (phaseJob === 'phase_what') {
+    const { ensureFormValidationOnPack } = require('./whatRequirementPhase.service');
+    await ensureFormValidationOnPack(packForPhase);
+    if (typeof packForPhase.isModified === 'function' && packForPhase.isModified('aiAnalysis')) {
+      await packForPhase.save();
+    }
+  }
+
+  // Fast Start: preflight READY/STALE/MISSING — prepare only when needed.
+  {
+    const { ensurePhaseRunPrepared } = require('./phaseRunPreflight.service');
+    const preflight = await ensurePhaseRunPrepared({
       userId,
       organizationId,
       packId,
-      pack,
-      refreshOnFrDrift: phaseJob === 'phase_how',
+      pack: packForPhase,
+      phaseJob,
+      snapshotPolicy: policyNorm,
     });
-    packForPhase = ensured.pack || pack;
-    snapshotDoc = ensured.snapshotDoc;
-    assertSnapshotRequired(snapshotDoc);
-    if (snapshotDoc) snapshotId = String(snapshotDoc._id);
+    packForPhase = preflight.pack || packForPhase;
+    snapshotDoc = preflight.snapshotDoc;
+    snapshotId = preflight.snapshotId || snapshotId;
+    preparationState = preflight.preparationState || 'READY';
+    reusedSnapshot = Boolean(preflight.reusedSnapshot);
+    preflightPackContentHash = preflight.packContentHash || null;
   }
+
   if (!snapshotId) {
     const err = new Error('Active AI snapshot required for phase planning run');
     err.statusCode = 400;
@@ -1730,17 +1751,11 @@ async function startPhaseAiPlanningRun({
 
   if (phaseJob === 'phase_what') {
     const {
-      ensureFormValidationOnPack,
       ensurePreparedIntakeForWhat,
     } = require('./whatRequirementPhase.service');
     const { assertRequirementPhaseCanStart, countValidFr } = require('../utils/requirement/workbookDiagnostic');
 
-    await ensureFormValidationOnPack(packForPhase);
-    if (typeof packForPhase.isModified === 'function' && packForPhase.isModified('aiAnalysis')) {
-      await packForPhase.save();
-    }
-
-    // Self-heal: validFr=0 OR missing canonicalRaw on Customer Raw → re-prefill, then re-read before frUnderstanding.
+    // Self-heal only when still missing FR/canonicalRaw after preflight.
     const prepared = await ensurePreparedIntakeForWhat({
       pack: packForPhase,
       organizationId,
@@ -1767,6 +1782,8 @@ async function startPhaseAiPlanningRun({
         snapshotDoc = refreshed.snapshotDoc;
         assertSnapshotRequired(snapshotDoc);
         if (snapshotDoc) snapshotId = String(snapshotDoc._id);
+        preparationState = 'STALE';
+        reusedSnapshot = false;
       }
       // eslint-disable-next-line no-console
       console.info('[phase_what] post-prepare intake', {
@@ -1799,6 +1816,9 @@ async function startPhaseAiPlanningRun({
       snapshotId: existing.snapshotId || snapshotId,
       schemaVersion: container.schemaVersion,
       mode: phaseJob === 'phase_what' ? 'requirement' : undefined,
+      preparationState,
+      reusedSnapshot,
+      packContentHash: preflightPackContentHash || undefined,
       idempotentReplay: true,
       httpStatus: 202,
     };
@@ -1838,6 +1858,9 @@ async function startPhaseAiPlanningRun({
       snapshotId,
       schemaVersion: container.schemaVersion,
       mode: phaseJob === 'phase_what' ? 'requirement' : undefined,
+      preparationState,
+      reusedSnapshot,
+      packContentHash: preflightPackContentHash || undefined,
       idempotentReplay: true,
       httpStatus: 202,
     };
@@ -2058,6 +2081,7 @@ async function startPhaseAiPlanningRun({
     toolData: phaseJob === 'phase_how' ? toolData : {},
     locale: deriveLocale,
     packContentHash:
+      preflightPackContentHash ||
       snapshotObject?.packContentHash ||
       packForPhase.aiAnalysisSnapshotMeta?.packContentHash ||
       null,
@@ -2202,6 +2226,9 @@ async function startPhaseAiPlanningRun({
     schemaVersion: container.schemaVersion,
     httpStatus: 202,
     mode: phaseJob === 'phase_what' ? 'requirement' : undefined,
+    preparationState,
+    reusedSnapshot,
+    packContentHash: preflightPackContentHash || undefined,
     ...(loop1Text ? { feedbackApplied: true } : {}),
   };
 }

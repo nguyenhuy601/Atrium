@@ -43,7 +43,7 @@ function textOr(t, key, vars) {
 
 /**
  * Phase 1 tool-first — 2 stages:
- * 1) prepare_only (input readiness)
+ * 1) requirement + snapshotPolicy=reuse_if_valid (BE preflight; prepare_only = Understanding CTA)
  * 2) tools_propose (tools → 1 projection → seed draft artifacts)
  * Gate 1: preview / submit / approve like manual pack flow.
  */
@@ -337,47 +337,36 @@ export default function RequirementPhase1PipelinePanel({
     setStage2Meta(null);
     setPipeline({ step: 1, substep: 'prepare' });
     try {
-      const prepRes = await requirementAPI.startPhaseAiPlanning(organizationId, packId, {
-        phase: 'what',
-        mode: 'prepare_only',
-      });
-      const prepared = unwrap(prepRes);
-      const missing = prepared?.readiness?.missing || [];
-      const prepForm = prepared?.readiness?.formValidation || prepared?.formValidation;
-      if (prepForm) setFormValidation(prepForm);
-      setStage1Meta({
-        intakeCorpusChars: Number(prepared?.intakeCorpusChars) || 0,
-        excerptsCount: Number(prepared?.excerptsCount) || 0,
-        skippedCount: Number(prepared?.skippedCount) || 0,
-        missing,
-        prefillApplied: Boolean(prepared?.readiness?.prefillApplied),
-        status: String(prepared?.status || ''),
-      });
-      if (prepared?.status) setPackStatus(String(prepared.status));
-      // RULE-FORM-01: only block on form INVALID — not content volume / requirementReadiness
-      if (prepForm && prepForm.ok === false) {
-        const msg = formatCustomerRawFormTooltip(prepForm, t);
-        setErrorMsg(msg);
-        toast.error(msg);
-        return;
-      }
-      const blocking = missing.filter((code) => code === 'no_analysis_snapshot');
-      if (blocking.length) {
-        const msg =
-          t('requirements.phase1InputBlocked', { codes: blocking.join(', ') }) ||
-          `Thiếu dữ liệu đầu vào: ${blocking.join(', ')}`;
-        setErrorMsg(msg);
-        toast.error(msg);
-        return;
-      }
-
+      // Fast Start: single requirement call — BE preflight prepares when MISSING/STALE.
       setBusyStage(2);
       const res = await requirementAPI.startPhaseAiPlanning(organizationId, packId, {
         phase: 'what',
         mode: 'requirement',
+        snapshotPolicy: 'reuse_if_valid',
         force: Boolean(stage2Meta?.done),
       });
       const data = unwrap(res);
+      if (data?.preparationState || data?.readiness) {
+        const readiness = data.readiness || {};
+        const missing = readiness.missing || [];
+        const prepForm = readiness.formValidation || data.formValidation;
+        if (prepForm) setFormValidation(prepForm);
+        setStage1Meta({
+          intakeCorpusChars: Number(data.intakeCorpusChars ?? readiness.intakeCorpusChars) || 0,
+          excerptsCount: Number(data.excerptsCount ?? readiness.excerptsCount) || 0,
+          skippedCount: Number(data.skippedCount ?? readiness.skippedCount) || 0,
+          missing,
+          prefillApplied: Boolean(readiness.prefillApplied),
+          status: String(data.status || readiness.packStatus || ''),
+        });
+        if (data?.status) setPackStatus(String(data.status));
+        if (prepForm && prepForm.ok === false) {
+          const msg = formatCustomerRawFormTooltip(prepForm, t);
+          setErrorMsg(msg);
+          toast.error(msg);
+          return;
+        }
+      }
       const acceptedRemote =
         res?.status === 202 ||
         (data?.accepted === true && data?.remote === true) ||

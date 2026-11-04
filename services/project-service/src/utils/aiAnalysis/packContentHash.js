@@ -1,12 +1,13 @@
 /**
  * Stable pack content fingerprint for AI Analysis snapshot binding.
+ * RULE-FS-03: content-only — no volatile prepare/tools metadata.
  */
 
 const crypto = require('crypto');
 const {
   buildRequirementFrSlices,
   buildRequirementFrSlicesForAnalysis,
-  buildProjectContextSlice,
+  buildProjectContentContextSlice,
 } = require('./aiAnalysisFrSlice');
 
 /**
@@ -16,11 +17,14 @@ const {
  */
 function buildNfrDigest(pack, { maxItems = 100 } = {}) {
   const rows = Array.isArray(pack?.nonFunctionalRequirements) ? pack.nonFunctionalRequirements : [];
-  return rows.slice(0, maxItems).map((r) => ({
-    id: String(r.externalId || r.id || r.nfrId || '').trim(),
-    req: String(r.requirement || r.description || r.title || r.name || '').slice(0, 200),
-    cat: String(r.category || r.type || '').slice(0, 80),
-  }));
+  return rows
+    .slice(0, maxItems)
+    .map((r) => ({
+      id: String(r.externalId || r.id || r.nfrId || '').trim(),
+      req: String(r.requirement || r.description || r.title || r.name || '').slice(0, 200),
+      cat: String(r.category || r.type || '').slice(0, 80),
+    }))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
 }
 
 /**
@@ -34,11 +38,9 @@ function buildPackContentHash(pack, { hierarchy } = {}) {
   const slices = hierarchy
     ? buildRequirementFrSlicesForAnalysis(pack, hierarchy, { maxItems: 200 })
     : buildRequirementFrSlices(pack, { maxItems: 200 });
-  const context = buildProjectContextSlice(pack);
-  const payload = {
-    v: 2,
-    context,
-    fr: slices.map((s) => ({
+  const context = buildProjectContentContextSlice(pack);
+  const fr = slices
+    .map((s) => ({
       id: s.id,
       m: s.module,
       f: s.feature || '',
@@ -46,7 +48,12 @@ function buildPackContentHash(pack, { hierarchy } = {}) {
       d: s.description || '',
       a: s.ac || '',
       src: s.source || '',
-    })),
+    }))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const payload = {
+    v: 3,
+    context,
+    fr,
     nfr: buildNfrDigest(pack),
   };
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 32);
