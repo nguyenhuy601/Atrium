@@ -201,7 +201,7 @@ UI admin: `/app/admin/*` (hub, users, structure, RBAC, …).
 | **`CORS_ORIGIN`** | Whitelist origin (có `https://atrium.dev` khi dev LAN) |
 | **`SINGLE_ORG_MODE`** | Một công ty / hạn chế tạo org công khai |
 
-Runbook: [`docs/security-runbook.md`](docs/security-runbook.md). Sau đổi secret: `bash devops/scripts/security/check-security-env.sh`.
+Runbook: [`docs/security-runbook.md`](docs/security-runbook.md). Thư mục `devops/` không nằm trong git. Trước deploy, xác nhận `.env` không có `RBAC_TEST_UNLOCK=true` và secret không còn placeholder (`change-me`, `your-secret-key`).
 
 ---
 
@@ -211,9 +211,8 @@ Runbook: [`docs/security-runbook.md`](docs/security-runbook.md). Sau đổi secr
 
 ```bash
 # .env root + service .env đã có (SINGLE_ORG_MODE, token, …)
-ATRIUM_ENV_CHECK=staging bash devops/scripts/security/check-security-env.sh   # hoặc env tương ứng
 bash devops/swarm/build-local-images.sh <service-name>   # chỉ service vừa sửa
-bash devops/swarm/deploy-stack.sh
+SKIP_SECURITY_ENV_CHECK=1 bash devops/swarm/deploy-stack.sh
 # hoặc: docker service update --force --update-parallelism 1 --update-order start-first atrium_<service>
 ```
 

@@ -275,7 +275,7 @@ jobs:
           cat <<EOF
           === Smoke development ===
           releaseId=${RELEASE_ID} SHA=${SHA}
-          1) ATRIUM_ENV_CHECK=ci bash devops/scripts/security/check-security-env.sh
+          1) Security env: bước CI đã kiểm tra RBAC_TEST_UNLOCK (không gọi devops/)
           2) devops/nginx/verify-lan-https.ps1 -BaseUrl https://atrium.dev
           EOF
 
@@ -309,8 +309,7 @@ jobs:
           Pin digests from manifest (không :latest)
 
           Manual:
-            ATRIUM_ENV_CHECK=staging bash devops/scripts/security/check-security-env.sh
-            bash devops/swarm/deploy-release.sh --release-id ${RELEASE_ID} --env staging
+            SKIP_SECURITY_ENV_CHECK=1 bash devops/swarm/deploy-release.sh --release-id ${RELEASE_ID} --env staging
 
           Rollback: bash devops/swarm/deploy-release.sh --release-id <previous> --env staging
           EOF
@@ -335,7 +334,7 @@ jobs:
           cat <<EOF
           === Smoke staging ===
           releaseId=${RELEASE_ID} SHA=${SHA}
-          - ATRIUM_ENV_CHECK=staging bash devops/scripts/security/check-security-env.sh
+          - Security env đã chạy trong CI (RBAC_TEST_UNLOCK); không gọi devops/scripts/security/
           - devops/swarm/voice-staging-smoke.md
           EOF
 

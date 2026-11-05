@@ -96,7 +96,27 @@ jobs:
           fetch-depth: 0
 
       - name: Security env (ci profile)
-        run: ATRIUM_ENV_CHECK=ci bash devops/scripts/security/check-security-env.sh
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in .env services/role-permission-service/.env; do
+            if [[ -f "$f" ]] && grep -qE '^RBAC_TEST_UNLOCK=true' "$f"; then
+              echo "[FAIL] $f: RBAC_TEST_UNLOCK=true"
+              fail=1
+            fi
+          done
+          if [[ "${NODE_ENV:-}" == "production" && "${RBAC_TEST_UNLOCK:-}" == "true" ]]; then
+            echo "[FAIL] NODE_ENV=production with RBAC_TEST_UNLOCK=true"
+            fail=1
+          fi
+          if [[ -f .env ]] && grep -qE 'change-me|your-secret-key' .env; then
+            echo "[WARN] .env contains dev placeholder secrets"
+          fi
+          if [[ "$fail" -ne 0 ]]; then
+            echo "Security env check failed."
+            exit 1
+          fi
+          echo "Security env check passed."
 
       - name: Gitleaks
         uses: gitleaks/gitleaks-action@v2
