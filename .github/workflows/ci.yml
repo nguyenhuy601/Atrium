@@ -486,7 +486,7 @@ jobs:
       always() &&
       needs.changes.outputs.is_main_publish == 'true' &&
       (needs.resolve-docker-matrix.result == 'success' || needs.resolve-docker-matrix.result == 'skipped') &&
-      (needs.publish-docker.result == 'success' || needs.publish-docker.result == 'skipped')
+      needs.publish-docker.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.gen.outputs.release_id }}
