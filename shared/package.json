@@ -63,7 +63,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "atrium": "file:..",
     "axios": "^1.20.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
