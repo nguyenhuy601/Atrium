@@ -69,7 +69,7 @@ jobs:
               - '.github/swarm-app-images.json'
               - '.github/workflows/ci.yml'
               - '.github/workflows/cd.yml'
-              - 'devops/scripts/**'
+              - '.github/scripts/**'
       - id: meta
         env:
           EVENT: ${{ github.event_name }}
@@ -295,7 +295,7 @@ jobs:
             (cd "${dir}" && node --test tests/*.test.js)
           done
 
-  # ── Docker matrix (shared script) ─────────────────────
+  # ── Docker matrix (.github/scripts — devops/ không commit) ─
   resolve-docker-matrix:
     name: "Docker — resolve matrix"
     needs: changes
@@ -365,7 +365,7 @@ jobs:
           ARGS=(--event "${EVENT_ARG}" --head HEAD --github-output)
           [[ -n "${BASE}" ]] && ARGS+=(--base "${BASE}")
           ARGS+=("${EXTRA[@]}")
-          bash devops/scripts/docker/resolve-docker-matrix.sh "${ARGS[@]}"
+          bash .github/scripts/resolve-docker-matrix.sh "${ARGS[@]}"
 
   # ── PR / feature-branch push: build verify (push=false) ─
   build-docker:
@@ -550,7 +550,7 @@ jobs:
             echo "No previous atrium-R* release found"
           fi
 
-          node devops/scripts/release/generate-release-manifest.mjs \
+          node .github/scripts/generate-release-manifest.mjs \
             --commit "${SHA}" \
             --release-id "${RELEASE_ID}" \
             --owner "${OWNER}" \
@@ -604,8 +604,7 @@ jobs:
           TITLE="Atrium ${RELEASE_ID}"
           BODY="Immutable release for commit \`${SHA}\`.
 
-          Deploy: \`bash devops/swarm/deploy-release.sh --release-id ${RELEASE_ID}\`
-          CD promotes this manifest — CD does **not** rebuild images.
+          CD promotes this manifest — CD does **not** rebuild images and does **not** run scripts under devops/.
           "
           if gh release view "${TAG}" >/dev/null 2>&1; then
             gh release upload "${TAG}" release-manifest.json --clobber
