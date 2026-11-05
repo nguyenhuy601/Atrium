@@ -10,7 +10,8 @@ ENV npm_config_fetch_retries=10 \
 
 COPY services/auth-service/package*.json ./
 
-RUN apk add --no-cache --virtual .build-deps python3 make g++ \
+RUN apk upgrade --no-cache \
+  && apk add --no-cache --virtual .build-deps python3 make g++ \
   && npm install --ignore-scripts && npm install -g nodemon \
   && apk del .build-deps
 

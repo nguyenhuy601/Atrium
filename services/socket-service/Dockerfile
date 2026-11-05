@@ -8,6 +8,8 @@ ENV npm_config_fetch_retries=10 \
     npm_config_fetch_retry_mintimeout=20000 \
     npm_config_fetch_retry_maxtimeout=120000
 
+RUN apk upgrade --no-cache
+
 COPY services/socket-service/package*.json ./
 RUN npm install --ignore-scripts && npm install -g nodemon
 

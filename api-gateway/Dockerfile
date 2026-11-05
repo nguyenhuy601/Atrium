@@ -8,6 +8,9 @@ ENV npm_config_fetch_retries=10 \
     npm_config_fetch_retry_mintimeout=20000 \
     npm_config_fetch_retry_maxtimeout=120000
 
+# Bản vá HIGH/CRITICAL của Alpine mà tag node:20-alpine chưa kéo theo.
+RUN apk upgrade --no-cache
+
 # 3️⃣ Copy dependency files (build context = repo root)
 COPY api-gateway/package*.json ./
 

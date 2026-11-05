@@ -14,6 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_BREAK_SYSTEM_PACKAGES=1
 
 RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       python3 \
