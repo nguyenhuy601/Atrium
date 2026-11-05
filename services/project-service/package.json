@@ -22,7 +22,7 @@
     "ioredis": "^5.9.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^9.1.6",
-    "multer": "^2.4.0",
+    "multer": "^2.5.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
@@ -60,6 +60,7 @@
     "picomatch@4": "4.0.4",
     "body-parser@1": "1.20.9",
     "body-parser@2": "2.4.0",
-    "follow-redirects": "1.16.2"
+    "follow-redirects": "1.16.2",
+    "node-forge": "1.4.3"
   }
 }
