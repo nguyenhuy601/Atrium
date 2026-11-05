@@ -6,7 +6,7 @@ Nền tảng **cộng tác nội bộ** (chat, voice/meeting, task, tài liệu,
 
 Đặc tả / luồng nghiệp vụ: [`docs/spec-pack/`](docs/spec-pack/), [`docs/luong nghiep vu/00-overview.md`](docs/luong%20nghiep%20vu/00-overview.md) (theo nhóm suite).
 
-**AI Project** (Two-Phase HITL): [`docs/ai-project/README.md`](docs/ai-project/README.md) · sơ đồ tổng quát [`docs/ai-project/diagrams/00-overview-poster.svg`](docs/ai-project/diagrams/00-overview-poster.svg).
+**AI Project** (Two-Phase HITL): [`docs/ai-project/README.md`](docs/ai-project/README.md) · sơ đồ quy trình [`docs/ai-project/diagrams/ai-operating-flow.jpg`](docs/ai-project/diagrams/ai-operating-flow.jpg).
 
 ---
 
@@ -252,6 +252,10 @@ Chi tiết Compose: [`docs/DOCKER-COMPOSE.md`](docs/DOCKER-COMPOSE.md).
 ## AI Project (hai giai đoạn, có người duyệt)
 
 Lập kế hoạch dự án có người duyệt: **WHAT** (SRS) → Gate 1 → **HOW** (WBS/lịch) → Gate 2 → tạo project.
+
+![Sơ đồ quy trình hoạt động AI Project — LangGraph, Two-phase HITL](docs/ai-project/diagrams/ai-operating-flow.jpg)
+
+Sơ đồ trên là **kiến trúc đề xuất**: vòng đời Input → Project Ready, LangGraph WHAT/HOW (kể cả subgraph), Hybrid RAG, Gate và materialize.
 
 ```mermaid
 flowchart LR
