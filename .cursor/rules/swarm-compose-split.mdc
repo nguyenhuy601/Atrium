@@ -1,0 +1,43 @@
+---
+description: Atrium dev — Docker Swarm cho app + infra AI (ollama/minio/qdrant)
+alwaysApply: true
+---
+
+# Swarm vs Compose — môi trường dev Atrium
+
+## Quy tắc nhớ nhanh
+
+| Runtime | File / lệnh | Services |
+|---------|-------------|----------|
+| **Docker Swarm** | `docker-stack.yml` + `bash devops/swarm/deploy-stack.sh` | App microservices **và** infra AI: `ollama`, `minio`, `minio-init`, `qdrant`, `api-gateway`, `auth-service`, … |
+| **Docker Compose extra** | `docker-compose.swarm-extra.yml` | **Deprecated** (trống) — không còn runtime; giữ file để script cũ `down` leftover |
+
+**Không** dùng `docker compose up` cho `api-gateway`, `user-service`, `ollama`, `minio`, hay bất kỳ service trong `docker-stack.yml`.
+
+DNS trên overlay (cùng stack): `http://ollama:11434`, `http://minio:9000`, `http://qdrant:6333`.
+
+## Swarm — cập nhật sau khi sửa code
+
+**Ưu tiên pull/update, hạn chế build** — chi tiết: [docker-vhdx-disk.mdc](./docker-vhdx-disk.mdc).
+
+Chỉ build **một** service vừa sửa (tag `atrium-<service>:latest`):
+
+```bash
+bash devops/swarm/build-local-images.sh <service-name>
+docker service update --force --update-parallelism 1 --update-order start-first atrium_<service-name>
+```
+
+Infra image public (ollama/minio/qdrant): không build local — `docker service update --force atrium_<name>` hoặc redeploy stack.
+
+Profile dev (label ai + pull model):
+
+```bash
+bash devops/swarm/dev-enable-profile.sh
+```
+
+## Khi agent gợi ý lệnh Docker
+
+- Sửa một microservice → **build đúng service đó** + `service update --force`; tránh `build-local-images.sh` không tham số.
+- Sửa/restart ollama/minio/qdrant → Swarm `docker service update --force atrium_<name>` (không `compose up`).
+- Không nhầm `docker compose up` root/stack yml cho microservices đã deploy Swarm.
+- Tránh redeploy toàn stack khi chỉ cần rolling một service.

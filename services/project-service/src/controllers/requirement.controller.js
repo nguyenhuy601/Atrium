@@ -1,0 +1,696 @@
+const { sendServiceError } = require('../middleware/sendServiceError');
+const {
+  TEMPLATE_FILE_NAME,
+} = require('../constants/requirementTemplate.constants');
+const { buildRequirementTemplateBuffer } = require('../utils/requirement/requirementTemplateBuilder');
+const {
+  previewRequirementImport,
+  confirmRequirementImport,
+} = require('../services/requirementImport.service');
+const {
+  listRequirementPacks,
+  getRequirementPack,
+  getRequirementPackSourceFile,
+  submitRequirementPack,
+  approveRequirementPack,
+  rejectRequirementPack,
+  createProjectFromRequirementPack,
+  deleteRequirementPack,
+  createIntakeDraftPack,
+  uploadPackCustomerDocument,
+} = require('../services/requirementPack.service');
+const {
+  getAiAnalysisSummary,
+  confirmAiAnalysisJob,
+  exportAiAnalysisSheet11,
+  startPhaseAiPlanningRun,
+} = require('../services/aiAnalysis.service');
+const {
+  assertRequirementPermission,
+  resolveRequirementAccess,
+} = require('../services/requirementAccess.service');
+
+function resolveOrgId(req) {
+  return String(
+    req.headers['x-organization-id'] ||
+      req.query?.organizationId ||
+      req.body?.organizationId ||
+      ''
+  ).trim();
+}
+
+function resolveUserId(req) {
+  return String(req.user?.id || req.user?.userId || req.user?._id || '').trim();
+}
+
+function jsonError(res, err) {
+  const body = {
+    success: false,
+    message: err.message || 'Error',
+    errorCode: err.errorCode || 'REQUIREMENT_ERROR',
+  };
+  if (err.details) body.data = err.details;
+  return res.status(err.statusCode || 500).json(body);
+}
+
+async function downloadTemplate(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    if (!organizationId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId bắt buộc",
+      message: "organizationId bắt buộc",
+    });
+    }
+    await assertRequirementPermission({ userId, organizationId, permission: 'requirement:view' });
+
+    const variant = String(req.query?.variant || '')
+      .trim()
+      .toLowerCase();
+
+    if (variant === 'raw') {
+      const {
+        loadCustomerRawTemplateBuffer,
+        CUSTOMER_RAW_FILE_NAME,
+      } = require('../utils/requirement/customerRawTemplateBuilder');
+      const buf = await loadCustomerRawTemplateBuffer();
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      );
+      res.setHeader('Content-Disposition', `attachment; filename="${CUSTOMER_RAW_FILE_NAME}"`);
+      return res.send(Buffer.from(buf));
+    }
+
+    if (variant === 'analysis') {
+      const {
+        loadRequirementAnalysisTemplateBuffer,
+        ANALYSIS_TEMPLATE_FILE_NAME,
+      } = require('../utils/requirement/requirementAnalysisTemplateBuilder');
+      const buf = await loadRequirementAnalysisTemplateBuffer();
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      );
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${ANALYSIS_TEMPLATE_FILE_NAME}"`
+      );
+      return res.send(Buffer.from(buf));
+    }
+
+    const buf = await buildRequirementTemplateBuffer();
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${TEMPLATE_FILE_NAME}"`);
+    return res.send(Buffer.from(buf));
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function previewImport(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    if (!req.file?.buffer) {
+      return res.status(400).json({
+        success: false,
+        message: 'file (.xlsx) bắt buộc',
+        errorCode: 'REQ_IMPORT_FILE_REQUIRED',
+      });
+    }
+    if (!organizationId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId bắt buộc",
+      message: "organizationId bắt buộc",
+    });
+    }
+    const data = await previewRequirementImport({
+      userId,
+      organizationId,
+      fileBuffer: req.file.buffer,
+      fileName: req.file.originalname || '',
+    });
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+/** Chuẩn hóa dữ liệu → Customer Raw xlsx (binary). */
+async function normalizeImport(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    if (!req.file?.buffer) {
+      return res.status(400).json({
+        success: false,
+        message: 'file (.xlsx) bắt buộc',
+        errorCode: 'REQ_IMPORT_FILE_REQUIRED',
+      });
+    }
+    if (!organizationId) {
+      return res.status(400).json({ success: false, message: 'organizationId bắt buộc' });
+    }
+    const {
+      normalizeCustomerWorkbookToRaw,
+    } = require('../services/customerRawNormalize.service');
+    const result = await normalizeCustomerWorkbookToRaw({
+      userId,
+      organizationId,
+      fileBuffer: req.file.buffer,
+      fileName: req.file.originalname || '',
+    });
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${result.fileName}"`
+    );
+    if (result.profile) {
+      res.setHeader('X-Raw-Normalize-Profile', String(result.profile));
+    }
+    return res.status(200).send(result.buffer);
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function createIntakeDraft(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const body = req.body || {};
+    if (!organizationId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId bắt buộc",
+      message: "organizationId bắt buộc",
+    });
+    }
+    const pack = await createIntakeDraftPack({
+      userId,
+      organizationId,
+      title: body.title,
+      description: body.description,
+      customerName: body.customerName,
+      startDate: body.startDate,
+      dueDate: body.dueDate,
+      priority: body.priority,
+      sourceFileName: body.sourceFileName,
+      importSessionId: body.importSessionId,
+      analysisMode: body.analysisMode,
+      projectId: body.projectId,
+    });
+    return res.status(201).json({ success: true, data: pack });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function uploadPackCustomerDocumentCtrl(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    if (!organizationId || !packId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId và packId bắt buộc",
+      message: "organizationId và packId bắt buộc",
+    });
+    }
+    const data = await uploadPackCustomerDocument({
+      userId,
+      organizationId,
+      packId,
+      file: req.file,
+      docClass: req.body?.docClass,
+      notes: req.body?.notes,
+    });
+    return res.status(201).json({ success: true, data });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function confirmImport(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const sessionId = String(req.body?.sessionId || '').trim();
+    if (!organizationId || !sessionId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId và sessionId bắt buộc",
+      message: "organizationId và sessionId bắt buộc",
+    });
+    }
+    const pack = await confirmRequirementImport({ userId, organizationId, sessionId });
+    return res.status(201).json({ success: true, data: pack });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function getAccess(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    if (!organizationId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId bắt buộc",
+      message: "organizationId bắt buộc",
+    });
+    }
+    const access = await resolveRequirementAccess({ userId, organizationId });
+    return res.json({ success: true, data: access });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function listPacks(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    if (!organizationId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId bắt buộc",
+      message: "organizationId bắt buộc",
+    });
+    }
+    const rows = await listRequirementPacks({
+      userId,
+      organizationId,
+      status: req.query?.status,
+    });
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function getPack(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    if (!organizationId || !packId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId và packId bắt buộc",
+      message: "organizationId và packId bắt buộc",
+    });
+    }
+    const view = String(req.query?.view || 'full').trim();
+    const pack = await getRequirementPack({
+      userId,
+      organizationId,
+      packId,
+      view,
+      gateRowOffset: req.query?.gateRowOffset,
+      gateRowLimit: req.query?.gateRowLimit,
+    });
+    return res.json({ success: true, data: pack });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function downloadSourceFile(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    if (!organizationId || !packId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId và packId bắt buộc",
+      message: "organizationId và packId bắt buộc",
+    });
+    }
+    const { body, fileName, contentType } = await getRequirementPackSourceFile({
+      userId,
+      organizationId,
+      packId,
+    });
+    const safeName = String(fileName || 'requirement.xlsx').replace(/[^\w.\-() ]+/g, '_');
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
+    if (body && typeof body.pipe === 'function') {
+      body.pipe(res);
+      return undefined;
+    }
+    return res.send(body);
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function submitPack(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const pack = await submitRequirementPack({
+      userId,
+      organizationId,
+      packId,
+      reviewDecisions: body.reviewDecisions || body.srsProposalReview || null,
+      expectedReviewVersion:
+        body.expectedReviewVersion != null ? body.expectedReviewVersion : body.reviewVersion,
+      expectedRevisionIds: body.expectedRevisionIds || null,
+      withdrawSubmissionId: body.withdrawSubmissionId || null,
+      requestId: req.headers['x-request-id'] || body.requestId || '',
+    });
+    return res.json({ success: true, data: pack });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function approvePack(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const pack = await approveRequirementPack({
+      userId,
+      organizationId,
+      packId,
+      forceApprove: Boolean(body.forceApprove),
+      overrideReason: body.overrideReason || body.reason || '',
+      note: body.note || body.notes || '',
+      contextProjectId: body.projectId || null,
+    });
+    return res.json({ success: true, data: pack });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function rejectPack(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    const pack = await rejectRequirementPack({
+      userId,
+      organizationId,
+      packId,
+      reason: req.body?.reason,
+      contextProjectId: req.body?.projectId || null,
+    });
+    return res.json({ success: true, data: pack });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function createProjectFromPack(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    if (!organizationId || !packId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId và packId bắt buộc",
+      message: "organizationId và packId bắt buộc",
+    });
+    }
+    const data = await createProjectFromRequirementPack({
+      userId,
+      organizationId,
+      packId,
+      title: req.body?.title,
+      importWorkItems: Boolean(req.body?.importWorkItems),
+      leafAssignments: req.body?.leafAssignments,
+      applyAssignees: req.body?.applyAssignees !== false,
+      forceApprove: Boolean(req.body?.forceApprove),
+      overrideReason: String(req.body?.overrideReason || '').trim(),
+      idempotencyKey: req.body?.idempotencyKey || null,
+    });
+    return res.status(201).json({ success: true, data });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function runAiPlanning(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    if (!organizationId || !packId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId và packId bắt buộc",
+      message: "organizationId và packId bắt buộc",
+    });
+    }
+    const err = new Error('AI planning heuristic đã gỡ — dùng phase_what / phase_how');
+    err.statusCode = 410;
+    err.errorCode = 'LEGACY_AI_PLANNING_REMOVED';
+    throw err;
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function approveAiStaffing(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    if (!organizationId || !packId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId và packId bắt buộc",
+      message: "organizationId và packId bắt buộc",
+    });
+    }
+    const err = new Error('AI planning heuristic đã gỡ — dùng phase_what / phase_how');
+    err.statusCode = 410;
+    err.errorCode = 'LEGACY_AI_PLANNING_REMOVED';
+    throw err;
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function discardAiStaffing(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    if (!organizationId || !packId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId và packId bắt buộc",
+      message: "organizationId và packId bắt buộc",
+    });
+    }
+    const err = new Error('AI planning heuristic đã gỡ — dùng phase_what / phase_how');
+    err.statusCode = 410;
+    err.errorCode = 'LEGACY_AI_PLANNING_REMOVED';
+    throw err;
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function deletePack(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    if (!organizationId || !packId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId và packId bắt buộc",
+      message: "organizationId và packId bắt buộc",
+    });
+    }
+    const data = await deleteRequirementPack({ userId, organizationId, packId });
+    return res.json({ success: true, data });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function getAiAnalysis(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    if (!organizationId || !packId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId và packId bắt buộc",
+      message: "organizationId và packId bắt buộc",
+    });
+    }
+    const data = await getAiAnalysisSummary({ userId, organizationId, packId });
+    return res.json({ success: true, data });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+/** Gate2 phase confirm — body.phase=how (no jobId). */
+async function confirmAiAnalysisPhase(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    if (!organizationId || !packId) {
+      return res.status(400).json({
+        success: false,
+        message: 'organizationId và packId bắt buộc',
+      });
+    }
+    const data = await confirmAiAnalysisJob({
+      userId,
+      organizationId,
+      packId,
+      phase: req.body?.phase || 'how',
+      action: req.body?.action,
+      note: req.body?.note || req.body?.reason || '',
+      reviewDecisions: req.body?.reviewDecisions,
+      track: req.body?.track,
+      proposal: req.body?.proposal,
+      proposalId: req.body?.proposalId,
+      decision: req.body?.decision,
+      conflictId: req.body?.conflictId,
+      chosenRoleKey: req.body?.chosenRoleKey,
+      forceApprove: Boolean(req.body?.forceApprove),
+      overrideReason: String(req.body?.overrideReason || '').trim().slice(0, 2000),
+    });
+    return res.json({ success: true, data });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function startPhaseAiPlanning(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    if (!organizationId || !packId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId và packId bắt buộc",
+      message: "organizationId và packId bắt buộc",
+    });
+    }
+    const idempotencyKey = String(
+      req.get('Idempotency-Key') ||
+        req.get('idempotency-key') ||
+        req.body?.idempotencyKey ||
+        ''
+    ).trim();
+    const localeRaw = String(req.body?.locale || req.get('X-UI-Locale') || '').trim().toLowerCase();
+    const locale = localeRaw === 'en' || localeRaw.startsWith('en') ? 'en' : localeRaw === 'vi' || localeRaw.startsWith('vi') ? 'vi' : '';
+    const impactScopeRaw = req.body?.impactScope;
+    const impactScope = Array.isArray(impactScopeRaw)
+      ? impactScopeRaw.map((s) => String(s || '').trim()).filter(Boolean)
+      : [];
+    const rerunToolsRaw = req.body?.rerunTools;
+    const rerunTools = Array.isArray(rerunToolsRaw)
+      ? rerunToolsRaw.map((s) => String(s || '').trim()).filter(Boolean)
+      : [];
+    const data = await startPhaseAiPlanningRun({
+      userId,
+      organizationId,
+      packId,
+      phase: req.body?.phase || 'how',
+      force: Boolean(req.body?.force),
+      mode: req.body?.mode || '',
+      feedback: req.body?.feedback || '',
+      impactScope,
+      rerunTools,
+      action: req.body?.action || '',
+      decision: req.body?.decision || '',
+      runId: req.body?.runId || '',
+      kind: req.body?.kind || '',
+      resume: req.body?.resume ?? null,
+      parentRunId: req.body?.parentRunId || '',
+      contextProjectId: req.body?.projectId || null,
+      locale: locale || undefined,
+      snapshotPolicy: req.body?.snapshotPolicy || 'reuse_if_valid',
+      idempotencyKey,
+    });
+    const httpStatus = Number(data?.httpStatus) === 200 ? 200 : 202;
+    return res.status(httpStatus).json({ success: true, data });
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+async function exportAiAnalysis(req, res) {
+  try {
+    const organizationId = resolveOrgId(req);
+    const userId = resolveUserId(req);
+    const packId = String(req.params.packId || '').trim();
+    if (!organizationId || !packId) {
+      return sendServiceError(res, 400, {
+      errorCode: 'VALIDATION_FAILED',
+      messageUser: "organizationId và packId bắt buộc",
+      message: "organizationId và packId bắt buộc",
+    });
+    }
+    const { buffer, fileName } = await exportAiAnalysisSheet11({
+      userId,
+      organizationId,
+      packId,
+    });
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return res.send(buffer);
+  } catch (err) {
+    return jsonError(res, err);
+  }
+}
+
+module.exports = {
+  downloadTemplate,
+  previewImport,
+  normalizeImport,
+  createIntakeDraft,
+  uploadPackCustomerDocumentCtrl,
+  confirmImport,
+  getAccess,
+  listPacks,
+  getPack,
+  downloadSourceFile,
+  submitPack,
+  approvePack,
+  rejectPack,
+  deletePack,
+  createProjectFromPack,
+  runAiPlanning,
+  approveAiStaffing,
+  discardAiStaffing,
+  getAiAnalysis,
+  confirmAiAnalysisPhase,
+  exportAiAnalysis,
+  startPhaseAiPlanning,
+};

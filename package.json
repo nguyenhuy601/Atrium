@@ -1,34 +1,30 @@
 {
-  "name": "voice-chat-app-microservices",
-  "version": "1.0.0",
-  "description": "Voice Chat Application with Microservices Architecture",
+  "name": "atrium",
   "private": true,
-  "workspaces": [
-    "client",
-    "services/*"
-  ],
+  "description": "Meta-package: script đồng bộ node_modules / lockfile cho mọi service sau khi pull",
   "scripts": {
-    "dev": "concurrently \"npm run dev:client\" \"npm run dev:gateway\" \"npm run dev:services\"",
-    "dev:client": "cd client && npm run dev",
-    "dev:gateway": "cd services/api-gateway && npm run dev",
-    "dev:services": "concurrently \"cd services/auth-service && npm run dev\" \"cd services/user-service && npm run dev\" \"cd services/organization-service && npm run dev\" \"cd services/chat-system-service && npm run dev\" \"cd services/task-service && npm run dev\" \"cd services/friend-service && npm run dev\"",
-    "install:all": "npm install && cd client && npm install && cd ../services/api-gateway && npm install && cd ../auth-service && npm install && cd ../user-service && npm install && cd ../organization-service && npm install && cd ../chat-system-service && npm install && cd ../task-service && npm install && cd ../friend-service && npm install",
-    "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down",
-    "docker:build": "docker-compose build",
-    "docker:logs": "docker-compose logs -f"
+    "deps": "node scripts/sync-node-deps.mjs"
   },
-  "keywords": [
-    "microservices",
-    "nodejs",
-    "react",
-    "socket.io",
-    "mongodb",
-    "docker"
-  ],
-  "author": "",
-  "license": "MIT",
-  "devDependencies": {
-    "concurrently": "^8.2.2"
+  "overrides": {
+    "proxy-addr": "2.0.8",
+    "protobufjs": "7.6.1",
+    "websocket-driver": "0.7.5",
+    "fast-xml-parser": "5.5.6",
+    "fast-xml-builder": "1.1.7",
+    "tar": "7.5.21",
+    "@grpc/grpc-js": "1.14.5",
+    "engine.io": "6.6.10",
+    "socket.io-parser": "4.2.7",
+    "ws": "8.21.0",
+    "@fastify/busboy": "3.2.1",
+    "minimatch@3": "3.1.4",
+    "brace-expansion@1": "1.1.20",
+    "brace-expansion@2": "2.1.6",
+    "path-to-regexp@0.1.12": "0.1.13",
+    "path-to-regexp@8": "8.4.0",
+    "form-data@2": "2.5.6",
+    "form-data@4": "4.0.6",
+    "picomatch@2": "2.3.2",
+    "picomatch@4": "4.0.4"
   }
 }

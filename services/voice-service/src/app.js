@@ -1,0 +1,40 @@
+const express = require('express');
+const { createCorsMiddleware } = require('@enterprise/shared/middleware/corsPolicy');
+const gatewayUserMiddleware = require('./middlewares/gatewayUser');
+const errorHandler = require('./middlewares/errorHandler');
+const { mongoose } = require('@enterprise/shared/config/mongo');
+require('./models/CallSession');
+require('./models/VoiceRoomLobby');
+require('./models/VoiceRoomJoinRequest');
+
+const app = express();
+
+// Middleware
+app.use(createCorsMiddleware());
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(gatewayUserMiddleware);
+
+// Routes
+app.get('/health', (req, res) => {
+  const mongoOk = mongoose.connection.readyState === 1;
+  res.status(mongoOk ? 200 : 503).json({
+    status: mongoOk ? 'ok' : 'degraded',
+    service: 'voice-service',
+    mongo: {
+      readyState: mongoose.connection.readyState,
+      ok: mongoOk,
+    },
+  });
+});
+
+// Meeting routes
+const meetingRoutes = require('./routes/meeting.routes');
+const voiceRoutes = require('./routes/voice.routes');
+app.use('/api/meetings', meetingRoutes);
+app.use('/api/voice', voiceRoutes);
+
+app.use(errorHandler);
+
+module.exports = app;
+

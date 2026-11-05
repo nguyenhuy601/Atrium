@@ -1,0 +1,174 @@
+require('dotenv').config();
+
+const { compareGatewayToken } = require('@enterprise/shared/middleware/compareGatewayToken');
+
+const USER_SERVICE_URL = String(process.env.USER_SERVICE_URL || '').trim().replace(/\/+$/, '');
+if (!USER_SERVICE_URL) throw new Error('Thiếu biến môi trường: USER_SERVICE_URL');
+
+if (process.env.NODE_ENV === 'production') {
+  const realtimeToken = String(process.env.REALTIME_INTERNAL_TOKEN || '').trim();
+  if (!realtimeToken) {
+    console.error('[socket-service] FATAL: REALTIME_INTERNAL_TOKEN is required in production.');
+    process.exit(1);
+  }
+}
+
+const http = require('http');
+const express = require('express');
+const cors = require('cors');
+const { Server } = require('socket.io');
+const { socketAuth } = require('@enterprise/shared/middleware/auth');
+const { connectRedis, disconnectRedis } = require('@enterprise/shared');
+const registerChatNamespace = require('./socket/chat.namespace');
+const { setChatNamespace, publishRealtimeEvent } = require('./socket/realtimeHub');
+
+const app = express();
+app.use(express.json({ limit: '1mb' }));
+
+const INTERNAL_REALTIME_TOKEN = process.env.REALTIME_INTERNAL_TOKEN || '';
+
+const isProd = process.env.NODE_ENV === 'production';
+// Dev: luôn cho phép mọi origin để FE truy cập được qua IP LAN và port bất kỳ.
+// Production: chỉ whitelist theo CORS_ORIGIN.
+const corsOriginRaw = String(process.env.CORS_ORIGIN || '').trim();
+const corsOrigin = corsOriginRaw || (isProd ? '' : '');
+const parsedOrigins = corsOrigin
+  .split(',')
+  .map((origin) => origin.replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').trim())
+  .filter(Boolean);
+
+const hasWildcardCors = parsedOrigins.some((o) => o === '*');
+if (isProd && hasWildcardCors) {
+  console.warn('[socket-service] CORS_ORIGIN contains * — ignored in production');
+}
+const safeProdOrigins = parsedOrigins.filter((o) => o !== '*');
+const socketCorsOrigin = !isProd
+  ? true
+  : safeProdOrigins.length === 0
+    ? false
+    : safeProdOrigins.length === 1
+      ? safeProdOrigins[0]
+      : safeProdOrigins;
+
+app.use(
+  cors({
+    origin: socketCorsOrigin,
+    credentials: true,
+    methods: ['GET', 'POST', 'OPTIONS'],
+  })
+);
+let redisAdapterActive = false;
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'socket-service',
+    redisAdapter: redisAdapterActive,
+    socketIoRedisAdapterEnv: process.env.SOCKET_IO_REDIS_ADAPTER !== 'false',
+  });
+});
+
+app.post('/internal/realtime/publish', (req, res) => {
+  const token = String(req.headers['x-realtime-token'] || '').trim();
+  const expected = String(INTERNAL_REALTIME_TOKEN || '').trim();
+  if (!expected) {
+    return res.status(503).json({ ok: false, message: 'REALTIME_INTERNAL_TOKEN not configured' });
+  }
+  if (!compareGatewayToken(token, expected)) {
+    return res.status(401).json({ ok: false, message: 'Unauthorized realtime publish' });
+  }
+
+  const result = publishRealtimeEvent(req.body || {});
+  if (!result.ok) {
+    return res.status(400).json(result);
+  }
+  return res.json(result);
+});
+
+const PORT = process.env.PORT || 3017;
+const SOCKET_PING_INTERVAL_MS = Math.max(10000, Number(process.env.SOCKET_PING_INTERVAL_MS || 25000));
+const SOCKET_PING_TIMEOUT_MS = Math.max(20000, Number(process.env.SOCKET_PING_TIMEOUT_MS || 60000));
+
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  cors: {
+    origin: socketCorsOrigin,
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+  pingInterval: SOCKET_PING_INTERVAL_MS,
+  pingTimeout: SOCKET_PING_TIMEOUT_MS,
+});
+
+async function attachRedisAdapterIfEnabled() {
+  if (process.env.SOCKET_IO_REDIS_ADAPTER === 'false') return;
+
+  try {
+    const { buildNodeRedisClientOptions, describeRedisConnectionMode } = require('@enterprise/shared/config/redisConnection');
+    const { createClient } = require('redis');
+    const { createAdapter } = require('@socket.io/redis-adapter');
+    const mode = describeRedisConnectionMode();
+    const clientOptions = buildNodeRedisClientOptions();
+    const pubClient = createClient(clientOptions);
+    const subClient = pubClient.duplicate();
+    await Promise.all([pubClient.connect(), subClient.connect()]);
+    io.adapter(createAdapter(pubClient, subClient));
+    redisAdapterActive = true;
+    console.log(`[socket-service] Socket.IO Redis adapter enabled (${mode})`);
+  } catch (err) {
+    console.warn('[socket-service] Redis adapter not available:', err.message);
+  }
+}
+
+function startListen() {
+  server.listen(PORT, () => {
+    const originLabel =
+      socketCorsOrigin === true
+        ? '*'
+        : Array.isArray(socketCorsOrigin)
+          ? socketCorsOrigin.join(', ')
+          : String(socketCorsOrigin);
+    console.log(`Socket Service đang chạy trên cổng ${PORT}`);
+    console.log(`[socket-service] Allowed origins: ${originLabel}`);
+    console.log(
+      `[socket-service] pingInterval=${SOCKET_PING_INTERVAL_MS}ms pingTimeout=${SOCKET_PING_TIMEOUT_MS}ms offlineGrace=${Math.max(0, Number(process.env.PRESENCE_OFFLINE_GRACE_MS || 12000))}ms`
+    );
+    const presenceToken = String(process.env.USER_SERVICE_INTERNAL_TOKEN || '').trim();
+    console.log(
+      `[socket-service] Presence → user-service: USER_SERVICE_URL=${process.env.USER_SERVICE_URL} ` +
+        `internal token ${presenceToken ? 'SET (len=' + presenceToken.length + ')' : 'MISSING (disconnect sẽ KHÔNG cập nhật offline trong DB)'}`
+    );
+  });
+}
+
+(async () => {
+  try {
+    connectRedis();
+  } catch (e) {
+    console.warn('[socket-service] Redis optional:', e.message);
+  }
+
+  await attachRedisAdapterIfEnabled();
+
+  const chatNamespace = io.of('/chat');
+  chatNamespace.use(socketAuth);
+  setChatNamespace(chatNamespace);
+  registerChatNamespace(chatNamespace);
+
+  startListen();
+
+  process.on('SIGTERM', () => {
+    console.log('[socket-service] SIGTERM: closing Socket.IO and HTTP');
+    io.close(() => {
+      server.close(async () => {
+        try {
+          await disconnectRedis();
+        } catch (e) {
+          /* ignore */
+        }
+        process.exit(0);
+      });
+    });
+  });
+})();

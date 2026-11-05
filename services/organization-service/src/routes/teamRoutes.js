@@ -1,13 +1,17 @@
 const express = require('express');
 const router = express.Router({ mergeParams: true });
 const teamController = require('../controllers/teamController');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorizeOrGrant } = require('../middleware/auth');
+const { requireOrgReadAccess } = require('../middleware/requireOrgReadAccess');
+const { registerObjectIdParams, requireMountedObjectIds } = require('../middleware/objectIdParam');
 
 router.use(protect);
+router.use(requireMountedObjectIds(['orgId', 'deptId']));
+registerObjectIdParams(router, ['id']);
 
-router.get('/', teamController.getTeams);
-router.post('/', authorize(['org_admin', 'department_head']), teamController.createTeam);
-router.put('/:id', authorize(['org_admin', 'department_head', 'team_leader']), teamController.updateTeam);
-router.delete('/:id', authorize(['org_admin', 'department_head']), teamController.deleteTeam);
+router.get('/', requireOrgReadAccess, teamController.getTeams);
+router.post('/', authorizeOrGrant(['owner', 'admin'], 'organization.team.create'), teamController.createTeam);
+router.put('/:id', authorizeOrGrant(['owner', 'admin'], 'organization.team.update'), teamController.updateTeam);
+router.delete('/:id', authorizeOrGrant(['owner', 'admin'], 'organization.team.delete'), teamController.deleteTeam);
 
 module.exports = router;

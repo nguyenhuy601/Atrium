@@ -1,0 +1,313 @@
+/**
+ * Minimal JSON-schema-like descriptors for default planning tools.
+ * Non-empty input/output/evidence schemas (properties required for registry asserts).
+ */
+
+const EmployeeMatchingTool = {
+  inputSchema: {
+    type: 'object',
+    properties: {
+      container: { type: 'object' },
+      poolItems: { type: 'array', items: { type: 'object' } },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      recommendations: { type: 'array' },
+      fte: { type: 'object' },
+    },
+  },
+  evidenceSchema: {
+    type: 'object',
+    properties: {
+      sourceType: { type: 'string' },
+      calculatedBy: { type: 'string' },
+    },
+  },
+};
+
+const EffortTool = {
+  inputSchema: {
+    type: 'object',
+    properties: {
+      container: { type: 'object' },
+      pack: { type: 'object' },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      estimatedHoursTotal: { type: 'number' },
+      tasks: { type: 'array' },
+    },
+  },
+  evidenceSchema: {
+    type: 'object',
+    properties: {
+      sourceType: { type: 'string' },
+      metric: { type: 'string' },
+    },
+  },
+};
+
+const RequirementAnalysisTool = {
+  inputSchema: {
+    type: 'object',
+    properties: {
+      snapshot: { type: 'object' },
+      pack: { type: 'object' },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      functionalRequirements: { type: 'array' },
+      hierarchyCandidates: { type: 'array' },
+    },
+  },
+  evidenceSchema: {
+    type: 'object',
+    properties: {
+      sourceType: { type: 'string' },
+      sourceId: { type: 'string' },
+    },
+  },
+};
+
+const ScheduleTool = {
+  inputSchema: {
+    type: 'object',
+    properties: {
+      container: { type: 'object' },
+      calendar: { type: 'object' },
+      projectStart: { type: 'string' },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      schedule: { type: 'array' },
+      taskDates: { type: 'object' },
+      schedulePlan: { type: 'object' },
+    },
+  },
+  evidenceSchema: {
+    type: 'object',
+    properties: {
+      sourceType: { type: 'string' },
+      ruleId: { type: 'string' },
+    },
+  },
+};
+
+const ArchitectureTool = {
+  inputSchema: {
+    type: 'object',
+    properties: {
+      container: { type: 'object' },
+      pack: { type: 'object' },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      components: { type: 'array' },
+      dependencies: { type: 'array' },
+    },
+  },
+  evidenceSchema: {
+    type: 'object',
+    properties: {
+      sourceType: { type: 'string' },
+      calculatedBy: { type: 'string' },
+    },
+  },
+};
+
+const RiskTool = {
+  inputSchema: {
+    type: 'object',
+    properties: {
+      container: { type: 'object' },
+      pack: { type: 'object' },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      risks: { type: 'array' },
+    },
+  },
+  evidenceSchema: {
+    type: 'object',
+    properties: {
+      sourceType: { type: 'string' },
+      metric: { type: 'string' },
+    },
+  },
+};
+
+const genericIo = {
+  inputSchema: {
+    type: 'object',
+    properties: {
+      container: { type: 'object' },
+      pack: { type: 'object' },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      container: { type: 'object' },
+    },
+  },
+  evidenceSchema: {
+    type: 'object',
+    properties: {
+      sourceType: { type: 'string' },
+      calculatedBy: { type: 'string' },
+    },
+  },
+};
+
+const SequencingTool = {
+  inputSchema: {
+    type: 'object',
+    properties: {
+      container: { type: 'object' },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      sequence: { type: 'object' },
+      theoreticalCpm: { type: 'object' },
+    },
+  },
+  evidenceSchema: genericIo.evidenceSchema,
+};
+
+const HierarchyTool = { ...genericIo };
+const InsightsTool = { ...genericIo };
+const BacklogMapTool = { ...genericIo };
+const WbsTool = { ...genericIo };
+const DependencyTool = {
+  inputSchema: {
+    type: 'object',
+    properties: {
+      container: { type: 'object' },
+      pack: { type: 'object' },
+      planningHints: { type: 'object' },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      schemaVersion: { type: 'string' },
+      analysisStatus: { type: 'string' },
+      dependencies: { type: 'array' },
+      unresolvedQuestions: { type: 'array' },
+      validation: { type: 'object' },
+      edges: { type: 'array' },
+      orderHint: { type: 'array' },
+      tool: { type: 'object' },
+    },
+  },
+  evidenceSchema: genericIo.evidenceSchema,
+};
+const ProjectPlanTool = { ...genericIo };
+
+const QualityPlanTool = {
+  inputSchema: {
+    type: 'object',
+    properties: {
+      container: { type: 'object' },
+      pack: { type: 'object' },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      qualityPlan: { type: 'object' },
+      structurallyOk: { type: 'boolean' },
+    },
+  },
+  evidenceSchema: genericIo.evidenceSchema,
+};
+
+const WhatSectionTool = {
+  inputSchema: {
+    type: 'object',
+    properties: {
+      pack: { type: 'object' },
+      proposal: { type: 'object' },
+      snapshot: { type: 'object' },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      engineId: { type: 'string' },
+      section: { type: 'string' },
+      items: { type: 'array' },
+    },
+  },
+  evidenceSchema: genericIo.evidenceSchema,
+};
+
+const WhatFrTool = {
+  inputSchema: {
+    type: 'object',
+    properties: {
+      pack: { type: 'object' },
+      snapshot: { type: 'object' },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      proposalFragment: { type: 'object' },
+      frUnderstanding: { type: 'object' },
+    },
+  },
+  evidenceSchema: genericIo.evidenceSchema,
+};
+
+const DeployPlanTool = {
+  inputSchema: {
+    type: 'object',
+    properties: {
+      container: { type: 'object' },
+      toolData: { type: 'object' },
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      deployPlan: { type: 'object' },
+      structurallyOk: { type: 'boolean' },
+    },
+  },
+  evidenceSchema: genericIo.evidenceSchema,
+};
+
+module.exports = {
+  EmployeeMatchingTool,
+  EffortTool,
+  RequirementAnalysisTool,
+  ScheduleTool,
+  ArchitectureTool,
+  RiskTool,
+  SequencingTool,
+  HierarchyTool,
+  InsightsTool,
+  BacklogMapTool,
+  WbsTool,
+  DependencyTool,
+  ProjectPlanTool,
+  QualityPlanTool,
+  DeployPlanTool,
+  WhatSectionTool,
+  WhatFrTool,
+};

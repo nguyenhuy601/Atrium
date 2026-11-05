@@ -1,0 +1,594 @@
+services:
+
+  api-gateway:
+
+    build:
+      context: .
+      dockerfile: api-gateway/Dockerfile
+
+    container_name: enterprise-api-gateway
+
+    ports:
+
+      - "3000:3000"
+
+    env_file:
+
+      - .env
+
+      - ./api-gateway/.env
+
+    environment:
+
+      REDIS_HOST: ${REDIS_HOST}
+
+      REDIS_PORT: ${REDIS_PORT}
+
+      BFF_CACHE_ENABLED: ${BFF_CACHE_ENABLED}
+
+      BFF_BOOTSTRAP_CACHE_TTL_SEC: ${BFF_BOOTSTRAP_CACHE_TTL_SEC}
+
+      BFF_SHELL_CACHE_TTL_SEC: ${BFF_SHELL_CACHE_TTL_SEC}
+
+      BFF_DASHBOARD_CACHE_TTL_SEC: ${BFF_DASHBOARD_CACHE_TTL_SEC}
+
+      BFF_DOCUMENTS_OVERVIEW_CACHE_TTL_SEC: ${BFF_DOCUMENTS_OVERVIEW_CACHE_TTL_SEC}
+
+      BFF_SHELL_TIMEOUT_MS: ${BFF_SHELL_TIMEOUT_MS}
+
+    depends_on:
+
+      - redis
+
+      - auth-service
+
+      - user-service
+
+
+      - organization-service
+
+      - role-permission-service
+
+      - chat-service
+
+      - voice-service
+
+      - project-service
+
+      - project-service
+
+
+      - notification-service
+
+    networks:
+
+      - enterprise-network
+
+    volumes:
+
+      - ./api-gateway:/app
+
+      - ./shared:/shared
+
+      - /app/node_modules
+
+    command: ["sh", "-c", "npm ci || npm install; node /shared/postinstall-link.cjs; node src/server.js"]
+
+  auth-service:
+
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+
+    container_name: enterprise-auth-service
+
+    env_file:
+
+      - .env
+
+      - ./services/auth-service/.env
+
+    environment:
+
+      USER_SERVICE_INTERNAL_TOKEN: ${USER_SERVICE_INTERNAL_TOKEN}
+
+    depends_on:
+
+      - mongodb
+
+      - redis
+
+    networks:
+
+      - enterprise-network
+
+    volumes:
+
+      - ./services/auth-service:/app
+
+      - ./shared:/shared
+
+      - /app/node_modules
+
+    command: ["sh", "-c", "npm ci || npm install; node /shared/postinstall-link.cjs; node src/server.js"]
+
+  user-service:
+
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+
+    container_name: enterprise-user-service
+
+    env_file:
+
+      - .env
+
+      - ./services/user-service/.env
+
+    environment:
+
+      USER_SERVICE_INTERNAL_TOKEN: ${USER_SERVICE_INTERNAL_TOKEN}
+
+    depends_on:
+
+      - mongodb
+
+      - redis
+
+    networks:
+
+      - enterprise-network
+
+    volumes:
+
+      - ./services/user-service:/app
+
+      - ./shared:/shared
+
+      - /app/node_modules
+
+    command: ["sh", "-c", "npm ci || npm install; node /shared/postinstall-link.cjs; node src/server.js"]
+
+  organization-service:
+
+    build:
+      context: .
+      dockerfile: services/organization-service/Dockerfile
+
+    container_name: enterprise-organization-service
+
+    env_file:
+
+      - .env
+
+      - ./services/organization-service/.env
+
+    environment:
+
+      NOTIFICATION_INTERNAL_TOKEN: ${NOTIFICATION_INTERNAL_TOKEN}
+
+    depends_on:
+
+      - mongodb
+
+      - redis
+
+    networks:
+
+      - enterprise-network
+
+    volumes:
+
+      - ./services/organization-service:/app
+
+      - ./shared:/shared
+
+      - /app/node_modules
+
+    command: ["sh", "-c", "npm ci || npm install; node /shared/postinstall-link.cjs; node src/server.js"]
+
+  role-permission-service:
+
+    build:
+      context: .
+      dockerfile: services/role-permission-service/Dockerfile
+
+    container_name: enterprise-role-permission-service
+
+    env_file:
+
+      - .env
+
+      - ./services/role-permission-service/.env
+
+    depends_on:
+
+      - mongodb
+
+      - redis
+
+      - organization-service
+
+    networks:
+
+      - enterprise-network
+
+    volumes:
+
+      - ./services/role-permission-service:/app
+
+      - ./shared:/shared
+
+      - /app/node_modules
+
+    command: ["sh", "-c", "npm ci || npm install; node /shared/postinstall-link.cjs; node src/server.js"]
+
+  chat-service:
+
+    build:
+      context: .
+      dockerfile: services/chat-service/Dockerfile
+
+    container_name: enterprise-chat-service
+
+    env_file:
+
+      - .env
+
+      - ./services/chat-service/.env
+
+    environment:
+
+      CHAT_INTERNAL_TOKEN: ${CHAT_INTERNAL_TOKEN}
+
+      RABBITMQ_URL: ${RABBITMQ_URL}
+
+      FRIEND_DM_USE_QUEUE: ${FRIEND_DM_USE_QUEUE}
+
+      REALTIME_INTERNAL_TOKEN: ${REALTIME_INTERNAL_TOKEN}
+
+      NOTIFICATION_INTERNAL_TOKEN: ${NOTIFICATION_INTERNAL_TOKEN}
+
+      USER_SERVICE_INTERNAL_TOKEN: ${USER_SERVICE_INTERNAL_TOKEN}
+
+    depends_on:
+
+      mongodb:
+
+        condition: service_started
+
+      redis:
+
+        condition: service_started
+
+      rabbitmq:
+
+        condition: service_healthy
+
+      user-service:
+
+        condition: service_started
+
+      organization-service:
+
+        condition: service_started
+
+    networks:
+
+      - enterprise-network
+
+    volumes:
+
+      - ./services/chat-service:/app
+
+      - ./shared:/shared
+
+      - /app/node_modules
+
+    command: ["sh", "-c", "npm ci || npm install; node /shared/postinstall-link.cjs; node src/server.js"]
+
+  project-service:
+
+    build:
+      context: .
+      dockerfile: services/project-service/Dockerfile
+
+    container_name: enterprise-project-service
+
+    env_file:
+
+      - .env
+
+      - ./services/project-service/.env
+
+    environment:
+
+      RABBITMQ_URL: ${RABBITMQ_URL}
+
+      CHAT_INTERNAL_TOKEN: ${CHAT_INTERNAL_TOKEN}
+
+    depends_on:
+
+      mongodb:
+
+        condition: service_started
+
+      redis:
+
+        condition: service_started
+
+      rabbitmq:
+
+        condition: service_healthy
+
+      chat-service:
+
+        condition: service_started
+
+      organization-service:
+
+        condition: service_started
+
+    networks:
+
+      - enterprise-network
+
+    volumes:
+
+      - ./services/project-service:/app
+
+      - ./shared:/shared
+
+      - /app/node_modules
+
+    command: ["sh", "-c", "npm ci || npm install; node /shared/postinstall-link.cjs; node src/server.js"]
+
+  project-service:
+
+    build:
+      context: .
+      dockerfile: services/project-service/Dockerfile
+
+    container_name: enterprise-project-service
+
+    env_file:
+
+      - .env
+
+      - ./services/project-service/.env
+
+    environment:
+
+      RABBITMQ_URL: ${RABBITMQ_URL}
+
+      CHAT_INTERNAL_TOKEN: ${CHAT_INTERNAL_TOKEN}
+
+    depends_on:
+
+      mongodb:
+
+        condition: service_started
+
+      redis:
+
+        condition: service_started
+
+      rabbitmq:
+
+        condition: service_healthy
+
+      chat-service:
+
+        condition: service_started
+
+      organization-service:
+
+        condition: service_started
+
+    networks:
+
+      - enterprise-network
+
+    volumes:
+
+      - ./services/project-service:/app
+
+      - ./shared:/shared
+
+      - /app/node_modules
+
+    command: ["sh", "-c", "npm ci || npm install; node /shared/postinstall-link.cjs; node src/server.js"]
+
+  voice-service:
+
+    build:
+      context: .
+      dockerfile: services/voice-service/Dockerfile
+
+    container_name: enterprise-voice-service
+
+    ports:
+
+      - "3005:3005"
+
+      - "40000-40100:40000-40100/udp"
+
+      - "40000-40100:40000-40100/tcp"
+
+    env_file:
+
+      - .env
+
+      - ./services/voice-service/.env
+
+    environment:
+
+      REALTIME_INTERNAL_TOKEN: ${REALTIME_INTERNAL_TOKEN}
+
+      CHAT_INTERNAL_TOKEN: ${CHAT_INTERNAL_TOKEN}
+
+      USER_SERVICE_INTERNAL_TOKEN: ${USER_SERVICE_INTERNAL_TOKEN}
+
+      NOTIFICATION_INTERNAL_TOKEN: ${NOTIFICATION_INTERNAL_TOKEN}
+
+      GATEWAY_INTERNAL_TOKEN: ${GATEWAY_INTERNAL_TOKEN}
+
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@rabbitmq:5672
+
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+
+      MINIO_BUCKET: ${MINIO_BUCKET}
+
+      MINIO_REGION: ${MINIO_REGION}
+
+      MINIO_USE_SSL: ${MINIO_USE_SSL}
+
+      VOICE_RECORDING_ENABLED: ${VOICE_RECORDING_ENABLED}
+
+    depends_on:
+
+      - mongodb
+
+      - redis
+
+      - rabbitmq
+
+      - minio
+
+      - socket-service
+
+      - chat-service
+
+      - notification-service
+
+    networks:
+
+      - enterprise-network
+
+    volumes:
+
+      - ./services/voice-service:/app
+
+      - ./shared:/shared
+
+      - /app/node_modules
+
+  notification-service:
+
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+
+    container_name: enterprise-notification-service
+
+    env_file:
+
+      - .env
+
+      - ./services/notification-service/.env
+
+    environment:
+
+      NOTIFICATION_INTERNAL_TOKEN: ${NOTIFICATION_INTERNAL_TOKEN}
+
+    depends_on:
+
+      - mongodb
+
+      - redis
+
+    networks:
+
+      - enterprise-network
+
+    volumes:
+
+      - ./services/notification-service:/app
+
+      - ./shared:/shared
+
+      - /app/node_modules
+
+    command: ["sh", "-c", "npm ci || npm install; node /shared/postinstall-link.cjs; node src/server.js"]
+
+  socket-service:
+
+    build:
+      context: .
+      dockerfile: services/socket-service/Dockerfile
+
+    container_name: enterprise-socket-service
+
+    expose:
+
+      - "3017"
+
+    env_file:
+
+      - .env
+
+      - ./services/socket-service/.env
+
+    environment:
+
+      USER_SERVICE_INTERNAL_TOKEN: ${USER_SERVICE_INTERNAL_TOKEN}
+
+      REDIS_HOST: ${REDIS_HOST}
+
+      REDIS_PORT: ${REDIS_PORT}
+
+      RABBITMQ_URL: ${RABBITMQ_URL}
+
+      FRIEND_DM_USE_QUEUE: ${FRIEND_DM_USE_QUEUE}
+
+      REALTIME_INTERNAL_TOKEN: ${REALTIME_INTERNAL_TOKEN}
+
+      SOCKET_IO_REDIS_ADAPTER: ${SOCKET_IO_REDIS_ADAPTER:-true}
+
+    depends_on:
+
+      redis:
+
+        condition: service_started
+
+      rabbitmq:
+
+        condition: service_healthy
+
+      chat-service:
+
+        condition: service_started
+
+      auth-service:
+
+        condition: service_started
+
+      user-service:
+
+        condition: service_started
+
+    networks:
+
+      - enterprise-network
+
+    volumes:
+
+      - ./services/socket-service:/app
+
+      - ./shared:/shared
+
+      - /app/node_modules
+
+    command: ["sh", "-c", "npm ci || npm install; node /shared/postinstall-link.cjs; node src/server.js"]
+
+networks:
+
+  enterprise-network:
+
+    driver: bridge
+

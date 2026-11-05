@@ -1,0 +1,176 @@
+/** Chuẩn avatar toàn app: bo góc (squircle), nền màu + chữ trắng (JA = initials). */
+
+/** Bóc chuỗi avatar từ API (string, hoặc object url/avatarUrl). */
+export function pickAvatarValue(avatar) {
+  if (avatar == null) return null;
+  if (typeof avatar === 'string') {
+    const v = avatar.trim();
+    return v || null;
+  }
+  if (typeof avatar === 'object') {
+    return pickAvatarValue(avatar.url || avatar.avatarUrl || avatar.src || avatar.avatar);
+  }
+  return null;
+}
+
+function resolveMediaUrlLocal(path) {
+  const raw = pickAvatarValue(path);
+  if (!raw) return '';
+  const p = String(raw).trim();
+  if (!p) return '';
+  if (p.startsWith('http://') || p.startsWith('https://') || p.startsWith('data:')) return p;
+  const normalized = p.replace(/\\/g, '/');
+  const pathPart = normalized.startsWith('/') ? normalized : `/${normalized}`;
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}${pathPart}`;
+  }
+  return pathPart;
+}
+
+export const AVATAR_RADIUS_CLASS = 'rounded-xl';
+
+export const AVATAR_TEXT_CLASS = 'font-bold text-white uppercase tracking-tight select-none';
+
+const SIZE_CLASS = {
+  xs: 'h-7 w-7 text-[10px]',
+  chip: 'h-8 w-8 text-[10px]',
+  sm: 'h-9 w-9 text-[11px]',
+  md: 'h-10 w-10 text-xs',
+  lg: 'h-14 w-14 text-sm',
+  profile: 'h-16 w-16 text-xl',
+  xl: 'h-20 w-20 text-2xl',
+  '2xl': 'h-24 w-24 text-3xl',
+  hero: 'h-28 w-28 text-3xl',
+};
+
+export function voiceSpeakingRingClass(active) {
+  return active
+    ? 'ring-2 ring-emerald-400 shadow-[0_0_14px_rgba(52,211,153,0.45)]'
+    : 'ring-2 ring-transparent';
+}
+
+/** Một màu token — tránh initials tím/xanh/đỏ lệch giữa header / settings / chat. */
+const AVATAR_PLACEHOLDER_BG = 'bg-primary';
+
+export function isAvatarImageUrl(value) {
+  const picked = pickAvatarValue(value);
+  if (!picked) return false;
+  const v = picked.trim();
+  if (!v) return false;
+  if (/^https?:\/\//i.test(v)) return true;
+  if (v.startsWith('data:image/')) return true;
+  if (/^\/?uploads\//i.test(v) || /^\/?api\//i.test(v)) return true;
+  if (/^users\/[^/]+\/avatars\//i.test(v)) return true;
+  if (/\.(jpe?g|png|gif|webp|avif|bmp|svg|ico)(\?.*)?$/i.test(v)) return true;
+  return false;
+}
+
+/** Hai chữ cái viết tắt (Họ + Tên → chữ đầu mỗi từ, hoặc 2 ký tự đầu nếu một từ). */
+export function displayInitials(name) {
+  if (!name || typeof name !== 'string') return '?';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0] || ''}${parts[parts.length - 1][0] || ''}`.toUpperCase();
+  }
+  const one = parts[0] || '';
+  if (one.length >= 2) return one.slice(0, 2).toUpperCase();
+  return (one[0] || '?').toUpperCase();
+}
+
+export function getAvatarBgClass(_name) {
+  return AVATAR_PLACEHOLDER_BG;
+}
+
+export function getAvatarSizeClass(size = 'md') {
+  return SIZE_CLASS[size] || SIZE_CLASS.md;
+}
+
+/** Class cho placeholder initials (không có ảnh) — màu/shape thống nhất theo tên, bỏ bg/rounded lệch từ ringClassName. */
+export function sanitizeAvatarRingExtra(extra = '') {
+  return String(extra || '')
+    .split(/\s+/)
+    .filter(
+      (c) =>
+        c &&
+        !/^bg-/.test(c) &&
+        !/^from-/.test(c) &&
+        !/^to-/.test(c) &&
+        !/^via-/.test(c) &&
+        !/^rounded-/.test(c) &&
+        !/^text-/.test(c) &&
+        !/^h-/.test(c) &&
+        !/^w-/.test(c) &&
+        !/^flex$/.test(c) &&
+        !/^items-/.test(c) &&
+        !/^justify-/.test(c) &&
+        !/^shrink-/.test(c) &&
+        !/^overflow-/.test(c) &&
+        !/^font-/.test(c)
+    )
+    .join(' ');
+}
+
+export function avatarPlaceholderClassName(name, size = 'md', extra = '') {
+  return [
+    'inline-flex shrink-0 items-center justify-center overflow-hidden',
+    AVATAR_RADIUS_CLASS,
+    getAvatarSizeClass(size),
+    getAvatarBgClass(name),
+    AVATAR_TEXT_CLASS,
+    sanitizeAvatarRingExtra(extra),
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/** Class shell khi có ảnh (cùng shape/size). */
+export function avatarImageShellClassName(size = 'md', extra = '') {
+  return [
+    'inline-flex shrink-0 items-center justify-center overflow-hidden',
+    AVATAR_RADIUS_CLASS,
+    getAvatarSizeClass(size),
+    sanitizeAvatarRingExtra(extra),
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/**
+ * Avatar protected — GET /api/users/:id/avatar chỉ khi đã có URL ảnh (hoặc path upload).
+ * Không gọi khi user không có avatar (vd. IT Admin thiếu profile) — tránh 404 + dùng initials.
+ */
+export function needsAuthenticatedAvatarFetch(avatar, userId = null) {
+  const raw = pickAvatarValue(avatar);
+  if (!raw || !isAvatarImageUrl(avatar)) return false;
+  if (String(raw).startsWith('data:')) return false;
+  const uid = String(userId || '').trim();
+  if (uid) return true;
+  if (/\/uploads\//i.test(String(raw))) return true;
+  if (/^users\/[^/]+\/avatars\//i.test(String(raw).trim())) return true;
+  const v = String(raw).trim();
+  if (/^https?:\/\//i.test(v)) return false;
+  return false;
+}
+
+/** Chỉ hiện <img> khi đã có src thật — tránh ô trống/màu lạ khi blob chưa về hoặc 404. */
+export function canRenderAvatarImage({ resolvedSrc, imgFailed = false } = {}) {
+  if (imgFailed) return false;
+  return Boolean(resolvedSrc);
+}
+
+export function resolveAvatarSrc(avatar, cacheBust, userId = null) {
+  if (!isAvatarImageUrl(avatar)) return null;
+  if (needsAuthenticatedAvatarFetch(avatar, userId)) {
+    return null;
+  }
+  let url = resolveMediaUrlLocal(avatar);
+  if (!url) return null;
+  if (cacheBust) {
+    const sep = url.includes('?') ? '&' : '?';
+    url = `${url}${sep}v=${encodeURIComponent(String(cacheBust))}`;
+  }
+  return url;
+}
+
+export const AVATAR_FILE_ACCEPT =
+  'image/jpeg,image/jpg,image/png,image/gif,image/webp,image/bmp,image/x-icon,image/avif,image/heic,image/heif,.jpg,.jpeg,.png,.gif,.webp,.bmp,.ico,.avif,.heic,.heif';

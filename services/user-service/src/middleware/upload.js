@@ -1,31 +1,63 @@
 const multer = require('multer');
 const path = require('path');
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.filename));
-  },
-});
+const ALLOWED_EXTENSIONS = new Set([
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.gif',
+  '.webp',
+  '.bmp',
+  '.ico',
+  '.avif',
+  '.jfif',
+  '.pjpeg',
+  '.heic',
+  '.heif',
+]);
 
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
+const MIME_TO_EXT = {
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/bmp': '.bmp',
+  'image/x-icon': '.ico',
+  'image/avif': '.avif',
+  'image/heic': '.heic',
+  'image/heif': '.heif',
+};
 
-  if (mimetype && extname) {
+function resolveExtension(file) {
+  const fromName = path.extname(String(file.originalname || '')).toLowerCase();
+  if (fromName && ALLOWED_EXTENSIONS.has(fromName)) return fromName;
+  const mime = String(file.mimetype || '').toLowerCase();
+  if (MIME_TO_EXT[mime]) return MIME_TO_EXT[mime];
+  if (mime.startsWith('image/')) return '.jpg';
+  return '';
+}
+
+const fileFilter = (_req, file, cb) => {
+  const ext = resolveExtension(file);
+  const mime = String(file.mimetype || '').toLowerCase();
+  const mimeOk = mime.startsWith('image/') || mime === 'application/octet-stream';
+  if (ext && (mimeOk || mime === '')) {
     return cb(null, true);
   }
-  cb(new Error('Only images are allowed'));
+  cb(
+    new Error(
+      'Chỉ chấp nhận ảnh: jpg, jpeg, png, gif, webp, bmp, ico, avif, heic (không hỗ trợ SVG)'
+    )
+  );
 };
 
 const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter,
 });
 
 module.exports = upload;
+module.exports.resolveExtension = resolveExtension;
+module.exports.MIME_TO_EXT = MIME_TO_EXT;

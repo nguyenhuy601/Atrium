@@ -1,0 +1,1168 @@
+/**
+ * Gate2 Planning Review — column config per HOW section (mirror Gate1).
+ * "Nguồn" = AI đề xuất | Heuristic | Nhân viên (PM edit / manual).
+ */
+
+import { createElement } from 'react';
+import { localizedProjectRoleLabel } from '../../../../utils/projectRoleLocale';
+import { resolveDependencyDecisionStatus } from './dependencyDisplay';
+import { isEmptyScheduleDateValue } from './assignmentScheduleTrust.js';
+import {
+  isWbsContainerLevel,
+  resolveWbsEffectiveLevel,
+  resolveWbsUiDepth,
+} from './wbsCatalogEdit.js';
+import {
+  enrichGate2HitlSeedPayload,
+  isGate2RiskItemRow,
+  parseRelatedFrIdsEditorText,
+  patchGate2HitlField,
+  relatedFrIdsToEditorText,
+} from './gate2HitlEditPayload.js';
+
+export { isGate2RiskItemRow } from './gate2HitlEditPayload.js';
+
+function tr(t, key, fallback) {
+  const value = typeof t === 'function' ? t(key) : '';
+  if (value == null || value === '' || value === key) return fallback;
+  return value;
+}
+
+function clip(value, max = 120) {
+  const text = String(value ?? '').trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}…`;
+}
+
+/** Audit source codes shown in Gate2 "Nguồn" column. */
+export const GATE2_AUDIT_SOURCE = Object.freeze({
+  AI: 'AI',
+  HEURISTIC: 'HEURISTIC',
+  EMPLOYEE: 'EMPLOYEE',
+});
+
+/** Soft display fallback when older HOW runs omitted suggestedRoleKey (mirrors BE AREA_ROLE_HINT). */
+const AREA_ROLE_HINT = Object.freeze({
+  frontend: 'frontend_developer',
+  backend: 'backend_developer',
+  database: 'backend_developer',
+  api: 'backend_developer',
+  auth: 'backend_developer',
+  infrastructure: 'devops_engineer',
+  infra: 'devops_engineer',
+  external: 'backend_developer',
+  security: 'backend_developer',
+  deployment: 'devops_engineer',
+  qa: 'qa_engineer',
+  design: 'ui_ux_designer',
+  management: 'project_manager',
+  analysis: 'business_analyst',
+});
+
+function wbsRoleDisplay(row, t) {
+  const level = String(row?.level || '').toLowerCase();
+  let key = String(row?.suggestedRoleKey || '').trim();
+  if (!key) {
+    if (level === 'epic') key = 'project_manager';
+    else if (level === 'feature') key = 'technical_lead';
+    else if (level === 'story') key = 'business_analyst';
+    else {
+      const area = String(row?.area || '').toLowerCase();
+      key = AREA_ROLE_HINT[area] || (level === 'task' ? 'backend_developer' : '');
+    }
+  }
+  if (!key) return '—';
+  // Phase rollup rows (effort_roles) keep phase ids as-is.
+  if (['dev', 'qa', 'deploy', 'mgmt'].includes(key)) return key;
+  const labeled = localizedProjectRoleLabel(key, key, t);
+  // Gate2 table: drop «Dự án —» prefix for density; keep catalog suffix.
+  return String(labeled || key)
+    .replace(/^(Dự án|Project)\s*[—–\-:]\s*/i, '')
+    .trim() || key;
+}
+
+/**
+ * Resolve row origin for HOW / Gate2 tables.
+ * Nhân viên when PM edits or provenance is manual / Gate1;
+ * AI đề xuất when generateJson wrote the text;
+ * Heuristic when a rule engine calculated the row.
+ * @param {object} row
+ * @param {{ action?: string }|null|undefined} decision
+ * @returns {'AI'|'HEURISTIC'|'EMPLOYEE'}
+ */
+export function resolveGate2AuditSource(row, decision) {
+  const action = String(decision?.action || '').toLowerCase();
+  if (action === 'edit' || action === 'create') {
+    return GATE2_AUDIT_SOURCE.EMPLOYEE;
+  }
+  const type = String(
+    row?.provenance?.type || row?.origin?.type || row?.dataSource || ''
+  )
+    .trim()
+    .toUpperCase();
+  if (
+    type === 'EMPLOYEE' ||
+    type === 'HUMAN' ||
+    type === 'MANUAL' ||
+    type === 'PM' ||
+    type === 'PM_ADDED' ||
+    type === 'STAFF' ||
+    type === 'GATE1_APPROVED'
+  ) {
+    return GATE2_AUDIT_SOURCE.EMPLOYEE;
+  }
+  const source = String(row?.source || '').trim().toLowerCase();
+  if (
+    source === 'manual' ||
+    source === 'employee' ||
+    source === 'human' ||
+    source === 'pm'
+  ) {
+    return GATE2_AUDIT_SOURCE.EMPLOYEE;
+  }
+  if (type === 'HEURISTIC' || source === 'heuristic') {
+    return GATE2_AUDIT_SOURCE.HEURISTIC;
+  }
+  const producer = String(row?.provenance?.producer || '').trim().toLowerCase();
+  if (producer === 'how_heuristic' || producer === 'heuristic_rule') {
+    return GATE2_AUDIT_SOURCE.HEURISTIC;
+  }
+  return GATE2_AUDIT_SOURCE.AI;
+}
+
+function auditSourceLabel(row, t, ctx) {
+  const code = resolveGate2AuditSource(row, ctx?.decision);
+  const fallbacks = {
+    AI: 'AI đề xuất',
+    HEURISTIC: 'Heuristic',
+    EMPLOYEE: 'Nhân viên',
+  };
+  return tr(t, `requirements.gate2AuditSource_${code}`, fallbacks[code] || code);
+}
+
+const COL_TITLE = {
+  key: 'title',
+  headerKey: 'requirements.phase1ColTitle',
+  headerFallback: 'Tiêu đề',
+  field: 'title',
+  editable: true,
+  defaultPx: 200,
+  minPx: 100,
+  render: (r) => clip(r.title || r.name || '—'),
+};
+
+const COL_AUDIT_SOURCE = {
+  key: 'auditSource',
+  headerKey: 'requirements.gate2ColAuditSource',
+  headerFallback: 'Nguồn',
+  editable: false,
+  defaultPx: 120,
+  minPx: 90,
+  /** @param {object} row @param {function} [t] @param {{ decision?: object }} [ctx] */
+  render: auditSourceLabel,
+};
+
+const COL_SUMMARY = {
+  key: 'summary',
+  headerKey: 'requirements.gate2ColSummary',
+  headerFallback: 'Tóm tắt',
+  field: 'summary',
+  editable: true,
+  defaultPx: 220,
+  minPx: 120,
+  render: (r) => clip(r.summary || '—', 160),
+};
+
+const COL_STATUS = {
+  key: 'status',
+  headerKey: 'requirements.phase1ColStatus',
+  headerFallback: 'Trạng thái',
+  editable: false,
+  defaultPx: 110,
+  minPx: 80,
+  render: (r, t) => {
+    const raw = String(r?.status || '').trim();
+    if (!raw) return '—';
+    return tr(t, `requirements.gate2ItemStatus_${raw.toUpperCase()}`, raw);
+  },
+};
+
+const WBS_LEVEL_LABELS = Object.freeze({
+  epic: 'Epic',
+  feature: 'Feature',
+  story: 'Story',
+  work_package: 'Work package',
+  task: 'Task',
+});
+
+function wbsTitleIndent(row, _t, ctx = {}) {
+  // Prefer edited depth (stamped when Level changes) so "Sửa" updates indent live.
+  const title = clip(row?.title || row?.name || '—', 140);
+  const edited = ctx?.decision?.editedPayload;
+  const depth = resolveWbsUiDepth(row, edited);
+  const effectiveLevel = resolveWbsEffectiveLevel(row, edited);
+  const isContainer =
+    edited && Object.prototype.hasOwnProperty.call(edited, 'isWbsContainer')
+      ? Boolean(edited.isWbsContainer)
+      : Boolean(row?.isWbsContainer) || isWbsContainerLevel(effectiveLevel);
+  const expandable = Boolean(row?.hasChildren && isContainer);
+  const expanded = expandable ? ctx.wbsExpanded !== false : true;
+  const onToggle = typeof ctx.onToggleWbs === 'function' ? ctx.onToggleWbs : null;
+  const warn =
+    row?.wbsUnresolved ||
+    row?.missingStories ||
+    String(row?.status || '').toUpperCase() === 'NEEDS_STORIES';
+  return createElement(
+    expandable ? 'button' : 'span',
+    {
+      type: expandable ? 'button' : undefined,
+      className: `inline-block max-w-full whitespace-pre-wrap break-words text-left ${
+        expandable ? 'hover:underline' : ''
+      } ${warn ? 'text-amber-700 dark:text-amber-400' : ''}`,
+      style: depth ? { paddingLeft: `${depth * 12}px` } : undefined,
+      onClick: expandable
+        ? (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onToggle?.(row.id);
+          }
+        : undefined,
+      title: warn
+        ? 'Thiếu Story / phân rã chưa đủ — bổ sung ở WHAT hoặc duyệt lại'
+        : expandable
+          ? expanded
+            ? 'Thu gọn'
+            : 'Mở các task / dòng con'
+          : undefined,
+    },
+    title
+  );
+}
+
+function wbsLevelLabel(row, t, ctx = {}) {
+  const level = resolveWbsEffectiveLevel(row, ctx?.decision?.editedPayload);
+  if (!level) return '—';
+  const fallback = WBS_LEVEL_LABELS[level] || level;
+  return tr(t, `requirements.gate2WbsLevel_${level}`, fallback);
+}
+
+/**
+ * Conflicts is a count column — never use em dash for zero (reads as “missing data”).
+ * @param {number} count
+ * @param {function|undefined} t
+ * @returns {import('react').ReactNode}
+ */
+function renderConflictCountCell(count, t) {
+  const n = Number(count) || 0;
+  if (n > 0) {
+    return createElement(
+      'span',
+      {
+        className: 'font-medium text-amber-800 dark:text-amber-200',
+        title: tr(t, 'requirements.gate2ConflictsHasTitle', '{count} xung đột dung lượng').replace(
+          '{count}',
+          String(n)
+        ),
+      },
+      String(n)
+    );
+  }
+  return createElement(
+    'span',
+    {
+      className: 'text-muted-foreground',
+      title: tr(t, 'requirements.gate2ConflictsNoneTitle', 'Không xung đột dung lượng'),
+    },
+    tr(t, 'requirements.gate2ConflictsNone', 'Không')
+  );
+}
+
+/** ISO date → ngày/tháng/năm. Non-dates stay blank so the cell shows an em dash. */
+export function formatGate2CalendarDay(value) {
+  const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return '';
+  return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+const GATE2_SECTION_COLUMNS = {
+  tasks: [
+    {
+      ...COL_TITLE,
+      defaultPx: 280,
+      minPx: 140,
+      render: (r, t, ctx) => wbsTitleIndent(r, t, ctx),
+    },
+    {
+      key: 'level',
+      headerKey: 'requirements.gate2ColLevel',
+      headerFallback: 'Level',
+      field: 'level',
+      editor: 'select',
+      placeholderKey: 'requirements.gate2WbsPickLevel',
+      placeholderFallback: 'Chọn level',
+      editable: true,
+      defaultPx: 110,
+      minPx: 72,
+      render: (r, t, ctx) => wbsLevelLabel(r, t, ctx),
+    },
+    {
+      key: 'role',
+      headerKey: 'requirements.gate2ColRole',
+      headerFallback: 'Role',
+      field: 'suggestedRoleKey',
+      editor: 'select',
+      placeholderKey: 'requirements.gate2AssignPickRole',
+      placeholderFallback: 'Chọn vai trò',
+      editable: true,
+      defaultPx: 130,
+      minPx: 80,
+      render: (r, t) => wbsRoleDisplay(r, t),
+    },
+    {
+      key: 'effort',
+      headerKey: 'requirements.gate2ColEffort',
+      headerFallback: 'Effort (h)',
+      field: 'effortHours',
+      editable: true,
+      defaultPx: 90,
+      minPx: 64,
+      render: (r) => {
+        if (r.duplicateOf) return '0';
+        if (r.effortHours == null) return '—';
+        const base = String(r.effortHours);
+        return r.effortRolledUp ? `${base} Σ` : base;
+      },
+    },
+    {
+      key: 'deliverable',
+      headerKey: 'requirements.gate2ColDeliverable',
+      headerFallback: 'Deliverable',
+      field: 'deliverable',
+      editable: true,
+      defaultPx: 180,
+      minPx: 100,
+      render: (r) => r.deliverable || '—',
+    },
+    COL_STATUS,
+    COL_AUDIT_SOURCE,
+  ],
+  dependencies: [
+    {
+      key: 'relation',
+      headerKey: 'requirements.gate2ColDepRelation',
+      headerFallback: 'Quan hệ',
+      field: 'relationLabel',
+      editable: false,
+      defaultPx: 200,
+      minPx: 120,
+      render: (r) =>
+        clip(
+          r.relationLabel ||
+            `${r.predecessorName || r.predecessorTaskId || '?'} → ${r.successorName || r.successorTaskId || '?'}`,
+          140
+        ),
+    },
+    {
+      key: 'title',
+      headerKey: 'requirements.gate2ColDepReason',
+      headerFallback: 'Lý do',
+      field: 'title',
+      editable: true,
+      defaultPx: 160,
+      minPx: 100,
+      render: (r) => clip(r.reason || r.title || r.summary || '—', 140),
+    },
+    {
+      key: 'requiredOutput',
+      headerKey: 'requirements.gate2ColDepRequiredOutput',
+      headerFallback: 'Output cần',
+      field: 'requiredOutput',
+      editable: false,
+      defaultPx: 140,
+      minPx: 90,
+      render: (r) => clip(r.requiredOutput || r.requiredOutputLabel || '—', 100),
+    },
+    {
+      key: 'requiredAt',
+      headerKey: 'requirements.gate2ColDepRequiredAt',
+      headerFallback: 'Chặn tại',
+      field: 'requiredAt',
+      editable: false,
+      defaultPx: 100,
+      minPx: 72,
+      render: (r, t) => {
+        const at = String(r.requiredAt || 'FULL').toUpperCase();
+        return tr(t, `requirements.gate2DepRequiredAt_${at}`, at);
+      },
+    },
+    {
+      key: 'basis',
+      headerKey: 'requirements.gate2ColDepBasis',
+      headerFallback: 'Cơ sở',
+      field: 'basis',
+      editable: false,
+      defaultPx: 88,
+      minPx: 64,
+      render: (r, t) => {
+        const basis = String(r.basis || 'INFERRED').toUpperCase();
+        return tr(t, `requirements.gate2DepBasis_${basis}`, basis);
+      },
+    },
+    {
+      key: 'schedulable',
+      headerKey: 'requirements.gate2ColDepSchedulable',
+      headerFallback: 'Lịch',
+      field: 'schedulable',
+      editable: false,
+      defaultPx: 100,
+      minPx: 72,
+      render: (r, t) =>
+        r.schedulable
+          ? tr(t, 'requirements.gate2DepSchedulableYes', 'Đưa vào lịch')
+          : tr(t, 'requirements.gate2DepSchedulableNo', 'Chỉ đề xuất'),
+    },
+    {
+      key: 'blockingScope',
+      headerKey: 'requirements.gate2ColDepScope',
+      headerFallback: 'Phạm vi chặn',
+      field: 'blockingScope',
+      editable: true,
+      defaultPx: 110,
+      minPx: 72,
+      render: (r, t) => {
+        const scope = String(r.blockingScope || 'FULL').toUpperCase();
+        return tr(t, `requirements.gate2DepScope_${scope}`, scope);
+      },
+    },
+    {
+      key: 'depType',
+      headerKey: 'requirements.gate2ColDepType',
+      headerFallback: 'Type',
+      field: 'depType',
+      editable: true,
+      defaultPx: 64,
+      minPx: 48,
+      render: (r) => r.relationship || r.depType || 'FS',
+    },
+    {
+      key: 'status',
+      headerKey: 'requirements.phase1ColStatus',
+      headerFallback: 'Trạng thái',
+      editable: false,
+      defaultPx: 100,
+      minPx: 72,
+      render: (r, t, ctx) => {
+        const status = resolveDependencyDecisionStatus(r, ctx?.decision);
+        return tr(t, `requirements.gate2ItemStatus_${status}`, status);
+      },
+    },
+    COL_AUDIT_SOURCE,
+  ],
+  assignments: [
+    COL_TITLE,
+    {
+      key: 'role',
+      headerKey: 'requirements.gate2ColRole',
+      headerFallback: 'Role',
+      field: 'suggestedRoleKey',
+      editor: 'select',
+      placeholderKey: 'requirements.gate2AssignPickRole',
+      placeholderFallback: 'Chọn vai trò',
+      editable: true,
+      defaultPx: 140,
+      minPx: 80,
+      render: (r, t) => wbsRoleDisplay(r, t),
+    },
+    {
+      key: 'effort',
+      headerKey: 'requirements.gate2ColEffort',
+      headerFallback: 'Effort (h)',
+      field: 'effortHours',
+      editable: false,
+      defaultPx: 90,
+      minPx: 64,
+      render: (r) => (r.effortHours != null ? String(r.effortHours) : '—'),
+    },
+    {
+      key: 'assignee',
+      headerKey: 'requirements.gate2ColAssignee',
+      headerFallback: 'Assignee',
+      field: 'assigneeUserId',
+      editor: 'select',
+      placeholderKey: 'requirements.gate2AssignPickPerson',
+      placeholderFallback: 'Chọn nhân sự',
+      editable: true,
+      defaultPx: 140,
+      minPx: 80,
+      render: (r) => r.assignee || '—',
+    },
+    {
+      key: 'startDate',
+      headerKey: 'requirements.gate2ColStart',
+      headerFallback: 'Bắt đầu',
+      field: 'startDate',
+      editable: true,
+      defaultPx: 110,
+      minPx: 88,
+      render: (r, t, ctx) => {
+        const edited = ctx?.decision?.editedPayload;
+        const editedVal =
+          edited && Object.prototype.hasOwnProperty.call(edited, 'startDate')
+            ? edited.startDate
+            : undefined;
+        const raw = !isEmptyScheduleDateValue(editedVal) ? editedVal : r.startDate;
+        const text = formatGate2CalendarDay(raw) || '—';
+        const stale =
+          Boolean(r.scheduleStale) ||
+          Boolean(r.scheduleDerived) ||
+          String(r.scheduleTrust || '') === 'provisional';
+        if (!stale || text === '—') return text;
+        return createElement(
+          'span',
+          {
+            className: 'text-muted-foreground italic',
+            title: tr(
+              t,
+              'requirements.gate2ScheduleStaleHint',
+              'Lịch tạm / cần Cập nhật lịch (ScheduleTool)'
+            ),
+          },
+          text
+        );
+      },
+    },
+    {
+      key: 'dueDate',
+      headerKey: 'requirements.gate2ColDue',
+      headerFallback: 'Kết thúc',
+      field: 'dueDate',
+      editable: true,
+      defaultPx: 110,
+      minPx: 88,
+      render: (r, t, ctx) => {
+        const edited = ctx?.decision?.editedPayload;
+        const editedVal =
+          edited && Object.prototype.hasOwnProperty.call(edited, 'dueDate')
+            ? edited.dueDate
+            : undefined;
+        const raw = !isEmptyScheduleDateValue(editedVal) ? editedVal : r.dueDate;
+        const text = formatGate2CalendarDay(raw) || '—';
+        const stale =
+          Boolean(r.scheduleStale) ||
+          Boolean(r.scheduleDerived) ||
+          String(r.scheduleTrust || '') === 'provisional';
+        if (!stale || text === '—') return text;
+        return createElement(
+          'span',
+          {
+            className: 'text-muted-foreground italic',
+            title: tr(
+              t,
+              'requirements.gate2ScheduleStaleHint',
+              'Lịch tạm / cần Cập nhật lịch (ScheduleTool)'
+            ),
+          },
+          text
+        );
+      },
+    },
+    {
+      key: 'conflicts',
+      headerKey: 'requirements.gate2ColConflicts',
+      headerFallback: 'Xung đột',
+      field: 'conflictCount',
+      editable: false,
+      defaultPx: 96,
+      minPx: 72,
+      render: (r, t) => renderConflictCountCell(r?.conflictCount, t),
+    },
+    {
+      key: 'score',
+      headerKey: 'requirements.gate2ColScore',
+      headerFallback: 'Score',
+      editable: false,
+      defaultPx: 72,
+      minPx: 56,
+      render: (r, _t, ctx) => {
+        const edited = ctx?.decision?.editedPayload;
+        const score =
+          edited && Object.prototype.hasOwnProperty.call(edited, 'score') ? edited.score : r.score;
+        return score != null && score !== '' ? String(score) : '—';
+      },
+    },
+    {
+      ...COL_STATUS,
+      render: (r, t, ctx) => {
+        const edited = ctx?.decision?.editedPayload;
+        const raw =
+          edited && Object.prototype.hasOwnProperty.call(edited, 'status')
+            ? edited.status
+            : r?.status;
+        const text = String(raw || '').trim();
+        if (!text) return '—';
+        return tr(t, `requirements.gate2ItemStatus_${text.toUpperCase()}`, text);
+      },
+    },
+    COL_AUDIT_SOURCE,
+  ],
+  /** @deprecated Lịch folded into assignments — kept for legacy decision keys only. */
+  schedule: [
+    COL_TITLE,
+    {
+      key: 'startDate',
+      headerKey: 'requirements.gate2ColStart',
+      headerFallback: 'Bắt đầu',
+      field: 'startDate',
+      editable: true,
+      defaultPx: 120,
+      minPx: 96,
+      render: (r) => formatGate2CalendarDay(r.startDate) || '—',
+    },
+    {
+      key: 'dueDate',
+      headerKey: 'requirements.gate2ColDue',
+      headerFallback: 'Kết thúc',
+      field: 'dueDate',
+      editable: true,
+      defaultPx: 120,
+      minPx: 96,
+      render: (r) => formatGate2CalendarDay(r.dueDate) || '—',
+    },
+    {
+      key: 'effort',
+      headerKey: 'requirements.gate2ColEffort',
+      headerFallback: 'Effort (h)',
+      field: 'effortHours',
+      editable: false,
+      defaultPx: 90,
+      minPx: 64,
+      render: (r) => (r.effortHours != null ? String(r.effortHours) : '—'),
+    },
+    COL_STATUS,
+    COL_AUDIT_SOURCE,
+  ],
+  scope: [
+    COL_TITLE,
+    {
+      key: 'level',
+      headerKey: 'requirements.gate2ColLevel',
+      headerFallback: 'Kind',
+      field: 'level',
+      editable: true,
+      defaultPx: 120,
+      minPx: 72,
+      render: (r) => r.level || r.scopeType || '—',
+    },
+    COL_SUMMARY,
+    COL_STATUS,
+    COL_AUDIT_SOURCE,
+  ],
+  risks: [
+    COL_TITLE,
+    {
+      key: 'trigger',
+      headerKey: 'requirements.gate2ColTrigger',
+      headerFallback: 'Trigger',
+      field: 'trigger',
+      editable: true,
+      isEditable: isGate2RiskItemRow,
+      defaultPx: 180,
+      minPx: 100,
+      render: (r) => clip(r.trigger || '—', 140),
+    },
+    {
+      key: 'probability',
+      headerKey: 'requirements.gate2ColProbability',
+      headerFallback: 'P (1–5)',
+      field: 'probability',
+      editable: true,
+      isEditable: isGate2RiskItemRow,
+      defaultPx: 72,
+      minPx: 56,
+      render: (r) => (r.probability != null ? String(r.probability) : '—'),
+    },
+    {
+      key: 'impact',
+      headerKey: 'requirements.gate2ColRiskImpact',
+      headerFallback: 'I (1–5)',
+      field: 'impact',
+      editable: true,
+      isEditable: isGate2RiskItemRow,
+      defaultPx: 72,
+      minPx: 56,
+      render: (r) => (r.impact != null ? String(r.impact) : '—'),
+    },
+    {
+      key: 'mitigation',
+      headerKey: 'requirements.gate2ColMitigation',
+      headerFallback: 'Mitigation',
+      field: 'mitigation',
+      editable: true,
+      isEditable: isGate2RiskItemRow,
+      defaultPx: 200,
+      minPx: 120,
+      render: (r) => clip(r.mitigation || r.summary || '—', 160),
+    },
+    {
+      key: 'relatedFrIds',
+      headerKey: 'requirements.gate2ColRelatedFr',
+      headerFallback: 'FR',
+      field: 'relatedFrIds',
+      editable: true,
+      isEditable: isGate2RiskItemRow,
+      defaultPx: 120,
+      minPx: 72,
+      render: (r) =>
+        Array.isArray(r.relatedFrIds) && r.relatedFrIds.length
+          ? r.relatedFrIds.join(', ')
+          : '—',
+    },
+    {
+      key: 'level',
+      headerKey: 'requirements.gate2ColLevel',
+      headerFallback: 'Kind',
+      field: 'level',
+      editable: false,
+      defaultPx: 100,
+      minPx: 64,
+      render: (r) => {
+        const kind = String(r.level || '').trim();
+        const band = String(r.band || '').trim();
+        if (kind && band && band.toLowerCase() !== kind.toLowerCase()) return `${kind} · ${band}`;
+        return kind || band || '—';
+      },
+    },
+    COL_STATUS,
+    COL_AUDIT_SOURCE,
+  ],
+  releases: [
+    COL_TITLE,
+    {
+      key: 'kind',
+      headerKey: 'requirements.gate2ColKind',
+      headerFallback: 'Kind',
+      field: 'kind',
+      editable: true,
+      defaultPx: 100,
+      minPx: 64,
+      render: (r, t) => {
+        if (r.kind === 'sprint_planning_status') {
+          return tr(t, 'requirements.gate2KindSprintPlanningStatus', 'AI status');
+        }
+        return r.kind || '—';
+      },
+    },
+    {
+      key: 'goal',
+      headerKey: 'requirements.gate2ColSprintGoal',
+      headerFallback: 'Sprint Goal',
+      field: 'goal',
+      editable: true,
+      defaultPx: 180,
+      minPx: 100,
+      render: (r) => clip(r.goal, 120) || '—',
+    },
+    {
+      key: 'startDate',
+      headerKey: 'requirements.gate2ColStart',
+      headerFallback: 'Start',
+      field: 'startDate',
+      editable: true,
+      defaultPx: 110,
+      minPx: 80,
+      render: (r) => formatGate2CalendarDay(r.startDate) || '—',
+    },
+    {
+      key: 'estimatedEnd',
+      headerKey: 'requirements.gate2ColDue',
+      headerFallback: 'End',
+      field: 'estimatedEnd',
+      editable: true,
+      defaultPx: 110,
+      minPx: 80,
+      render: (r) => formatGate2CalendarDay(r.estimatedEnd) || '—',
+    },
+    {
+      key: 'effort',
+      headerKey: 'requirements.gate2ColEffort',
+      headerFallback: 'Effort (h)',
+      field: 'effortHours',
+      editable: true,
+      defaultPx: 90,
+      minPx: 64,
+      render: (r) => (r.effortHours != null ? String(r.effortHours) : '—'),
+    },
+    {
+      key: 'capacity',
+      headerKey: 'requirements.gate2ColCapacity',
+      headerFallback: 'Capacity (h)',
+      field: 'capacityHours',
+      editable: false,
+      defaultPx: 100,
+      minPx: 72,
+      render: (r) => {
+        if (r.kind !== 'sprint') return '—';
+        if (r.capacityHours == null) return '—';
+        const util =
+          r.utilizationPct != null ? ` · ${r.utilizationPct}%` : '';
+        return `${r.capacityHours}${util}`;
+      },
+    },
+    {
+      key: 'taskCount',
+      headerKey: 'requirements.gate2ColTaskCount',
+      headerFallback: 'Tasks',
+      field: 'taskCount',
+      editable: false,
+      defaultPx: 72,
+      minPx: 56,
+      render: (r) => (r.taskCount != null ? String(r.taskCount) : '—'),
+    },
+    COL_SUMMARY,
+    COL_STATUS,
+    COL_AUDIT_SOURCE,
+  ],
+  quality: [
+    COL_TITLE,
+    {
+      key: 'level',
+      headerKey: 'requirements.gate2ColLevel',
+      headerFallback: 'Level',
+      field: 'level',
+      editable: true,
+      defaultPx: 100,
+      minPx: 64,
+      render: (r) => r.level || r.testLevel || '—',
+    },
+    {
+      key: 'testType',
+      headerKey: 'requirements.gate2ColTestType',
+      headerFallback: 'Type',
+      field: 'testType',
+      editable: true,
+      defaultPx: 110,
+      minPx: 72,
+      render: (r) => r.testType || '—',
+    },
+    {
+      key: 'sourceUcKey',
+      headerKey: 'requirements.gate2ColSourceUc',
+      headerFallback: 'UC',
+      field: 'sourceUcKey',
+      editable: true,
+      defaultPx: 110,
+      minPx: 72,
+      render: (r) => r.sourceUcKey || '—',
+    },
+    {
+      key: 'executionStatus',
+      headerKey: 'requirements.gate2ColExecution',
+      headerFallback: 'Execution',
+      field: 'executionStatus',
+      editable: false,
+      defaultPx: 110,
+      minPx: 80,
+      render: (r, t) => {
+        const status = String(r?.executionStatus || '').toLowerCase();
+        if (status === 'passed') {
+          return tr(t, 'requirements.qualityReviewPassed', 'Đạt');
+        }
+        if (status === 'failed') {
+          return tr(t, 'requirements.qualityReviewFailed', 'Không đạt');
+        }
+        return tr(t, 'requirements.qualityReviewNotRun', 'Chưa chạy');
+      },
+    },
+    COL_STATUS,
+    COL_AUDIT_SOURCE,
+    {
+      key: 'openTcDetail',
+      headerKey: 'requirements.gate2ColTcDetail',
+      headerFallback: 'Chi tiết',
+      editable: false,
+      defaultPx: 100,
+      minPx: 80,
+      render: () => '—',
+    },
+  ],
+  effort_roles: [
+    COL_TITLE,
+    {
+      key: 'role',
+      headerKey: 'requirements.gate2ColRole',
+      headerFallback: 'Role',
+      field: 'suggestedRoleKey',
+      editor: 'select',
+      placeholderKey: 'requirements.gate2AssignPickRole',
+      placeholderFallback: 'Chọn vai trò',
+      editable: true,
+      defaultPx: 140,
+      minPx: 80,
+      render: (r, t) => wbsRoleDisplay(r, t),
+    },
+    {
+      key: 'effort',
+      headerKey: 'requirements.gate2ColEffort',
+      headerFallback: 'Effort (h)',
+      field: 'effortHours',
+      editable: true,
+      defaultPx: 90,
+      minPx: 64,
+      render: (r) => (r.effortHours != null ? String(r.effortHours) : '—'),
+    },
+    COL_SUMMARY,
+    COL_STATUS,
+    COL_AUDIT_SOURCE,
+  ],
+};
+
+const FALLBACK = GATE2_SECTION_COLUMNS.tasks;
+
+export function getGate2ColumnsForSection(section, opts = {}) {
+  const cols = GATE2_SECTION_COLUMNS[String(section || '')] || FALLBACK;
+  const onOpenSprintScope =
+    typeof opts.onOpenSprintScope === 'function' ? opts.onOpenSprintScope : null;
+  const onOpenScheduleDetail =
+    typeof opts.onOpenScheduleDetail === 'function' ? opts.onOpenScheduleDetail : null;
+  const onOpenTcDetail =
+    typeof opts.onOpenTcDetail === 'function' ? opts.onOpenTcDetail : null;
+  const sectionKey = String(section || '');
+
+  if (sectionKey === 'quality' && onOpenTcDetail) {
+    return cols.map((col) => {
+      if (col.key !== 'openTcDetail') return col;
+      return {
+        ...col,
+        render: (r, t) =>
+          createElement(
+            'button',
+            {
+              type: 'button',
+              className:
+                'font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              onClick: (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onOpenTcDetail(r);
+              },
+              title: tr(t, 'requirements.gate2OpenTcDetail', 'Xem / sửa chi tiết Test Case'),
+            },
+            tr(t, 'requirements.gate2OpenTcDetail', 'Chi tiết TC')
+          ),
+      };
+    });
+  }
+
+  if (sectionKey === 'releases' && onOpenSprintScope) {
+    return cols.map((col) => {
+      if (col.key !== 'taskCount') return col;
+      return {
+        ...col,
+        render: (r, t) => {
+          const openable =
+            r.kind === 'sprint' ||
+            r.kind === 'release' ||
+            r.kind === 'unallocated' ||
+            r.kind === 'sprint_planning_status';
+          if (!openable) {
+            return r.taskCount != null ? String(r.taskCount) : '—';
+          }
+          const label =
+            r.kind === 'sprint_planning_status'
+              ? typeof t === 'function'
+                ? t('requirements.gate2OpenSprintPlanningStatus') || 'Chi tiết'
+                : 'Chi tiết'
+              : r.taskCount != null
+                ? String(r.taskCount)
+                : '—';
+          if (r.kind !== 'sprint_planning_status' && r.taskCount == null) return '—';
+          return createElement(
+            'button',
+            {
+              type: 'button',
+              className:
+                'font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              onClick: (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onOpenSprintScope(r);
+              },
+              title: typeof t === 'function'
+                ? t('requirements.gate2OpenSprintScope') || 'Open scope'
+                : 'Open scope',
+            },
+            label
+          );
+        },
+      };
+    });
+  }
+
+  if (sectionKey === 'assignments' && onOpenScheduleDetail) {
+    return cols.map((col) => {
+      if (col.key !== 'conflicts' && col.key !== 'startDate' && col.key !== 'dueDate') {
+        return col;
+      }
+      if (col.key === 'conflicts') {
+        return {
+          ...col,
+          render: (r, t) => {
+            const n = Number(r?.conflictCount) || 0;
+            return createElement(
+              'button',
+              {
+                type: 'button',
+                className:
+                  n > 0
+                    ? 'font-medium text-amber-800 underline-offset-2 hover:underline dark:text-amber-200'
+                    : 'text-muted-foreground underline-offset-2 hover:underline',
+                onClick: (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onOpenScheduleDetail(r);
+                },
+                title: tr(t, 'requirements.gate2OpenScheduleDetail', 'Chi tiết lịch theo ngày'),
+              },
+              n > 0
+                ? String(n)
+                : tr(t, 'requirements.gate2ConflictsNone', 'Không')
+            );
+          },
+        };
+      }
+      return col;
+    });
+  }
+
+  return cols;
+}
+
+export function getGate2FieldValue(row, col, editedPayload) {
+  const field = col?.field;
+  if (!field) return '';
+  let value;
+  if (editedPayload && Object.prototype.hasOwnProperty.call(editedPayload, field)) {
+    const edited = editedPayload[field];
+    // Do not let empty seeded dates mask enriched row start/due.
+    if (
+      (field === 'startDate' || field === 'dueDate') &&
+      isEmptyScheduleDateValue(edited) &&
+      !isEmptyScheduleDateValue(row?.[field])
+    ) {
+      value = row[field];
+    } else {
+      value = edited;
+    }
+  } else {
+    value = row?.[field] ?? '';
+  }
+  // Closed-list fields: normalize so <select> matches option values.
+  if (field === 'level' || field === 'suggestedRoleKey') {
+    return String(value ?? '').trim().toLowerCase();
+  }
+  if (field === 'relatedFrIds') {
+    return relatedFrIdsToEditorText(value);
+  }
+  if (field === 'probability' || field === 'impact') {
+    return value == null || value === '' ? '' : String(value);
+  }
+  return value;
+}
+
+export function seedGate2EditedPayload(row, columns) {
+  const payload = {};
+  for (const col of columns || []) {
+    if (!col?.editable || !col.field) continue;
+    if (typeof col.isEditable === 'function' && !col.isEditable(row)) continue;
+    const value = getGate2FieldValue(row, col, null);
+    // Omit blank schedule dates so later enrich / SoT can still display.
+    if (
+      (col.field === 'startDate' || col.field === 'dueDate') &&
+      isEmptyScheduleDateValue(value)
+    ) {
+      continue;
+    }
+    if (col.field === 'relatedFrIds') {
+      payload.relatedFrIds = parseRelatedFrIdsEditorText(value);
+      continue;
+    }
+    if (col.field === 'probability' || col.field === 'impact') {
+      const n = Number(value);
+      if (Number.isFinite(n)) payload[col.field] = n;
+      continue;
+    }
+    payload[col.field] = value;
+  }
+  if (Array.isArray(row?.taskIds) && row.taskIds.length) {
+    payload.taskIds = row.taskIds.map(String);
+  }
+  if (Array.isArray(row?.pbiIds) && row.pbiIds.length) {
+    payload.pbiIds = row.pbiIds.map(String);
+  }
+  if (row?.goal) payload.goal = String(row.goal);
+  if (row?.capacityHours != null && Number.isFinite(Number(row.capacityHours))) {
+    payload.capacityHours = Number(row.capacityHours);
+  }
+  if (row?.utilizationPct != null && Number.isFinite(Number(row.utilizationPct))) {
+    payload.utilizationPct = Number(row.utilizationPct);
+  }
+  if (row?.taskCount != null && Number.isFinite(Number(row.taskCount))) {
+    payload.taskCount = Number(row.taskCount);
+  }
+  if (row?.assignee && row.assignee !== '—') payload.assignee = String(row.assignee);
+  if (row?.score != null && Number.isFinite(Number(row.score))) payload.score = Number(row.score);
+  if (row?.availableHours != null && Number.isFinite(Number(row.availableHours))) {
+    payload.availableHours = Number(row.availableHours);
+  }
+  if (row?.status) payload.status = String(row.status);
+  payload.overload = Boolean(row?.overload);
+  return enrichGate2HitlSeedPayload(row, payload);
+}
+
+export function patchGate2EditedPayload(prev, field, value) {
+  return patchGate2HitlField(prev, field, value);
+}
+
+export function getGate2RowId(row, index = 0) {
+  return String(row?.logicalId || row?.id || `row-${index}`).trim();
+}
+
+const DECISION_ACTIONS = new Set(['accept', 'edit', 'reject']);
+
+export function areGate2SectionDecisionsComplete(bySection, decisions = {}) {
+  if (!bySection || typeof bySection !== 'object') return false;
+  let total = 0;
+  for (const rows of Object.values(bySection)) {
+    if (!Array.isArray(rows)) continue;
+    for (let i = 0; i < rows.length; i += 1) {
+      const id = getGate2RowId(rows[i], i);
+      if (!id) continue;
+      total += 1;
+      const action = String(decisions[id]?.action || '').toLowerCase();
+      if (!DECISION_ACTIONS.has(action)) return false;
+    }
+  }
+  return total > 0;
+}
+
+export function countGate2PendingDecisions(bySection, decisions = {}) {
+  if (!bySection || typeof bySection !== 'object') return 0;
+  let pending = 0;
+  for (const rows of Object.values(bySection)) {
+    if (!Array.isArray(rows)) continue;
+    for (let i = 0; i < rows.length; i += 1) {
+      const id = getGate2RowId(rows[i], i);
+      if (!id) continue;
+      const action = String(decisions[id]?.action || '').toLowerCase();
+      if (!DECISION_ACTIONS.has(action)) pending += 1;
+    }
+  }
+  return pending;
+}
+
+export const GATE2_SCROLL_PAGE_SIZE = 30;
+
+/** Fixed body height for Gate2 / HOW Monitor tables (align with Gate1). */
+export const GATE2_TABLE_BODY_HEIGHT_CLASS = 'h-96';
+
+export default getGate2ColumnsForSection;

@@ -1,0 +1,212 @@
+services:
+
+  mongodb:
+
+    image: mongo:7
+
+    container_name: enterprise-mongodb
+
+    ports:
+
+      - "27017:27017"
+
+    volumes:
+
+      - mongodb_data:/data/db
+
+    environment:
+
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+
+    networks:
+
+      - enterprise-network
+
+
+
+  redis:
+
+    image: redis:7-alpine
+
+    container_name: enterprise-redis
+
+    ports:
+
+      - "6379:6379"
+
+    volumes:
+
+      - redis_data:/data
+
+    networks:
+
+      - enterprise-network
+
+
+
+
+  rabbitmq:
+
+    image: rabbitmq:3-management-alpine
+
+    container_name: enterprise-rabbitmq
+
+    hostname: rabbitmq
+
+    ports:
+
+      - "5672:5672"
+
+      - "15672:15672"
+
+    environment:
+
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
+
+    volumes:
+
+      - rabbitmq_data:/var/lib/rabbitmq
+
+    healthcheck:
+
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+
+      interval: 10s
+
+      timeout: 10s
+
+      retries: 12
+
+      start_period: 40s
+
+    networks:
+
+      - enterprise-network
+
+
+
+  ollama:
+
+    image: ollama/ollama:latest
+
+    container_name: enterprise-ollama
+
+    ports:
+
+      - "11434:11434"
+
+    volumes:
+
+      - ollama_data:/root/.ollama
+
+    networks:
+
+      - enterprise-network
+
+
+
+  # Docker Hub minio/* community images removed (2025-10); use Quay mirrors.
+  minio:
+
+    image: quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
+
+    container_name: enterprise-minio
+
+    ports:
+
+      - "9000:9000"
+
+      - "9001:9001"
+
+    environment:
+
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+
+    volumes:
+
+      - minio_data:/data
+
+    command: server /data --console-address ":9001"
+
+    healthcheck:
+
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+
+      interval: 10s
+
+      timeout: 5s
+
+      retries: 12
+
+      start_period: 20s
+
+    networks:
+
+      - enterprise-network
+
+
+
+  minio-init:
+
+    image: quay.io/minio/mc:latest
+
+    container_name: enterprise-minio-init
+
+    depends_on:
+
+      minio:
+
+        condition: service_healthy
+
+    environment:
+
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+
+      MINIO_BUCKET: ${MINIO_BUCKET:-meeting-recordings}
+
+    entrypoint: >
+
+      /bin/sh -c "
+
+      mc alias set local http://minio:9000 $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY &&
+
+      mc mb --ignore-existing local/$$MINIO_BUCKET &&
+
+      exit 0
+
+      "
+
+    networks:
+
+      - enterprise-network
+
+
+
+volumes:
+
+  mongodb_data:
+
+  redis_data:
+
+  rabbitmq_data:
+
+  ollama_data:
+
+  minio_data:
+
+
+
+networks:
+
+  enterprise-network:
+
+    driver: bridge
+

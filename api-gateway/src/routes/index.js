@@ -1,0 +1,41 @@
+const express = require('express');
+const router = express.Router();
+const authMiddleware = require('../middlewares/auth.middleware');
+const permissionMiddleware = require('../middlewares/permission.middleware');
+const proxyMiddleware = require('../middlewares/proxy.middleware');
+const { searchLimiter } = require('../middlewares/rateLimiters');
+const { publicBffRouter, orgBffRouter } = require('../bff');
+
+router.get('/metrics', (req, res) => {
+  res.json({
+    success: true,
+    service: 'api-gateway',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Apply authentication middleware cho tất cả routes (trừ public routes)
+router.use(authMiddleware);
+router.use(searchLimiter);
+
+// BFF — bootstrap / dashboard (trước permission)
+router.use(publicBffRouter);
+
+// Apply permission middleware để kiểm tra quyền truy cập
+router.use(permissionMiddleware);
+
+// BFF — org shell / documents-overview (cache + coalesce, trước proxy)
+router.use(orgBffRouter);
+
+// Apply proxy middleware cho tất cả routes
+// Dùng router.use() với path pattern để match tất cả routes
+// Lưu ý: Với Express 5, cần đảm bảo proxy middleware được gọi đúng cách
+router.use((req, res, next) => {
+  console.log(`[API-Gateway] Router.use() middleware called for ${req.method} ${req.path}`);
+  return proxyMiddleware(req, res, next);
+});
+
+module.exports = router;
+
+

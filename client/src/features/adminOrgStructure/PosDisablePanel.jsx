@@ -1,0 +1,134 @@
+/** Position (HR) — admin RBAC */
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import {
+  AdminUserFormCard,
+  AdminUserPanelShell,
+  adminDangerBtnClass,
+  adminInputClass,
+  adminLabelClass,
+} from '../../components/adminUsers/adminUserPanelUi';
+import {
+  AdminListSkeleton,
+} from '../../components/adminUsers/adminPanelStates';
+import { ConfirmDialog } from '../../components/Shared';
+import { adminUserAPI } from '../../services/api/adminUserAPI';
+import useAdminMembers from '../../hooks/useAdminMembers';
+import { useAppStrings } from '../../locales/appStrings';
+import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
+import { memberUserId } from '../../utils/adminUserUtils';
+import { memberJobTitle } from '../../utils/userTaxonomyUtils';
+
+export default function PosDisablePanel({ orgId, embedded = false }) {
+  const { t } = useAppStrings();
+  const [searchParams] = useSearchParams();
+  const titleParam = String(searchParams.get('title') || '').trim();
+  const { members, loading, loadMembers, error: membersError } = useAdminMembers(orgId, { view: 'directory' });
+  const [title, setTitle] = useState(titleParam);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (titleParam) setTitle(titleParam);
+  }, [titleParam]);
+
+  const titles = useMemo(() => {
+    const set = new Set();
+    for (const m of members) {
+      const jobTitle = memberJobTitle(m);
+      if (jobTitle) set.add(jobTitle);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [members]);
+
+  const confirm = async () => {
+    if (!orgId || !title || busy) return;
+    const targets = members.filter((m) => memberJobTitle(m) === title);
+    setBusy(true);
+    try {
+      await Promise.all(
+        targets.map((m) => adminUserAPI.patchProfile(orgId, memberUserId(m), { jobTitle: '' }))
+      );
+      toast.success(t('adminOrg.posCleared'));
+      setOpen(false);
+      setTitle('');
+      await loadMembers();
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('adminOrg.posClearFail') }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const body = (
+    <>
+      <AdminUserFormCard danger>
+        {membersError ? (
+          <div className="space-y-3">
+            <p role="alert" className="rounded-xl border border-destructive bg-card px-3 py-2 text-sm text-destructive">
+              {resolveApiErrorMessage(membersError, { t, fallback: t('companyAdmin.loadMembersFail') })}
+            </p>
+            <button
+              type="button"
+              className={adminDangerBtnClass()}
+              disabled={busy}
+              onClick={() => loadMembers()}
+            >
+              {t('adminRbac.retry')}
+            </button>
+          </div>
+        ) : loading ? (
+          <AdminListSkeleton rows={3} />
+        ) : (
+          <div className="mx-auto max-w-lg space-y-4">
+            <label className="block">
+              <span className={adminLabelClass()}>{t('adminOrg.posTitle')}</span>
+              <select
+                className={adminInputClass()}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              >
+                <option value="">{t('adminOrg.selectTitle')}</option>
+                {titles.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={!title}
+              className={adminDangerBtnClass()}
+              onClick={() => setOpen(true)}
+            >
+              {t('adminOrg.posDisableAction')}
+            </button>
+          </div>
+        )}
+      </AdminUserFormCard>
+      <ConfirmDialog
+        isOpen={open}
+        onClose={() => !busy && setOpen(false)}
+        onConfirm={confirm}
+        variant="danger"
+        title={t('adminDomains.rbac.posDisable')}
+        message={t('adminOrg.posClearConfirm', { name: title })}
+        confirmText={t('adminOrg.posDisableAction')}
+        cancelText={t('common.cancel')}
+      />
+    </>
+  );
+
+  if (embedded) return body;
+
+  return (
+    <AdminUserPanelShell
+      title={t('adminDomains.rbac.posDisable')}
+      hint={t('adminOrg.posDisableHint')}
+    >
+      {body}
+    </AdminUserPanelShell>
+  );
+}

@@ -1,0 +1,482 @@
+const mongoose = require('../db');
+
+/**
+ * Project aggregate (SSOT identity / settings / scope / catalog lifecycle).
+ * Board (TaskBoard) is a child — projectId !== boardId.
+ */
+const customerSchema = new mongoose.Schema(
+  {
+    name: { type: String, trim: true, default: '', maxlength: 180 },
+    company: { type: String, trim: true, default: '', maxlength: 180 },
+    contactPerson: { type: String, trim: true, default: '', maxlength: 180 },
+    contractCode: { type: String, trim: true, default: '', maxlength: 64 },
+  },
+  { _id: false }
+);
+
+const methodologySettingsSchema = new mongoose.Schema(
+  {
+    sprintDurationDays: { type: Number, default: null },
+    sprintStartDay: { type: String, trim: true, default: '' },
+    wipLimit: { type: Number, default: null },
+  },
+  { _id: false }
+);
+
+const technicalEnvSchema = new mongoose.Schema(
+  {
+    key: { type: String, trim: true, default: 'custom', maxlength: 32 },
+    name: { type: String, trim: true, default: '', maxlength: 120 },
+    url: { type: String, trim: true, default: '', maxlength: 500 },
+  },
+  { _id: false }
+);
+
+const technicalSetupSchema = new mongoose.Schema(
+  {
+    repository: {
+      url: { type: String, trim: true, default: '', maxlength: 500 },
+      provider: { type: String, trim: true, default: '', maxlength: 64 },
+      defaultBranch: { type: String, trim: true, default: '', maxlength: 128 },
+    },
+    stack: {
+      languages: { type: [{ type: String, trim: true, maxlength: 64 }], default: [] },
+      frameworks: { type: [{ type: String, trim: true, maxlength: 64 }], default: [] },
+      databases: { type: [{ type: String, trim: true, maxlength: 64 }], default: [] },
+    },
+    environments: { type: [technicalEnvSchema], default: [] },
+    infrastructure: {
+      notes: { type: String, trim: true, default: '', maxlength: 2000 },
+      cloudProvider: { type: String, trim: true, default: '', maxlength: 64 },
+    },
+    cicd: {
+      provider: { type: String, trim: true, default: '', maxlength: 64 },
+      pipelineUrl: { type: String, trim: true, default: '', maxlength: 500 },
+      notes: { type: String, trim: true, default: '', maxlength: 2000 },
+    },
+    deployment: {
+      strategy: { type: String, trim: true, default: '', maxlength: 64 },
+      target: { type: String, trim: true, default: '', maxlength: 180 },
+      notes: { type: String, trim: true, default: '', maxlength: 2000 },
+    },
+    completedAt: { type: Date, default: null },
+    updatedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+  },
+  { _id: false }
+);
+
+const requiredProjectRoleSchema = new mongoose.Schema(
+  {
+    roleKey: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 64,
+    },
+    requiredCount: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0,
+    },
+  },
+  { _id: false }
+);
+
+const informationLevelOverrideSchema = new mongoose.Schema(
+  {
+    audience: { type: String, required: true, trim: true, maxlength: 64 },
+    level: {
+      type: String,
+      enum: ['summary', 'details', 'confidential'],
+      required: true,
+    },
+  },
+  { _id: false }
+);
+
+const projectSchema = new mongoose.Schema(
+  {
+    organizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      index: true,
+    },
+    teamId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: false,
+      default: null,
+      index: true,
+    },
+    /** Org-level identity: 'organization' (default). Legacy team|department|division kept for dual-read until migrate. */
+    scopeType: {
+      type: String,
+      enum: ['organization', 'team', 'department', 'division'],
+      default: 'organization',
+      index: true,
+    },
+    scopeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      index: true,
+    },
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 180,
+    },
+    projectCode: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: 64,
+      index: true,
+    },
+    description: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: 2000,
+    },
+    /** Legacy + expected end alias */
+    dueDate: {
+      type: Date,
+      default: null,
+    },
+    background: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: 2000,
+    },
+    /**
+     * Legacy binary visibility (dual-read Phase 1).
+     * Prefer visibilityMode + visibilityPolicy / org policy.
+     */
+    visibility: {
+      type: String,
+      enum: ['private', 'workspace'],
+      default: 'private',
+    },
+    /** inherit = org settings.projectVisibilityPolicy; custom = project.visibilityPolicy */
+    visibilityMode: {
+      type: String,
+      enum: ['inherit', 'custom'],
+      default: 'inherit',
+      index: true,
+    },
+    /** Snapshot when visibilityMode=custom (same shape as org projectVisibilityPolicy) */
+    visibilityPolicy: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    informationLevelOverrides: {
+      type: [informationLevelOverrideSchema],
+      default: [],
+    },
+    /** Departments participating — discover + resource filter; NOT RBAC */
+    relatedDepartmentIds: {
+      type: [{ type: mongoose.Schema.Types.ObjectId }],
+      default: [],
+      index: true,
+    },
+    status: {
+      type: String,
+      enum: ['draft', 'ready', 'in_development', 'qa_uat', 'release_handover', 'on_hold', 'closed'],
+      default: 'draft',
+      index: true,
+    },
+    /**
+     * Delivery gate (orthogonal to status). Missing on legacy docs → coerce to development at read.
+     * New creates default requirement_analysis via createProject / init fields.
+     */
+    deliveryPhase: {
+      type: String,
+      enum: [
+        'requirement_analysis',
+        'delivery_planning',
+        'development',
+        'qa_uat',
+        'release_handover',
+      ],
+      default: 'requirement_analysis',
+      index: true,
+    },
+    /**
+     * Birth path: ai = Phase 0 draft (HITL); manual = Phase 1 RA (not draft tab).
+     * Additive — missing on legacy docs.
+     */
+    analysisMode: {
+      type: String,
+      enum: ['manual', 'ai'],
+      default: 'manual',
+      index: true,
+    },
+    /**
+     * Cách duyệt Gate WHAT / HOW khi cổng có từ 2 vai trò.
+     * finalRoleKey là vai trò Tổng duyệt — người xác nhận cổng.
+     */
+    gateReviewPolicy: {
+      type: mongoose.Schema.Types.Mixed,
+      default: undefined,
+    },
+    /** Plan A — project Release Ready gate (HITL). */
+    releaseReadyStatus: {
+      type: String,
+      enum: ['none', 'confirmed'],
+      default: 'none',
+      index: true,
+    },
+    releaseReadyAt: {
+      type: Date,
+      default: null,
+    },
+    releaseReadyBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      index: true,
+    },
+    /** Plan C — dedupe stamp for release_ready_proposed notify. */
+    releaseReadyNotifiedAt: {
+      type: Date,
+      default: null,
+    },
+    /** Plan A — UAT sign-off after Release Ready. */
+    uatStatus: {
+      type: String,
+      enum: ['none', 'pass', 'fail'],
+      default: 'none',
+      index: true,
+    },
+    uatSignedAt: {
+      type: Date,
+      default: null,
+    },
+    uatSignedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      index: true,
+    },
+    uatNote: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: 2000,
+    },
+    /** Plan B — handover checklist ticks (id → boolean). */
+    handoverChecklist: {
+      type: mongoose.Schema.Types.Mixed,
+      default: () => ({}),
+    },
+    /** Chuẩn Vàng — per-item audit { [id]: { at, byUserId } }. */
+    handoverChecklistMeta: {
+      type: mongoose.Schema.Types.Mixed,
+      default: () => ({}),
+    },
+    /** Plan B — product release label (server-set on first handover). */
+    releaseLabel: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: 64,
+    },
+    /** Plan D E5 — last Production verify evidence (flat; no Deployment entity). */
+    deployEvidence: {
+      at: { type: Date, default: null },
+      byUserId: { type: mongoose.Schema.Types.ObjectId, default: null },
+      env: { type: String, trim: true, default: '', maxlength: 64 },
+      releaseLabelRef: { type: String, trim: true, default: '', maxlength: 64 },
+      notes: { type: String, trim: true, default: '', maxlength: 2000 },
+      pipelineUrl: { type: String, trim: true, default: '', maxlength: 500 },
+    },
+    /** Template-driven required analysis kinds for Phase 1 gate (empty = default PHASE1_REQUIRED_KINDS) */
+    phase1RequiredKinds: {
+      type: [{ type: String, trim: true, uppercase: true, maxlength: 16 }],
+      default: [],
+    },
+    /** Stamp when PM/PO starts Delivery Planning after RA approved */
+    phase1RaApprovedAt: {
+      type: Date,
+      default: null,
+    },
+    /**
+     * Phase 2 Manual path — PM staging table awaiting PO approve before development.
+     * { status, methodology, rows[], submittedAt, submittedBy, reviewedAt, reviewedBy, note }
+     */
+    phase2ManualStaging: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    projectType: {
+      type: String,
+      enum: ['software', 'integration', 'maintenance', 'research', 'other'],
+      default: 'software',
+    },
+    category: {
+      type: String,
+      enum: ['internal', 'customer'],
+      default: 'internal',
+      index: true,
+    },
+    priority: {
+      type: String,
+      enum: ['low', 'medium', 'high', 'urgent'],
+      default: 'medium',
+    },
+    tags: {
+      type: [{ type: String, trim: true, maxlength: 48 }],
+      default: [],
+    },
+    startDate: {
+      type: Date,
+      default: null,
+    },
+    expectedEndDate: {
+      type: Date,
+      default: null,
+    },
+    /** warn_v1 chỉ gán lúc tạo. Document cũ để null và không áp luật lịch mới. */
+    schedulePolicy: {
+      type: String,
+      default: null,
+      maxlength: 32,
+    },
+    estimatedDurationDays: {
+      type: Number,
+      default: null,
+    },
+    workingCalendar: {
+      type: String,
+      trim: true,
+      default: 'standard',
+      maxlength: 64,
+    },
+    methodology: {
+      type: String,
+      enum: ['scrum'],
+      default: 'scrum',
+    },
+    methodologySettings: {
+      type: methodologySettingsSchema,
+      default: () => ({}),
+    },
+    /** Hub Work types tree — additive; null = FE/BE default depths. */
+    workTypeConfig: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    /** Catalog priority (key/label) — null = default low/medium/high/urgent. */
+    priorityConfig: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    /** Phase 4 — org WorkflowTemplate bind (boards clone khi apply). */
+    workflowTemplateId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'WorkflowTemplate',
+      default: null,
+      index: true,
+    },
+    /** Phase 5 — default policy khi chuyển task → done (nếu transition không gắn riêng). */
+    defaultTaskDoneApprovalPolicyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ApprovalPolicy',
+      default: null,
+      index: true,
+    },
+    /** Phase 6 — ApprovalPolicy cho Change Request (null = Phase 5 free terminal). */
+    changeRequestApprovalPolicyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ApprovalPolicy',
+      default: null,
+      index: true,
+    },
+    customer: {
+      type: customerSchema,
+      default: null,
+    },
+    technicalSetup: {
+      type: technicalSetupSchema,
+      default: () => ({}),
+    },
+    requiredProjectRoles: {
+      type: [requiredProjectRoleSchema],
+      default: [],
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      index: true,
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    /** Complete project (100% Done) — not the same as soft-archive. */
+    closedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    closedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+    /** Snapshot 7 nhóm lúc hoàn thành — Mixed, không index. */
+    closureSnapshot: {
+      type: Object,
+      default: null,
+    },
+    /** Phase 6 — soft-archive timestamp */
+    archivedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    /** Days to retain after archive (null → org GovernanceSettings.defaultRetentionDays) */
+    retentionDays: {
+      type: Number,
+      default: null,
+      min: 1,
+      max: 3650,
+    },
+    retentionUntil: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    /** Budget placeholder — not ERP accounting */
+    budgetStub: {
+      type: {
+        amount: { type: Number, default: null },
+        currency: { type: String, trim: true, default: 'VND', maxlength: 8 },
+        note: { type: String, trim: true, default: '', maxlength: 240 },
+      },
+      default: null,
+    },
+  },
+  { timestamps: true }
+);
+
+projectSchema.index({ organizationId: 1, scopeType: 1, scopeId: 1, isActive: 1, createdAt: -1 });
+projectSchema.index({ organizationId: 1, status: 1, isActive: 1 });
+projectSchema.index(
+  { organizationId: 1, projectCode: 1 },
+  { unique: true, partialFilterExpression: { projectCode: { $gt: '' } } }
+);
+
+/** Dual-read: docs cũ status=cancelled/completed/… → closed trước khi validate enum.
+ * Mongoose 9: middleware sync/async — không còn callback `next` (gọi next() → TypeError). */
+projectSchema.pre('validate', function coerceLegacyStatus() {
+  try {
+    const { coerceProjectLifecycleStatus } = require('../utils/project/projectInitFields');
+    const coerced = coerceProjectLifecycleStatus(this.status);
+    if (coerced) this.status = coerced;
+  } catch {
+    /* keep raw — enum sẽ reject nếu vẫn invalid */
+  }
+});
+
+module.exports = mongoose.model('Project', projectSchema);

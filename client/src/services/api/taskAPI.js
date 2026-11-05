@@ -1,44 +1,653 @@
 import apiClient from './apiClient';
 
+function buildQueryParams(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([k, v]) => {
+    if (k === 'workspaceSlug' || k === 'slug') return;
+    if (v != null && v !== '') params.set(k, String(v));
+  });
+  return params;
+}
+
+/** legacy | workspace | dual — mặc định workspace (S4b); rollback: VITE_TASK_API_MODE=dual */
+export function getTaskApiMode() {
+  const raw = String(import.meta.env.VITE_TASK_API_MODE || 'workspace')
+    .trim()
+    .toLowerCase();
+  return ['legacy', 'workspace', 'dual'].includes(raw) ? raw : 'workspace';
+}
+
+export function extractWorkspaceApiContext(source = {}) {
+  const workspaceSlug = String(source.workspaceSlug || source.slug || '').trim();
+  const organizationId =
+    source.organizationId != null && source.organizationId !== ''
+      ? String(source.organizationId)
+      : '';
+  return { workspaceSlug, organizationId };
+}
+
+function stripWorkspaceKeys(obj = {}) {
+  const next = { ...(obj || {}) };
+  delete next.workspaceSlug;
+  delete next.slug;
+  return next;
+}
+
+function legacyBoardBase() {
+  return '/tasks/boards';
+}
+
+function workspaceBoardBase(workspaceSlug) {
+  return `/workspaces/${encodeURIComponent(workspaceSlug)}/task-boards`;
+}
+
+function shouldTryWorkspace(ctx) {
+  const mode = getTaskApiMode();
+  if (mode === 'legacy') return false;
+  if (!ctx.workspaceSlug) return false;
+  if (mode === 'workspace') return true;
+  return true;
+}
+
+function isFallbackableError(err) {
+  const status = Number(err?.response?.status || err?.status || 0);
+  return status === 404 || status === 501 || status === 502 || status === 503;
+}
+
+async function requestWithWorkspaceFallback({ ctx, workspaceRequest, legacyRequest }) {
+  const mode = getTaskApiMode();
+  if (mode === 'legacy' || !ctx.workspaceSlug) {
+    return legacyRequest();
+  }
+  if (mode === 'workspace') {
+    return workspaceRequest();
+  }
+  try {
+    return await workspaceRequest();
+  } catch (err) {
+    if (!isFallbackableError(err)) throw err;
+    return legacyRequest();
+  }
+}
+
+/**
+ * apiClient interceptor đã trả thẳng response.data — unwrap { success, data } hoặc { status, data }.
+ */
+export function unwrapTaskApiPayload(res) {
+  if (res == null) return null;
+  const hasEnvelope =
+    res?.data !== undefined && (res?.success !== undefined || res?.status !== undefined);
+  const first = hasEnvelope ? res.data : res;
+  if (
+    first &&
+    typeof first === 'object' &&
+    first.data !== undefined &&
+    (first.success !== undefined || first.status !== undefined)
+  ) {
+    return first.data;
+  }
+  return first;
+}
+
+export function unwrapTaskBoardListPayload(res) {
+  const payload = unwrapTaskApiPayload(res);
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+}
+
+export function unwrapTaskBoardDetailPayload(res) {
+  const payload = unwrapTaskApiPayload(res);
+  if (!payload || typeof payload !== 'object') return null;
+  if (payload.board || Array.isArray(payload.lists)) return payload;
+  return null;
+}
+
+/** Gateway permission: extractServerId đọc query (không cần parse JSON body). */
+function orgQuery(organizationId) {
+  if (organizationId == null || organizationId === '') return '';
+  return `?organizationId=${encodeURIComponent(String(organizationId))}`;
+}
+
+function boardOptsFromArgs(second, third) {
+  if (third && typeof third === 'object') return extractWorkspaceApiContext(third);
+  if (second && typeof second === 'object' && !Array.isArray(second)) {
+    const ctx = extractWorkspaceApiContext(second);
+    if (ctx.workspaceSlug || ctx.organizationId) return ctx;
+  }
+  return {};
+}
+
+function axiosCallConfig(opts = {}) {
+  const cfg = {};
+  if (opts.skipGlobalErrorHandling) cfg.skipGlobalErrorHandling = true;
+  if (opts.skipPermissionDeniedToast) cfg.skipPermissionDeniedToast = true;
+  if (opts.skipNotFoundToast) cfg.skipNotFoundToast = true;
+  return Object.keys(cfg).length ? cfg : undefined;
+}
+
 export const taskAPI = {
-  // Get all tasks
-  getTasks: (organizationId, filters = {}) => {
-    const params = new URLSearchParams({ organizationId, ...filters });
-    return apiClient.get(`/tasks?${params}`);
+  // Get all tasks — truyền object: { organizationId?, dueFrom?, dueTo?, status?, ... }
+  getTasks: (filters = {}) => {
+    const params = buildQueryParams(filters);
+    const q = params.toString();
+    return apiClient.get(q ? `/tasks?${q}` : '/tasks');
   },
 
   // Create new task
   createTask: (taskData) => {
-    return apiClient.post('/tasks', taskData);
+    const payload = stripWorkspaceKeys({ ...(taskData || {}) });
+    if (!payload.serverId && payload.organizationId) {
+      payload.serverId = payload.organizationId;
+    }
+    return apiClient.post('/tasks', payload);
   },
 
   // Get task by ID
-  getTask: (id) => {
-    return apiClient.get(`/tasks/${id}`);
+  getTask: (id, opts = {}) => {
+    return apiClient.get(`/tasks/${id}${orgQuery(opts.organizationId)}`);
   },
 
-  // Update task
-  updateTask: (id, updates) => {
-    return apiClient.put(`/tasks/${id}`, updates);
+  // Update task — opts.organizationId giúp API Gateway có ngữ cảnh org (query string)
+  updateTask: (id, updates, opts = {}) => {
+    return apiClient.put(`/tasks/${id}${orgQuery(opts.organizationId)}`, updates);
   },
+
+  listWorklogs: (taskId, opts = {}) =>
+    apiClient.get(`/tasks/${encodeURIComponent(taskId)}/worklogs${orgQuery(opts.organizationId)}`),
+
+  getTaskHistory: (taskId, params = {}, opts = {}) =>
+    apiClient.get(`/tasks/${encodeURIComponent(taskId)}/history${orgQuery(opts.organizationId)}`, {
+      params: { limit: params.limit, before: params.before },
+    }),
+
+  createWorklog: (taskId, body = {}, opts = {}) =>
+    apiClient.post(
+      `/tasks/${encodeURIComponent(taskId)}/worklogs${orgQuery(opts.organizationId)}`,
+      body
+    ),
+
+  getSprintTimeSummary: (projectId, sprintId) =>
+    apiClient.get(
+      `/projects/${encodeURIComponent(projectId)}/sprints/${encodeURIComponent(sprintId)}/time-summary`
+    ),
 
   // Delete task
-  deleteTask: (id) => {
-    return apiClient.delete(`/tasks/${id}`);
+  deleteTask: (id, opts = {}) => {
+    return apiClient.delete(`/tasks/${id}${orgQuery(opts.organizationId)}`);
   },
 
   // Update task status
-  updateStatus: (id, status) => {
-    return apiClient.patch(`/tasks/${id}/status`, { status });
+  updateStatus: (id, status, opts = {}) => {
+    return apiClient.patch(`/tasks/${id}/status${orgQuery(opts.organizationId)}`, { status });
   },
 
   // Assign task to user
-  assignTask: (id, userId) => {
-    return apiClient.post(`/tasks/${id}/assign`, { userId });
+  assignTask: (id, userId, opts = {}) => {
+    return apiClient.post(`/tasks/${id}/assign${orgQuery(opts.organizationId)}`, { userId });
   },
 
   // Get task statistics
-  getStatistics: (organizationId) => {
-    return apiClient.get(`/tasks/statistics?organizationId=${organizationId}`);
-  }
+  getStatistics: (organizationId, opts = {}) => {
+    const params = new URLSearchParams();
+    if (organizationId != null && organizationId !== '') {
+      params.set('organizationId', String(organizationId));
+    }
+    if (opts.view) params.set('view', String(opts.view));
+    const q = params.toString();
+    return apiClient.get(q ? `/tasks/statistics?${q}` : '/tasks/statistics');
+  },
+
+  createBoard: (payload = {}) => {
+    const ctx = extractWorkspaceApiContext(payload);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () => apiClient.post(workspaceBoardBase(ctx.workspaceSlug), body),
+      legacyRequest: () => apiClient.post(`${legacyBoardBase()}`, body),
+    });
+  },
+
+  getBoards: (filters = {}) => {
+    const ctx = extractWorkspaceApiContext(filters);
+    const params = buildQueryParams(filters);
+    const q = params.toString();
+    const legacyPath = q ? `${legacyBoardBase()}?${q}` : legacyBoardBase();
+    const workspacePath = q
+      ? `${workspaceBoardBase(ctx.workspaceSlug)}?${q}`
+      : workspaceBoardBase(ctx.workspaceSlug);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () => apiClient.get(workspacePath),
+      legacyRequest: () => apiClient.get(legacyPath),
+    });
+  },
+
+  getBoardDetail: (boardId, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    const silent = axiosCallConfig(opts) || {};
+    const params = {};
+    if (opts.includeCards === false || opts.includeCards === 0 || opts.includeCards === '0') {
+      params.includeCards = '0';
+    }
+    if (opts.epicId) params.epicId = String(opts.epicId);
+    if (opts.featureId) params.featureId = String(opts.featureId);
+    if (opts.parentTaskId) params.parentTaskId = String(opts.parentTaskId);
+    const cfg = {
+      ...silent,
+      ...(Object.keys(params).length ? { params: { ...(silent.params || {}), ...params } } : {}),
+    };
+    const callCfg = Object.keys(cfg).length ? cfg : undefined;
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.get(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}`, callCfg),
+      legacyRequest: () => apiClient.get(`${legacyBoardBase()}/${boardId}`, callCfg),
+    });
+  },
+
+  patchBoard: (boardId, payload = {}, opts = {}) => {
+    const ctx = boardOptsFromArgs(payload, opts) || extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.patch(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}`, body),
+      legacyRequest: () => apiClient.patch(`${legacyBoardBase()}/${boardId}`, body),
+    });
+  },
+
+  archiveBoard: (boardId, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/archive`),
+      legacyRequest: () => apiClient.post(`${legacyBoardBase()}/${boardId}/archive`),
+    });
+  },
+
+  getBoardAssignableMembers: (boardId, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.get(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/assignable-members`),
+      legacyRequest: () =>
+        apiClient.get(`${legacyBoardBase()}/${boardId}/assignable-members`),
+    });
+  },
+
+  createBoardList: (boardId, payload = {}, opts = {}) => {
+    const ctx = boardOptsFromArgs(payload, opts) || extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/lists`, body),
+      legacyRequest: () => apiClient.post(`${legacyBoardBase()}/${boardId}/lists`, body),
+    });
+  },
+
+  reorderBoardList: (boardId, listId, payload = {}, opts = {}) => {
+    const ctx = boardOptsFromArgs(payload, opts) || extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.patch(
+          `${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/lists/${listId}`,
+          body
+        ),
+      legacyRequest: () =>
+        apiClient.patch(`${legacyBoardBase()}/${boardId}/lists/${listId}`, body),
+    });
+  },
+
+  copyBoardList: (boardId, listId, payload = {}, opts = {}) => {
+    const ctx = boardOptsFromArgs(payload, opts) || extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(
+          `${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/lists/${listId}/copy`,
+          body
+        ),
+      legacyRequest: () =>
+        apiClient.post(`${legacyBoardBase()}/${boardId}/lists/${listId}/copy`, body),
+    });
+  },
+
+  moveBoardList: (boardId, listId, payload = {}, opts = {}) => {
+    const ctx = boardOptsFromArgs(payload, opts) || extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(
+          `${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/lists/${listId}/move`,
+          body
+        ),
+      legacyRequest: () =>
+        apiClient.post(`${legacyBoardBase()}/${boardId}/lists/${listId}/move`, body),
+    });
+  },
+
+  moveAllBoardListCards: (boardId, listId, payload = {}, opts = {}) => {
+    const ctx = boardOptsFromArgs(payload, opts) || extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(
+          `${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/lists/${listId}/move-all-cards`,
+          body
+        ),
+      legacyRequest: () =>
+        apiClient.post(`${legacyBoardBase()}/${boardId}/lists/${listId}/move-all-cards`, body),
+    });
+  },
+
+  watchBoardList: (boardId, listId, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(
+          `${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/lists/${listId}/watch`
+        ),
+      legacyRequest: () => apiClient.post(`${legacyBoardBase()}/${boardId}/lists/${listId}/watch`),
+    });
+  },
+
+  unwatchBoardList: (boardId, listId, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.delete(
+          `${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/lists/${listId}/watch`
+        ),
+      legacyRequest: () =>
+        apiClient.delete(`${legacyBoardBase()}/${boardId}/lists/${listId}/watch`),
+    });
+  },
+
+  archiveBoardList: (boardId, listId, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.delete(
+          `${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/lists/${listId}`
+        ),
+      legacyRequest: () => apiClient.delete(`${legacyBoardBase()}/${boardId}/lists/${listId}`),
+    });
+  },
+
+  createBoardCard: (boardId, payload = {}, opts = {}) => {
+    const ctx = boardOptsFromArgs(payload, opts) || extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    const silent = axiosCallConfig(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/cards`, body, silent),
+      legacyRequest: () => apiClient.post(`${legacyBoardBase()}/${boardId}/cards`, body, silent),
+    });
+  },
+
+  moveBoardCard: (cardId, payload = {}, opts = {}) => {
+    const ctx = boardOptsFromArgs(payload, opts) || extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.patch(`${workspaceBoardBase(ctx.workspaceSlug)}/cards/${cardId}/move`, body),
+      legacyRequest: () => apiClient.patch(`${legacyBoardBase()}/cards/${cardId}/move`, body),
+    });
+  },
+
+  copyBoardCard: (cardId, payload = {}, opts = {}) => {
+    const ctx = boardOptsFromArgs(payload, opts) || extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(`${workspaceBoardBase(ctx.workspaceSlug)}/cards/${cardId}/copy`, body),
+      legacyRequest: () => apiClient.post(`${legacyBoardBase()}/cards/${cardId}/copy`, body),
+    });
+  },
+
+  archiveBoardCard: (cardId, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.delete(`${workspaceBoardBase(ctx.workspaceSlug)}/cards/${cardId}`),
+      legacyRequest: () => apiClient.delete(`${legacyBoardBase()}/cards/${cardId}`),
+    });
+  },
+
+  updateBoardCard: (cardId, payload = {}, opts = {}) => {
+    const ctx = boardOptsFromArgs(payload, opts) || extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.patch(`${workspaceBoardBase(ctx.workspaceSlug)}/cards/${cardId}`, body),
+      legacyRequest: () => apiClient.patch(`${legacyBoardBase()}/cards/${cardId}`, body),
+    });
+  },
+
+  createWorkGroup: (featureId, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(`${workspaceBoardBase(ctx.workspaceSlug)}/features/${featureId}/workgroup`),
+      legacyRequest: () =>
+        apiClient.post(`${legacyBoardBase()}/features/${featureId}/workgroup`),
+    });
+  },
+
+  addBoardCardComment: (cardId, content, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(`${workspaceBoardBase(ctx.workspaceSlug)}/cards/${cardId}/comments`, {
+          content,
+        }),
+      legacyRequest: () =>
+        apiClient.post(`${legacyBoardBase()}/cards/${cardId}/comments`, { content }),
+    });
+  },
+
+  /** Brief dự án (BGĐ → chỉ định PM) — luôn legacy /tasks/project-briefs */
+  createProjectBrief: (payload = {}) => apiClient.post('/tasks/project-briefs', payload),
+
+  listProjectBriefs: (filters = {}, opts = {}) => {
+    const params = buildQueryParams(filters);
+    const q = params.toString();
+    const cfg = {};
+    if (opts.timeout != null) cfg.timeout = opts.timeout;
+    if (opts.signal) cfg.signal = opts.signal;
+    if (opts.skipPermissionDeniedToast) cfg.skipPermissionDeniedToast = true;
+    if (opts.skipNotFoundToast) cfg.skipNotFoundToast = true;
+    if (opts.skipGlobalErrorHandling) cfg.skipGlobalErrorHandling = true;
+    return apiClient.get(q ? `/tasks/project-briefs?${q}` : '/tasks/project-briefs', cfg);
+  },
+
+  getProjectBrief: (briefId) => apiClient.get(`/tasks/project-briefs/${encodeURIComponent(briefId)}`),
+
+  acceptProjectBrief: (briefId, payload = {}) =>
+    apiClient.post(`/tasks/project-briefs/${encodeURIComponent(briefId)}/accept`, payload),
+
+  cancelProjectBrief: (briefId) =>
+    apiClient.post(`/tasks/project-briefs/${encodeURIComponent(briefId)}/cancel`, {}),
+
+  listBoardSprints: (boardId, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.get(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/sprints`),
+      legacyRequest: () => apiClient.get(`${legacyBoardBase()}/${boardId}/sprints`),
+    });
+  },
+
+  createBoardSprint: (boardId, payload = {}, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/sprints`, body),
+      legacyRequest: () => apiClient.post(`${legacyBoardBase()}/${boardId}/sprints`, body),
+    });
+  },
+
+  updateBoardSprint: (boardId, sprintId, payload = {}, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.patch(
+          `${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/sprints/${sprintId}`,
+          body
+        ),
+      legacyRequest: () =>
+        apiClient.patch(`${legacyBoardBase()}/${boardId}/sprints/${sprintId}`, body),
+    });
+  },
+
+  deleteBoardSprint: (boardId, sprintId, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.delete(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/sprints/${sprintId}`),
+      legacyRequest: () => apiClient.delete(`${legacyBoardBase()}/${boardId}/sprints/${sprintId}`),
+    });
+  },
+
+  assignCardsToSprint: (boardId, sprintId, cardIds = [], opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(
+          `${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/sprints/${sprintId}/cards`,
+          { cardIds }
+        ),
+      legacyRequest: () =>
+        apiClient.post(`${legacyBoardBase()}/${boardId}/sprints/${sprintId}/cards`, { cardIds }),
+    });
+  },
+
+  removeCardFromSprint: (boardId, sprintId, cardId, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.delete(
+          `${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/sprints/${sprintId}/cards/${cardId}`
+        ),
+      legacyRequest: () =>
+        apiClient.delete(`${legacyBoardBase()}/${boardId}/sprints/${sprintId}/cards/${cardId}`),
+    });
+  },
+
+  getBoardWorkflow: (boardId, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    const cfg = axiosCallConfig(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.get(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/workflow`, cfg),
+      legacyRequest: () => apiClient.get(`${legacyBoardBase()}/${boardId}/workflow`, cfg),
+    });
+  },
+
+  putBoardWorkflow: (boardId, payload = {}, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.put(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/workflow`, body),
+      legacyRequest: () => apiClient.put(`${legacyBoardBase()}/${boardId}/workflow`, body),
+    });
+  },
+
+  seedBoardWorkflow: (boardId, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/workflow/seed-default`),
+      legacyRequest: () =>
+        apiClient.post(`${legacyBoardBase()}/${boardId}/workflow/seed-default`),
+    });
+  },
+
+  applyBoardWorkflowTemplate: (boardId, payload = {}, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(
+          `${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/workflow/apply-template`,
+          body
+        ),
+      legacyRequest: () =>
+        apiClient.post(`${legacyBoardBase()}/${boardId}/workflow/apply-template`, body),
+    });
+  },
+
+  listWorkflowTemplates: (organizationId, opts = {}) =>
+    apiClient.get('/projects/workflow-templates', {
+      params: {
+        organizationId,
+        ...(opts.projectId ? { projectId: opts.projectId } : {}),
+      },
+    }),
+
+  upsertWorkflowTemplate: (organizationId, payload = {}) =>
+    apiClient.post('/projects/workflow-templates', {
+      ...payload,
+      organizationId,
+    }),
+
+  updateWorkflowTemplate: (organizationId, templateId, payload = {}) =>
+    apiClient.put(`/projects/workflow-templates/${encodeURIComponent(templateId)}`, {
+      ...payload,
+      organizationId,
+    }),
+
+  applyProjectWorkflow: (projectId, payload = {}) =>
+    apiClient.post(`/projects/${encodeURIComponent(projectId)}/workflow/apply`, payload),
+
+  transferBoard: (boardId, payload = {}, opts = {}) => {
+    const ctx = extractWorkspaceApiContext(opts);
+    const body = stripWorkspaceKeys(payload);
+    return requestWithWorkspaceFallback({
+      ctx,
+      workspaceRequest: () =>
+        apiClient.post(`${workspaceBoardBase(ctx.workspaceSlug)}/${boardId}/transfer`, body),
+      legacyRequest: () => apiClient.post(`${legacyBoardBase()}/${boardId}/transfer`, body),
+    });
+  },
+};
+
+/** @deprecated dùng getTaskApiMode — export để test */
+export const __taskApiInternals = {
+  shouldTryWorkspace,
+  isFallbackableError,
+  legacyBoardBase,
+  workspaceBoardBase,
 };

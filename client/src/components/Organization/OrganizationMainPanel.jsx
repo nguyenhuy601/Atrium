@@ -1,0 +1,3735 @@
+import { useQueryClient } from '@tanstack/react-query';
+import {
+    AlertCircle,
+    AtSign,
+    Bell,
+    Calendar,
+    ChevronLeft,
+    ChevronsDown,
+    ClipboardList,
+    FileText,
+    Hash,
+    PanelLeft,
+    Image as ImageIcon,
+    MessageSquare,
+    Mic,
+    Paperclip,
+    Plus,
+    Search,
+    Send,
+    Settings,
+    Smile,
+    Users,
+    Video,
+    X
+} from 'lucide-react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import toast from 'react-hot-toast';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocale } from '../../context/LocaleContext';
+import { useTheme } from '../../context/ThemeContext';
+import OrganizationDocumentsWorkspacePanel from '../../features/orgDocuments/OrganizationDocumentsWorkspacePanel';
+import OrganizationNotificationsWorkspacePanel from '../../features/orgNotifications/OrganizationNotificationsWorkspacePanel';
+import { useAppStrings } from '../../locales/appStrings';
+import useTaskWorkspaceScope from '../../hooks/useTaskWorkspaceScope';
+import { entShell, roleBadgeClass, roleBadgeLabel } from '../../theme/enterpriseWorkspace';
+import { isWorkspaceAuxTab, normalizeWorkspaceTab } from '../../utils/workspaceTabUtils';
+import DepartmentMeetingsPanel from './DepartmentMeetingsPanel';
+import DepartmentMembersPanel from './DepartmentMembersPanel';
+
+import ProjectHubChangeRequestDetailDrawer from '../../features/projects/hub/ProjectHubChangeRequestDetailDrawer';
+import WorkItemDetail from '../../features/projects/hub/WorkItemDetail/WorkItemDetail';
+import { queryKeys } from '../../lib/queryKeys';
+import { fetchChatMediaFile } from '../../utils/chatGifStickerSend';
+import { normalizeComposerFile } from '../../utils/composerAttachmentUtils';
+import { isHoursSoftWarning } from '../../utils/hoursSoftWarning';
+import { shouldPlaceToolbarBelowBubble } from '../../utils/messageToolbarPlacement';
+import {
+  resolveLineChatScope,
+  resolveScopedWorkspaceChannels,
+} from '../../utils/orgChannelScope';
+import {
+  CHAT_RAIL_BASE_W,
+  CHAT_RAIL_MAX_W,
+  CHAT_RAIL_MIN_W,
+} from '../../utils/orgWorkspaceLayoutPrefs';
+import {
+  channelNameToDisplaySlug,
+  displayDepartmentName,
+  resolveChannelHeaderDescription,
+} from '../../utils/orgEntityDisplay';
+import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
+import ChatContextPicker from '../Chat/ChatContextPicker';
+import ChatContextPreview from '../Chat/ChatContextPreview';
+import { ChatMessageAttachmentBody } from '../Chat/ChatFileAttachment';
+import ChatUploadProgressBar from '../Chat/ChatUploadProgressBar';
+import ComposerEmojiPicker from '../Chat/ComposerEmojiPicker';
+import UnifiedChatComposer from '../Chat/UnifiedChatComposer';
+import { contextCallTargetFromMessage, normalizeMessageRefs } from '../Chat/chatContextRefs';
+import { Modal } from '../Shared';
+import UserAvatar from '../Shared/UserAvatar';
+import ChannelMessageMoreMenu from './ChannelMessageMoreMenu';
+import ChannelMessageToolbar from './ChannelMessageToolbar';
+import OrgMessageInlineEditor from './OrgMessageInlineEditor';
+
+import VoiceAudioSettingsPanel from '../../pages/Voice/VoiceAudioSettingsPanel';
+import { loadVoiceAudioPrefs } from '../../pages/Voice/voiceAudioPrefs';
+import { mapProjectsToBoardPickerRows, projectAPI } from '../../services/api/projectAPI';
+import {
+    taskAPI,
+    unwrapTaskApiPayload,
+    unwrapTaskBoardDetailPayload
+} from '../../services/api/taskAPI';
+import { buildCollaborateProjectsNewPath } from '../../utils/suitePathUtils';
+import { collectMentionLabelsFromContacts } from '../../utils/tokenizeMessageMentions';
+import OrgMessageHoverActions from '../Chat/OrgMessageHoverActions';
+import OrganizationChatView from './OrganizationChatView';
+import OrganizationSidebarAudioBar from './OrganizationSidebarAudioBar';
+import OrganizationVoiceChannelView from './OrganizationVoiceChannelView';
+import OrganizationVoiceConnectionPanel from './OrganizationVoiceConnectionPanel';
+import OrganizationWorkspaceStructureSidebar from './OrganizationWorkspaceStructureSidebar';
+import {
+    FIGMA_ORG_CHANNEL_HEADER,
+    FIGMA_ORG_CHANNEL_HEADER_DESC,
+    FIGMA_ORG_CHANNEL_HEADER_TITLE,
+    FIGMA_ORG_CHANNEL_ICON_BTN,
+} from './figmaOrganizationClasses';
+import { channelUnreadCount } from './organizationStructureTheme';
+
+function isContextCallMessage(message) {
+  return String(message?.visibility?.mode || '') === 'project_intersection';
+}
+
+function contextCallProjectId(row) {
+  return String(row?.projectId || row?._id || '').trim();
+}
+
+function MessageContextChips({ message, isDarkMode, t, onOpen }) {
+  const refs = normalizeMessageRefs(message);
+  const call = contextCallTargetFromMessage(message);
+  if (!call && !refs.length) return null;
+  const chipCls = `mb-2 w-full rounded-xl border px-3 py-2 text-left ${
+    isDarkMode ? 'border-indigo-400/25 bg-indigo-500/10' : 'border-indigo-200 bg-indigo-50'
+  }`;
+  return (
+    <>
+      {call ? (
+        <button
+          type="button"
+          className={chipCls}
+          onClick={() => onOpen(call)}
+          aria-label={t('orgPanel.contextRefChipAria', { label: call.label || t('orgPanel.contextCallFallback') })}
+        >
+          <div
+            className={`text-[10px] font-semibold uppercase tracking-wide ${
+              isDarkMode ? 'text-indigo-200' : 'text-indigo-700'
+            }`}
+          >
+            {t('orgPanel.contextCallBadge')}
+          </div>
+          <div className="text-sm font-semibold">{call.label || t('orgPanel.contextCallFallback')}</div>
+        </button>
+      ) : null}
+      {refs.map((ref) => (
+        <button
+          key={`${ref.kind}-${ref.id}`}
+          type="button"
+          className={chipCls}
+          onClick={() => onOpen(ref)}
+          aria-label={t('orgPanel.contextRefChipAria', { label: ref.label || ref.id })}
+        >
+          <span className="font-mono text-sm font-semibold">{ref.label || ref.id}</span>
+        </button>
+      ))}
+    </>
+  );
+}
+
+function messageDayKey(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function senderInitials(message) {
+  const u = message?.senderId;
+  if (u && typeof u === 'object') {
+    const n = u.displayName || u.username || u.fullName || '';
+    if (typeof n === 'string' && n.trim()) {
+      const p = n.trim().split(/\s+/);
+      if (p.length >= 2) return `${p[0][0]}${p[p.length - 1][0]}`.toUpperCase();
+      return n.slice(0, 2).toUpperCase();
+    }
+  }
+  return 'TV';
+}
+
+function senderDisplayName(message, isMine, currentUser, fallback) {
+  if (isMine) {
+    return (
+      currentUser?.displayName ||
+      currentUser?.fullName ||
+      currentUser?.username ||
+      currentUser?.email?.split?.('@')?.[0] ||
+      fallback
+    );
+  }
+  const u = message?.senderId;
+  if (u && typeof u === 'object') {
+    return u.displayName || u.username || u.fullName || fallback;
+  }
+  return fallback;
+}
+
+function senderAvatarUrl(message, isMine, currentUser) {
+  if (isMine) {
+    return currentUser?.avatar || currentUser?.profile?.avatar || null;
+  }
+  const u = message?.senderId;
+  if (u && typeof u === 'object') {
+    return u.avatar || u.profile?.avatar || null;
+  }
+  return null;
+}
+
+function senderUserId(message, isMine, currentUser) {
+  if (isMine) {
+    const id = currentUser?.id || currentUser?._id || currentUser?.userId;
+    return id != null ? String(id) : null;
+  }
+  const u = message?.senderId;
+  if (u && typeof u === 'object') {
+    const id = u._id || u.id || u.userId;
+    return id != null ? String(id) : null;
+  }
+  if (u != null && u !== '') return String(u);
+  return null;
+}
+
+function userInitialsFromProfile(user) {
+  const name =
+    user?.displayName || user?.fullName || user?.username || user?.email?.split?.('@')?.[0] || '';
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'U';
+  if (parts.length === 1) return parts[0].slice(0, 1).toUpperCase();
+  return `${parts[0][0] || ''}${parts[parts.length - 1][0] || ''}`.toUpperCase();
+}
+
+function FigmaOrgChatComposer({
+  canWriteInChannel,
+  channelReadOnly,
+  chSlug,
+  placeholder: placeholderOverride,
+  fileInputRef,
+  imageInputRef,
+  messageInput,
+  mentionItems = [],
+  onChangeMessageInput,
+  onClearReply,
+  onCreateContactCard,
+  onCreatePoll,
+  onOpenContextPicker,
+  onOpenEmoji,
+  onSendMessage,
+  hasContextCall = false,
+  replyingToMessage,
+  replyToLabel,
+  selectedChannelId,
+  sendingMessage,
+  t,
+}) {
+  const MAX_TEXTAREA_HEIGHT = 120;
+  const disabled = !selectedChannelId || sendingMessage || channelReadOnly;
+  const sendDisabled = disabled || (!String(messageInput || '').trim() && !hasContextCall);
+  const placeholder =
+    placeholderOverride ||
+    (channelReadOnly
+      ? t('orgPanel.composerReadOnlyHint')
+      : selectedChannelId
+        ? t('orgPanel.composerFigmaHint', {
+            ch: chSlug || t('organizations.channelNameFallback'),
+          })
+        : t('orgPanel.composerPlaceholder'));
+  const iconButton =
+    'flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-[background-color,color,transform] duration-150 hover:-translate-y-0.5 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0';
+
+  const inputRef = useRef(null);
+  const mentionMenuRef = useRef(null);
+  const mentionButtonRef = useRef(null);
+  const [showMentionMenu, setShowMentionMenu] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+
+  const safeMentionItems = useMemo(
+    () => (Array.isArray(mentionItems) ? mentionItems.filter((item) => item && item.label) : []),
+    [mentionItems]
+  );
+
+  const filteredMentionItems = useMemo(() => {
+    const q = mentionQuery.trim().toLowerCase();
+    if (!q) return safeMentionItems;
+    return safeMentionItems.filter((item) => {
+      const label = String(item.label || '').toLowerCase();
+      const username = String(item.username || '').toLowerCase();
+      return label.includes(q) || username.includes(q);
+    });
+  }, [safeMentionItems, mentionQuery]);
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const nextHeight = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT);
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > MAX_TEXTAREA_HEIGHT ? 'auto' : 'hidden';
+  }, [messageInput]);
+
+  useEffect(() => {
+    if (!showMentionMenu) return undefined;
+    const handleOutsideClick = (event) => {
+      if (mentionMenuRef.current?.contains(event.target)) return;
+      if (mentionButtonRef.current?.contains(event.target)) return;
+      if (inputRef.current?.contains(event.target)) return;
+      setShowMentionMenu(false);
+      setMentionQuery('');
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showMentionMenu]);
+
+  const insertMention = (item) => {
+    if (disabled) return;
+    const label = String(item?.label || item?.username || '').trim();
+    if (!label) return;
+    const el = inputRef.current;
+    const cur = String(messageInput || '');
+    if (el && typeof el.selectionStart === 'number') {
+      const cursor = el.selectionStart;
+      const head = cur.slice(0, cursor);
+      const tail = cur.slice(cursor);
+      const match = head.match(/(^|\s)@([^\s@]*)$/);
+      if (match) {
+        const token = match[0];
+        const prefix = head.slice(0, head.length - token.length);
+        const spacer = token.startsWith(' ') ? ' ' : '';
+        onChangeMessageInput?.(`${prefix}${spacer}@${label} ${tail}`);
+      } else {
+        onChangeMessageInput?.(`${cur}${cur && !cur.endsWith(' ') ? ' ' : ''}@${label} `);
+      }
+    } else {
+      onChangeMessageInput?.(`${cur}${cur && !cur.endsWith(' ') ? ' ' : ''}@${label} `);
+    }
+    setShowMentionMenu(false);
+    setMentionQuery('');
+    requestAnimationFrame(() => {
+      try {
+        inputRef.current?.focus();
+      } catch {
+        /* ignore */
+      }
+    });
+  };
+
+  const handleSend = () => {
+    if (sendDisabled) return;
+    onSendMessage?.();
+  };
+
+  const handleInputChange = (nextValue) => {
+    onChangeMessageInput?.(nextValue);
+    if (!safeMentionItems.length) return;
+    const el = inputRef.current;
+    const cursor =
+      el && typeof el.selectionStart === 'number' ? el.selectionStart : nextValue.length;
+    const head = nextValue.slice(0, cursor);
+    const match = head.match(/(?:^|\s)@([^\s@]*)$/);
+    if (match) {
+      setMentionQuery(match[1] || '');
+      setShowMentionMenu(true);
+    } else if (showMentionMenu) {
+      setShowMentionMenu(false);
+      setMentionQuery('');
+    }
+  };
+
+  const handleKeyDown = (event) => {
+    if (showMentionMenu && filteredMentionItems.length > 0 && event.key === 'Enter') {
+      event.preventDefault();
+      insertMention(filteredMentionItems[0]);
+      return;
+    }
+    if (event.key === 'Escape' && showMentionMenu) {
+      event.preventDefault();
+      setShowMentionMenu(false);
+      setMentionQuery('');
+      return;
+    }
+    if (event.key !== 'Enter' || event.shiftKey) return;
+    event.preventDefault();
+    handleSend();
+  };
+
+  return (
+    <div className="mr-auto w-full">
+      {replyingToMessage ? (
+        <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/60 px-3 py-2 text-sm text-foreground shadow-xs">
+          <div className="min-w-0">
+            <span className="text-muted-foreground">{t('orgPanel.replying')}</span>
+            <span className="font-semibold text-primary">{replyToLabel(replyingToMessage)}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => onClearReply?.()}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+            aria-label={t('orgPanel.cancelReplyAria')}
+          >
+            <X size={15} aria-hidden />
+          </button>
+        </div>
+      ) : null}
+
+      <div className="relative overflow-visible rounded-2xl border border-border bg-surface shadow-sm transition-[border-color,box-shadow] duration-150 focus-within:border-primary/35 focus-within:shadow-md">
+        {showMentionMenu && safeMentionItems.length > 0 ? (
+          <div
+            ref={mentionMenuRef}
+            className="absolute bottom-[calc(100%-4px)] left-0 right-0 z-40 mx-2 mb-1 max-h-56 overflow-hidden rounded-xl border border-border bg-surface shadow-xl"
+          >
+            <div className="border-b border-border px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('chat.mentionSuggestions')}
+            </div>
+            <div className="max-h-48 overflow-y-auto">
+              {filteredMentionItems.length ? (
+                filteredMentionItems.map((item) => (
+                  <button
+                    key={String(item.value || item.label)}
+                    type="button"
+                    onClick={() => insertMention(item)}
+                    className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-muted"
+                  >
+                    <UserAvatar avatar={item.avatar} name={item.label} size="chip" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-foreground">
+                        {item.label}
+                      </span>
+                      {item.username ? (
+                        <span className="block truncate text-xs text-muted-foreground">
+                          @{item.username}
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="px-3 py-3 text-sm text-muted-foreground">
+                  {t('chat.mentionNoMatch')}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="flex items-end gap-1 px-2 py-1.5 sm:px-2.5">
+          <div className="flex shrink-0 items-center gap-0.5 pb-0.5">
+            <button
+              type="button"
+              title={t('orgPanel.menuUploadFile')}
+              aria-label={t('orgPanel.menuUploadFile')}
+              disabled={!canWriteInChannel}
+              onClick={() => fileInputRef.current?.click()}
+              className={iconButton}
+            >
+              <Paperclip size={17} aria-hidden />
+            </button>
+            <button
+              type="button"
+              title={t('orgPanel.menuUploadImage')}
+              aria-label={t('orgPanel.menuUploadImage')}
+              disabled={!canWriteInChannel}
+              onClick={() => imageInputRef.current?.click()}
+              className={iconButton}
+            >
+              <ImageIcon size={17} aria-hidden />
+            </button>
+            <button
+              type="button"
+              title={t('orgPanel.emojiTab')}
+              aria-label={t('orgPanel.emojiTab')}
+              disabled={disabled}
+              onClick={onOpenEmoji}
+              className={iconButton}
+            >
+              <Smile size={17} aria-hidden />
+            </button>
+            <button
+              type="button"
+              title={t('orgPanel.menuContextCall')}
+              aria-label={t('orgPanel.menuContextCall')}
+              disabled={!canWriteInChannel}
+              onClick={() => onOpenContextPicker?.()}
+              className={`${iconButton} hidden sm:flex`}
+            >
+              <ClipboardList size={17} aria-hidden />
+            </button>
+            <button
+              type="button"
+              title={t('orgPanel.menuPoll')}
+              aria-label={t('orgPanel.menuPoll')}
+              disabled={!canWriteInChannel}
+              onClick={onCreatePoll}
+              className={`${iconButton} hidden sm:flex`}
+            >
+              <AlertCircle size={17} aria-hidden />
+            </button>
+            <button
+              type="button"
+              title={t('orgPanel.menuContact')}
+              aria-label={t('orgPanel.menuContact')}
+              disabled={!canWriteInChannel}
+              onClick={onCreateContactCard}
+              className={`${iconButton} hidden sm:flex`}
+            >
+              <Users size={17} aria-hidden />
+            </button>
+            <button
+              ref={mentionButtonRef}
+              type="button"
+              title={t('chat.toolbarMention')}
+              aria-label={t('chat.toolbarMention')}
+              disabled={disabled || !safeMentionItems.length}
+              onClick={() => {
+                if (!safeMentionItems.length) return;
+                setMentionQuery('');
+                setShowMentionMenu((prev) => !prev);
+              }}
+              className={iconButton}
+            >
+              <AtSign size={17} aria-hidden />
+            </button>
+          </div>
+
+          <textarea
+            ref={inputRef}
+            value={messageInput}
+            onChange={(event) => handleInputChange(event.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={disabled}
+            rows={1}
+            placeholder={placeholder}
+            className="max-h-[120px] min-h-10 flex-1 resize-none bg-transparent py-2 text-[0.9375rem] leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-70"
+          />
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={sendDisabled}
+            aria-label={t('orgPanel.send')}
+            className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition-[background-color,transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:bg-primary-hover hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none disabled:hover:translate-y-0"
+          >
+            <Send size={17} aria-hidden />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const OrganizationMainPanel = ({
+  landingDemo = false,
+  workspaceTabView = 'chat',
+  workspaceDocFiles = [],
+  loadingWorkspaceDocuments = false,
+  workspaceDocumentsError = '',
+  onWorkspaceDocumentsReload,
+  notificationsFetchEnabled = false,
+  orgMembers = [],
+  onAnnounceMeetingJoin,
+  selectedOrganization,
+  departments = [],
+  selectedDepartment,
+  selectedDepartmentId = '',
+  branches = [],
+  selectedBranchId = '',
+  selectedDivisionId = '',
+  onSelectBranch,
+  onSelectDivision,
+  channels = [],
+  projectChannels = [],
+  channelPermissionMatrix = {},
+  membershipScope = null,
+  teams = [],
+  selectedTeamId = '',
+  selectedChannelId,
+  messages = [],
+  messageInput = '',
+  onChangeMessageInput,
+  onSendMessage,
+  loadingMessages = false,
+  hasMoreOlderMessages = false,
+  loadingOlderMessages = false,
+  onLoadOlderMessages,
+  sendingMessage = false,
+  currentUserId,
+  currentUser = null,
+  onSelectChannel,
+  onSelectDepartment,
+  onSelectTeam,
+  onOpenNotificationsPage,
+  onOpenDocumentInWorkspace,
+  onCreateDepartment,
+  onCreateChannel,
+  onOpenChannelSettings,
+  onOpenDivisionSettings,
+  onOpenDepartmentSettings,
+  onOpenTeamSettings,
+  onSendChatOption,
+  chatContacts = [],
+  loadingChatContacts = false,
+  loadingChannels = false,
+  loadingDepartments = false,
+  channelUploadProgress = null,
+  /** Trả lời tin (Discord-like) */
+  replyingToMessage = null,
+  onClearReply,
+  onReplyToMessage,
+  onSaveMessageEdit,
+  onDeleteMessage,
+  onForwardMessage,
+  onQuickReactMessage,
+  /** ID user đang socket online — avatar stack + số đếm ở header workspace */
+  workspaceOnlineUserIds = [],
+  /** Kết quả tìm kiếm workspace: chuyển kênh / nhảy tin */
+  onWorkspaceSearchJump,
+  workspaceSearchOpen = false,
+  onWorkspaceSearchOpenChange,
+  workspaceTasks = [],
+  loadingWorkspaceTasks = false,
+  taskWorkspaceScope = null,
+  onMoveWorkspaceTask,
+  onCreateWorkspaceTask,
+  onWorkspaceTasksRefresh,
+  onOpenOrganizationSettings,
+  onInviteOrganization,
+  canInviteMembers = false,
+  canManageWorkspaceStructure = false,
+  canManageChannelRoleAccess = false,
+  canSeeAllStructure = false,
+  onWorkspaceTabChange,
+  onDisconnectVoice,
+  organizationId = '',
+  onVoiceRoomSessionEnd,
+  onOpenVoiceChatSidebar,
+  voiceChatSidebarOpen = true,
+  /** Đăng ký mở poll/danh thiếp cho composer chat voice (sidebar phải) */
+  onRegisterVoiceComposerHelpers,
+  /** Gắn emoji vào ô nhập đang active (text hoặc voice sidebar) */
+  onAppendComposerEmoji,
+  onCreateTaskBoardFromTeamMenu,
+  initialTaskBoardTeam = null,
+  suiteLayout = false,
+  suiteMode = null,
+  departmentWorkspaceActive = false,
+  onBackFromTeam = null,
+  leftRailOpen = true,
+  leftRailWidth = CHAT_RAIL_BASE_W,
+  onLeftRailOpenChange,
+  onLeftRailWidthChange,
+  rightPanelOpen = false,
+  onRightPanelOpenChange,
+  isLgViewport = true,
+  /** Docs: phòng + kênh user thuộc (lọc chat phòng ban + project files). */
+  memberDepartmentIds = null,
+  memberDepartmentChannelIds = null,
+}) => {
+  const { locale } = useLocale();
+  const { t } = useAppStrings();
+  const { isDarkMode } = useTheme();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    setShowEmojiPicker(false);
+    setMoreMenu({ open: false, anchorRect: null, message: null });
+  }, [location.pathname]);
+
+  const formatDateDividerLabel = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const t0 = startOf(d);
+    const now = new Date();
+    const today0 = startOf(now);
+    const y = new Date(now);
+    y.setDate(y.getDate() - 1);
+    const yesterday0 = startOf(y);
+    const LOCALE_TAG_EN = 'en-US';
+    const LOCALE_TAG_VI = 'vi-VN';
+    const loc = locale === 'en' ? LOCALE_TAG_EN : LOCALE_TAG_VI;
+    const dd = d.toLocaleDateString(loc, { day: '2-digit', month: '2-digit' });
+    if (t0 === today0) return `${t('orgPanel.dateToday')} — ${dd}`;
+    if (t0 === yesterday0) return `${t('orgPanel.dateYesterday')} — ${dd}`;
+    return d.toLocaleDateString(loc, {
+      weekday: 'long',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+  };
+
+  const [isPollModalOpen, setIsPollModalOpen] = useState(false);
+  const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOptions, setPollOptions] = useState(['', '']);
+  const [pollDuration, setPollDuration] = useState('24h');
+  const [allowMultiAnswer, setAllowMultiAnswer] = useState(false);
+  const [contactSearch, setContactSearch] = useState('');
+  const [contactCategory, setContactCategory] = useState('all');
+  const [selectedContactId, setSelectedContactId] = useState('');
+  const [useManualContactEntry, setUseManualContactEntry] = useState(false);
+  const [manualContactFullName, setManualContactFullName] = useState('');
+  const [manualContactPhone, setManualContactPhone] = useState('');
+  const [manualContactEmail, setManualContactEmail] = useState('');
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [contextProject, setContextProject] = useState(null);
+  const [contextRef, setContextRef] = useState(null);
+  const [contextPickerOpen, setContextPickerOpen] = useState(false);
+  const [contextProjects, setContextProjects] = useState([]);
+  const [contextProjectsLoading, setContextProjectsLoading] = useState(false);
+  const [contextPreviewTarget, setContextPreviewTarget] = useState(null);
+  const [chatWorkDetail, setChatWorkDetail] = useState(null);
+  const [chatCrDetail, setChatCrDetail] = useState(null);
+
+  useEffect(() => {
+    setContextProject(null);
+    setContextRef(null);
+    setContextPickerOpen(false);
+    setContextPreviewTarget(null);
+  }, [selectedChannelId]);
+  const [emojiSearch, setEmojiSearch] = useState('');
+  const [emojiPickerTab, setEmojiPickerTab] = useState('emoji');
+  const [mediaPickerSending, setMediaPickerSending] = useState(false);
+  const fileInputRef = useRef(null);
+  const imageInputRef = useRef(null);
+  const chatScrollRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const isNearBottomRef = useRef(true);
+  const forceScrollOnChannelRef = useRef(false);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+
+  const [editingMessageId, setEditingMessageId] = useState(null);
+  const [editDraft, setEditDraft] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [moreMenu, setMoreMenu] = useState({ open: false, anchorRect: null, message: null });
+  /** Hover: thanh công cụ phía trên bubble hoặc phía dưới (tránh cắt khi tin ở đầu khung chat) */
+  const [toolbarPlacementById, setToolbarPlacementById] = useState({});
+  const [workspaceTab, setWorkspaceTab] = useState(() => normalizeWorkspaceTab(workspaceTabView));
+  const [taskSearchQuery, setTaskSearchQuery] = useState('');
+  const [taskDepartmentFilter, setTaskDepartmentFilter] = useState('all');
+  const [taskCreateOpen, setTaskCreateOpen] = useState(false);
+  const [projectBriefCreateOpen, setProjectBriefCreateOpen] = useState(false);
+  const [projectBriefs, setProjectBriefs] = useState([]);
+  const [loadingProjectBriefs, setLoadingProjectBriefs] = useState(false);
+  const [taskBoards, setTaskBoards] = useState([]);
+  const [loadingTaskBoards, setLoadingTaskBoards] = useState(false);
+  const [selectedTaskBoardId, setSelectedTaskBoardId] = useState('');
+  const [taskBoardSearchFocusToken, setTaskBoardSearchFocusToken] = useState(0);
+  const [taskBoardDetail, setTaskBoardDetail] = useState(null);
+  const [accessibleTaskBoards, setAccessibleTaskBoards] = useState([]);
+  const [loadingTaskBoardDetail, setLoadingTaskBoardDetail] = useState(false);
+  const [creatingTask, setCreatingTask] = useState(false);
+  const [taskForm, setTaskForm] = useState({
+    title: '',
+    description: '',
+    dueDate: '',
+    priority: 'medium',
+    assigneeId: '',
+    departmentId: '',
+  });
+  const [voiceConnectionState, setVoiceConnectionState] = useState('idle'); // idle | connecting | connected | error
+  const orgVoiceUserId = String(currentUserId || currentUser?.id || currentUser?._id || '').trim();
+  const initialVoiceTogglePrefs = loadVoiceAudioPrefs(orgVoiceUserId);
+  const [voiceAudioState, setVoiceAudioState] = useState({
+    isMuted: Boolean(initialVoiceTogglePrefs.micMuted),
+    isSpeakerOff: Boolean(initialVoiceTogglePrefs.speakerOff),
+    canToggleMute: false,
+  });
+  const voiceControlActionsRef = useRef({
+    disconnect: null,
+    toggleMute: null,
+    toggleSpeaker: null,
+  });
+  const initialOrgVoiceAudio = loadVoiceAudioPrefs(orgVoiceUserId);
+  const [orgVoiceSettingsOpen, setOrgVoiceSettingsOpen] = useState(false);
+  const [orgMicId, setOrgMicId] = useState(initialOrgVoiceAudio.micDeviceId);
+  const [orgSpeakerId, setOrgSpeakerId] = useState(initialOrgVoiceAudio.speakerDeviceId);
+  const [orgMicVolume, setOrgMicVolume] = useState(initialOrgVoiceAudio.micVolume);
+  const [orgSpeakerVolume, setOrgSpeakerVolume] = useState(initialOrgVoiceAudio.speakerVolume);
+
+  // Sidebar trái (cấu trúc): kéo thu tối đa 100px, rộng tối đa mặc định + 100px.
+  const LEFT_ASIDE_BASE_W = 252;
+  const LEFT_ASIDE_MIN_W = 100;
+  const LEFT_ASIDE_MAX_W = LEFT_ASIDE_BASE_W + 100;
+  const [leftAsideW, setLeftAsideW] = useState(LEFT_ASIDE_BASE_W);
+  const leftAsideWRef = useRef(leftAsideW);
+  leftAsideWRef.current = leftAsideW;
+  const leftAsideResizeRef = useRef(null);
+
+  useEffect(() => {
+    const onMove = (e) => {
+      const st = leftAsideResizeRef.current;
+      if (!st || !st.active) return;
+      const x = e?.clientX ?? 0;
+      const dx = x - st.startX; // kéo sang phải => tăng width
+      const next = Math.round(st.startW + dx);
+      const clamped = Math.max(st.minW, Math.min(st.maxW, next));
+      setLeftAsideW(clamped);
+      e?.preventDefault?.();
+    };
+    const onUp = () => {
+      const st = leftAsideResizeRef.current;
+      if (!st || !st.active) return;
+      leftAsideResizeRef.current = null;
+      if (st.persistChatRail) onLeftRailWidthChange?.(leftAsideWRef.current);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [onLeftRailWidthChange]);
+
+  useEffect(() => {
+    if (!suiteLayout) return;
+    const next = Math.max(
+      CHAT_RAIL_MIN_W,
+      Math.min(CHAT_RAIL_MAX_W, Number(leftRailWidth) || CHAT_RAIL_BASE_W)
+    );
+    setLeftAsideW(next);
+  }, [suiteLayout, leftRailWidth]);
+
+  const resolvedDepartmentId = String(
+    selectedDepartment?._id || selectedDepartment?.id || selectedDepartmentId || ''
+  );
+  const deptWorkspaceContext = Boolean(
+    departmentWorkspaceActive && resolvedDepartmentId && !selectedTeamId
+  );
+
+  const openWorkspaceChat = () => {
+    const next = deptWorkspaceContext ? 'announcement' : 'chat';
+    setWorkspaceTab(next);
+    onWorkspaceTabChange?.(next);
+  };
+
+  useEffect(() => {
+    const deptMode = Boolean(departmentWorkspaceActive && !selectedTeamId);
+    const nextTab = normalizeWorkspaceTab(workspaceTabView, { departmentMode: deptMode });
+    setWorkspaceTab((prev) => (prev === nextTab ? prev : nextTab));
+  }, [workspaceTabView, departmentWorkspaceActive, selectedTeamId]);
+
+  const auxWorkspaceTab = isWorkspaceAuxTab(workspaceTab);
+  const isChatLikeTab = workspaceTab === 'chat' || workspaceTab === 'announcement';
+  const currentUserIdStr = String(currentUserId || currentUser?.id || currentUser?._id || '').trim();
+  const isDepartmentHead = Boolean(
+    resolvedDepartmentId &&
+      currentUserIdStr &&
+      String(selectedDepartment?.head?._id || selectedDepartment?.head || '') === currentUserIdStr
+  );
+  const canManageDeptMeetings = Boolean(canManageWorkspaceStructure || isDepartmentHead);
+
+  const scopedChannels = useMemo(
+    () =>
+      resolveScopedWorkspaceChannels(channels, {
+        teamId: selectedTeamId,
+        departmentId: resolvedDepartmentId,
+        departmentOnly: Boolean(departmentWorkspaceActive && !selectedTeamId && resolvedDepartmentId),
+      }),
+    [channels, selectedTeamId, resolvedDepartmentId, departmentWorkspaceActive]
+  );
+  const chatChannels = scopedChannels.filter((channel) => channel.type !== 'voice');
+  const voiceChannels = scopedChannels.filter((channel) => channel.type === 'voice');
+  const channelMatrixReady = Object.keys(channelPermissionMatrix || {}).length > 0;
+  const getChannelPerm = (channelId) => {
+    const row = channelPermissionMatrix?.[String(channelId)] || null;
+    const canSee = Boolean(row?.canSee ?? row?.canRead);
+    return {
+      canSee,
+      canRead: Boolean(row?.canRead),
+      canWrite: Boolean(row?.canWrite),
+      canDelete: Boolean(row?.canDelete),
+      canVoice: Boolean(row?.canVoice),
+    };
+  };
+  const selectedChannel =
+    [...channels, ...projectChannels].find(
+      (channel) => String(channel._id) === String(selectedChannelId)
+    ) || null;
+  const lineChatScope = resolveLineChatScope({
+    departmentWorkspaceActive,
+    selectedTeamId,
+    channel: selectedChannel,
+  });
+  const selectedChannelPerm = getChannelPerm(selectedChannelId);
+  const canWriteInChannel = Boolean(selectedChannelPerm.canWrite);
+  const channelReadOnly =
+    Boolean(selectedChannelId) &&
+    Boolean(selectedChannelPerm.canSee || selectedChannelPerm.canRead) &&
+    !canWriteInChannel;
+  const openContextPicker = () => {
+    setContextPickerOpen((open) => !open);
+    void loadContextCallProjects();
+  };
+  const handleComposerSend = () => {
+    const ref = contextRef
+      ? {
+          kind: contextRef.kind,
+          id: contextRef.id,
+          projectId: contextRef.projectId,
+          label: contextRef.label || contextRef.title || '',
+        }
+      : null;
+    onSendMessage?.({
+      contextProjectId: contextCallProjectId(contextProject),
+      contextProjectName: String(contextProject?.name || contextProject?.title || '').trim(),
+      contextRefs: ref ? [ref] : undefined,
+      onSent: () => {
+        setContextProject(null);
+        setContextRef(null);
+        setContextPickerOpen(false);
+      },
+    });
+  };
+  const isVoiceChannel = selectedChannel?.type === 'voice';
+  const isVoiceWorkspace = workspaceTab === 'voice' || isVoiceChannel;
+  const canUseVoiceChannel = (channel) => {
+    if (!channel?._id) return false;
+    if (!channelMatrixReady) return true;
+    return Boolean(getChannelPerm(channel._id).canVoice);
+  };
+  const activeVoiceChannel = isVoiceChannel
+    ? selectedChannel
+    : workspaceTab === 'voice'
+      ? voiceChannels.find(canUseVoiceChannel) || voiceChannels[0] || null
+      : null;
+  const activeVoiceChannelId = activeVoiceChannel?._id ? String(activeVoiceChannel._id) : '';
+  const activeVoiceChannelPerm = getChannelPerm(activeVoiceChannelId);
+  const canVoiceChannel = activeVoiceChannel
+    ? !channelMatrixReady || Boolean(activeVoiceChannelPerm.canVoice)
+    : Boolean(getChannelPerm(selectedChannelId).canVoice);
+  const selectedTeam = teams.find((team) => String(team._id) === String(selectedTeamId)) || null;
+  const voiceConnVisible = isVoiceWorkspace && Boolean(activeVoiceChannelId) && canVoiceChannel;
+  const voiceConnConnected = voiceConnectionState === 'connected';
+  const currentUserName =
+    currentUser?.displayName ||
+    currentUser?.fullName ||
+    currentUser?.username ||
+    currentUser?.email?.split?.('@')?.[0] ||
+    t('orgPanel.you');
+  const currentUserAvatar = currentUser?.avatar || currentUser?.profile?.avatar || null;
+  useEffect(() => {
+    if (!isVoiceWorkspace || !canVoiceChannel) {
+      setVoiceConnectionState('idle');
+      const prefs = loadVoiceAudioPrefs(orgVoiceUserId);
+      setVoiceAudioState((prev) => ({
+        isMuted: prefs.micMuted,
+        isSpeakerOff: prefs.speakerOff,
+        canToggleMute: false,
+      }));
+      voiceControlActionsRef.current = { toggleMute: null, toggleSpeaker: null, disconnect: null };
+    }
+  }, [isVoiceWorkspace, canVoiceChannel, activeVoiceChannelId, orgVoiceUserId]);
+
+  const handleOrgAudioPrefChange = ({ micMuted, speakerOff }) => {
+    setVoiceAudioState((prev) => ({
+      ...prev,
+      isMuted: micMuted ?? prev.isMuted,
+      isSpeakerOff: speakerOff ?? prev.isSpeakerOff,
+    }));
+  };
+  const canTeamReadAnyChannel = (teamId) =>
+    channels.some(
+      (channel) =>
+        String(channel.team || '') === String(teamId) && getChannelPerm(channel._id).canRead
+    );
+
+  const sortedWorkspaceMessages = useMemo(() => {
+    return [...messages].sort((a, b) => {
+      const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return ta - tb;
+    });
+  }, [messages]);
+
+  const CHAT_NEAR_BOTTOM_PX = 64;
+
+  const updateNearBottomState = useCallback(() => {
+    const el = chatScrollRef.current;
+    if (!el) {
+      isNearBottomRef.current = true;
+      setShowJumpToLatest(false);
+      return;
+    }
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+    if (maxScroll <= 4) {
+      isNearBottomRef.current = true;
+      setShowJumpToLatest(false);
+      return;
+    }
+    const distFromBottom = maxScroll - el.scrollTop;
+    const near = distFromBottom <= CHAT_NEAR_BOTTOM_PX;
+    isNearBottomRef.current = near;
+    setShowJumpToLatest(!near);
+  }, []);
+
+  const handleChatScroll = useCallback(() => {
+    updateNearBottomState();
+  }, [updateNearBottomState]);
+
+  const scrollChatToLatest = useCallback((behavior = 'auto') => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const apply = () => {
+      const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (maxScroll > 0) {
+        if (behavior === 'smooth') {
+          el.scrollTo({ top: maxScroll, behavior: 'smooth' });
+        } else {
+          el.scrollTop = maxScroll;
+        }
+      } else {
+        el.scrollTop = 0;
+      }
+      isNearBottomRef.current = true;
+      setShowJumpToLatest(false);
+    };
+    requestAnimationFrame(() => {
+      apply();
+      requestAnimationFrame(() => {
+        apply();
+        requestAnimationFrame(updateNearBottomState);
+      });
+    });
+  }, [updateNearBottomState]);
+
+  useEffect(() => {
+    if (auxWorkspaceTab || isVoiceWorkspace) return;
+    forceScrollOnChannelRef.current = true;
+    isNearBottomRef.current = true;
+    setShowJumpToLatest(false);
+    const el = chatScrollRef.current;
+    if (el) el.scrollTop = 0;
+  }, [selectedChannelId, workspaceTab, isVoiceWorkspace, auxWorkspaceTab]);
+
+  useEffect(() => {
+    if (auxWorkspaceTab || isVoiceWorkspace || loadingMessages) return;
+
+    if (forceScrollOnChannelRef.current) {
+      forceScrollOnChannelRef.current = false;
+      scrollChatToLatest('auto');
+      return;
+    }
+
+    if (!isNearBottomRef.current) return;
+    scrollChatToLatest(sortedWorkspaceMessages.length > 0 ? 'smooth' : 'auto');
+  }, [
+    selectedChannelId,
+    sortedWorkspaceMessages,
+    loadingMessages,
+    workspaceTab,
+    isVoiceWorkspace,
+    auxWorkspaceTab,
+    scrollChatToLatest,
+  ]);
+
+  const filteredWorkspaceTasks = useMemo(() => {
+    const q = String(taskSearchQuery || '').trim().toLowerCase();
+    return (workspaceTasks || []).filter((task) => {
+      const byQuery =
+        !q ||
+        `${task?.title || ''} ${task?.description || ''} ${task?.departmentName || ''}`
+          .toLowerCase()
+          .includes(q);
+      const taskDeptId = String(task?.departmentId || task?.department?._id || '');
+      const byDepartment = taskDepartmentFilter === 'all' || taskDeptId === taskDepartmentFilter;
+      return byQuery && byDepartment;
+    });
+  }, [workspaceTasks, taskSearchQuery, taskDepartmentFilter]);
+
+  const taskColumns = useMemo(() => {
+    const todo = [];
+    const inProgress = [];
+    const done = [];
+    for (const task of filteredWorkspaceTasks) {
+      const status = String(task?.status || 'todo');
+      if (status === 'done') done.push(task);
+      else if (status === 'in_progress' || status === 'review') inProgress.push(task);
+      else todo.push(task);
+    }
+    return { todo, inProgress, done };
+  }, [filteredWorkspaceTasks]);
+
+  const taskSummary = useMemo(() => {
+    const total = (workspaceTasks || []).length;
+    const inProgressCount = (workspaceTasks || []).filter((t) => {
+      const status = String(t?.status || '');
+      return status === 'in_progress' || status === 'review';
+    }).length;
+    const reviewCount = (workspaceTasks || []).filter((t) => String(t?.status || '') === 'review').length;
+    const doneCount = (workspaceTasks || []).filter((t) => String(t?.status || '') === 'done').length;
+    const progressPercent = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+    return { total, inProgressCount, reviewCount, doneCount, progressPercent };
+  }, [workspaceTasks]);
+
+
+  const orgIdForTask =
+    organizationId || selectedOrganization?._id || selectedOrganization?.id || null;
+  const workspaceSlugForTask = String(selectedOrganization?.slug || '').trim();
+  const { canCreateProjectCapability, createProjectDeniedKey } = useTaskWorkspaceScope(
+    orgIdForTask ? String(orgIdForTask) : ''
+  );
+  const taskBoardApiCtx = useMemo(
+    () => ({
+      organizationId: orgIdForTask ? String(orgIdForTask) : '',
+      workspaceSlug: workspaceSlugForTask,
+    }),
+    [orgIdForTask, workspaceSlugForTask]
+  );
+
+  const loadTaskBoards = useCallback(async () => {
+    if (!orgIdForTask) {
+      setTaskBoards([]);
+      setSelectedTaskBoardId('');
+      setTaskBoardDetail(null);
+      return;
+    }
+    setLoadingTaskBoards(true);
+    try {
+      const filters = { ...taskBoardApiCtx };
+      // Org-level projects: list theo organizationId (không filter department ownership).
+      if (selectedTeamId) {
+        filters.teamId = String(selectedTeamId);
+      }
+      const res = await projectAPI.list(filters);
+      const payload = unwrapTaskApiPayload(res);
+      const raw = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+      const list = mapProjectsToBoardPickerRows(raw);
+      setTaskBoards(list);
+      if (!list.some((b) => String(b._id) === String(selectedTaskBoardId))) {
+        setSelectedTaskBoardId(list[0]?._id ? String(list[0]._id) : '');
+      }
+    } catch (err) {
+      setTaskBoards([]);
+      toast.error(resolveApiErrorMessage(err, t('taskBoard.loadBoardFail')));
+    } finally {
+      setLoadingTaskBoards(false);
+    }
+  }, [
+    taskBoardApiCtx,
+    selectedTeamId,
+    organizationId,
+    selectedTaskBoardId,
+    t,
+  ]);
+
+  const loadContextCallProjects = useCallback(async () => {
+    if (!orgIdForTask) {
+      setContextProjects([]);
+      return;
+    }
+    setContextProjectsLoading(true);
+    try {
+      const res = await projectAPI.list({ ...taskBoardApiCtx });
+      const payload = unwrapTaskApiPayload(res);
+      const raw = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+      setContextProjects(
+        raw
+          .map((p) => {
+            const projectId = String(p?.projectId || p?._id || '').trim();
+            if (!projectId) return null;
+            return {
+              projectId,
+              name: String(p.title || p.name || p.projectCode || projectId).trim(),
+              projectCode: String(p.projectCode || '').trim(),
+              defaultBoardId: String(p.defaultBoardId || p.boards?.[0]?._id || '').trim(),
+            };
+          })
+          .filter(Boolean)
+      );
+    } catch {
+      setContextProjects([]);
+    } finally {
+      setContextProjectsLoading(false);
+    }
+  }, [orgIdForTask, taskBoardApiCtx]);
+
+  const openChatContextDetail = useCallback(
+    async (payload, target, panel = 'detail') => {
+      setContextPreviewTarget(null);
+      const kind = String(payload?.kind || target?.kind || '');
+      const projectId = String(payload?.projectId || target?.projectId || '').trim();
+      const entityId = String(payload?.id || target?.id || '').trim();
+      if (kind === 'change_request') {
+        if (!projectId || !entityId) return;
+        setChatCrDetail({
+          projectId,
+          crId: entityId,
+          initialTab: panel === 'activity' ? 'activity' : 'overview',
+        });
+        return;
+      }
+      if (kind !== 'task' || !entityId) return;
+      let workItem = {
+        _id: entityId,
+        title: payload?.title || target?.title || target?.label || '',
+        issueType: payload?.issueType || 'task',
+        status: payload?.status || '',
+        priority: payload?.priority || '',
+        projectId,
+      };
+      try {
+        const res = await taskAPI.getTask(entityId, taskBoardApiCtx);
+        const data = unwrapTaskApiPayload(res);
+        if (data && typeof data === 'object') workItem = data;
+      } catch {
+        /* stub from preview */
+      }
+      setChatWorkDetail({
+        workItem,
+        projectId,
+        projectCode: payload?.project?.projectCode || '',
+        boardId: String(workItem.boardId || '').trim(),
+        initialPanel: panel,
+      });
+    },
+    [taskBoardApiCtx]
+  );
+
+  const loadProjectBriefs = useCallback(async () => {
+    if (!orgIdForTask) {
+      setProjectBriefs([]);
+      return;
+    }
+    setLoadingProjectBriefs(true);
+    try {
+      const res = await taskAPI.listProjectBriefs({
+        organizationId: String(orgIdForTask),
+        status: 'open',
+      });
+      const payload = unwrapTaskApiPayload(res);
+      const list = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+      setProjectBriefs(list);
+    } catch {
+      setProjectBriefs([]);
+    } finally {
+      setLoadingProjectBriefs(false);
+    }
+  }, [orgIdForTask]);
+
+  const teamsInScope = useMemo(() => {
+    // Project board = org-level — không filter team theo board.scopeType department (legacy).
+    if (selectedTeamId) {
+      const team = teams.find((row) => String(row._id) === String(selectedTeamId));
+      return team ? [team] : [];
+    }
+    if (resolvedDepartmentId) {
+      return teams.filter(
+        (team) => String(team.department || team.departmentId || '') === String(resolvedDepartmentId)
+      );
+    }
+    return [];
+  }, [teams, selectedTeamId, resolvedDepartmentId]);
+
+  const taskBoardDetailRef = useRef(taskBoardDetail);
+  taskBoardDetailRef.current = taskBoardDetail;
+
+  const loadTaskBoardDetail = useCallback(async (boardId, options = {}) => {
+    const silent = Boolean(options?.silent);
+    if (!boardId) {
+      setTaskBoardDetail(null);
+      return;
+    }
+    if (!silent) setLoadingTaskBoardDetail(true);
+    try {
+      const res = await taskAPI.getBoardDetail(String(boardId), taskBoardApiCtx);
+      setTaskBoardDetail(unwrapTaskBoardDetailPayload(res));
+    } catch (err) {
+      if (!silent) setTaskBoardDetail(null);
+      toast.error(resolveApiErrorMessage(err, t('taskBoard.loadBoardDetailFail')));
+    } finally {
+      if (!silent) setLoadingTaskBoardDetail(false);
+    }
+  }, [taskBoardApiCtx]);
+
+  const loadAccessibleTaskBoards = useCallback(async () => {
+    if (!orgIdForTask) {
+      setAccessibleTaskBoards([]);
+      return;
+    }
+    try {
+      const res = await projectAPI.list({ ...taskBoardApiCtx });
+      const payload = unwrapTaskApiPayload(res);
+      const raw = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+      setAccessibleTaskBoards(mapProjectsToBoardPickerRows(raw));
+    } catch {
+      setAccessibleTaskBoards([]);
+    }
+  }, [taskBoardApiCtx]);
+
+  useEffect(() => {
+    if (workspaceTab === 'tasks' && workspaceSearchOpen) {
+      onWorkspaceSearchOpenChange?.(false);
+    }
+  }, [workspaceTab, workspaceSearchOpen, onWorkspaceSearchOpenChange]);
+
+  useEffect(() => {
+    if (workspaceTab !== 'tasks') return;
+    loadTaskBoards();
+    loadAccessibleTaskBoards();
+    loadProjectBriefs();
+  }, [workspaceTab, loadTaskBoards, loadAccessibleTaskBoards, loadProjectBriefs]);
+
+  useEffect(() => {
+    if (workspaceTab !== 'tasks') return;
+    const current = taskBoardDetailRef.current;
+    const sameBoard =
+      Boolean(selectedTaskBoardId) &&
+      current?.board &&
+      String(current.board._id) === String(selectedTaskBoardId);
+    loadTaskBoardDetail(selectedTaskBoardId, { silent: sameBoard });
+  }, [workspaceTab, selectedTaskBoardId, loadTaskBoardDetail]);
+
+  const refreshTaskBoardView = useCallback(async () => {
+    if (!selectedTaskBoardId) return;
+    await loadTaskBoardDetail(selectedTaskBoardId, { silent: true });
+  }, [selectedTaskBoardId, loadTaskBoardDetail]);
+
+  const handleReorderBoardList = useCallback(
+    async (listId, position) => {
+      if (!selectedTaskBoardId || !listId) return;
+      let rollbackLists = null;
+      try {
+        setTaskBoardDetail((prev) => {
+          if (!prev?.lists) return prev;
+          const source = [...prev.lists];
+          rollbackLists = source;
+          const ids = source.map((l) => String(l._id));
+          const fromIdx = ids.indexOf(String(listId));
+          if (fromIdx < 0) return prev;
+          const next = source.filter((l) => String(l._id) !== String(listId));
+          const targetIdx = Math.max(0, Math.min(Number(position || 1) - 1, next.length));
+          next.splice(targetIdx, 0, source[fromIdx]);
+          return {
+            ...prev,
+            lists: next.map((l, idx) => ({ ...l, order: (idx + 1) * 1000 })),
+          };
+        });
+        await taskAPI.reorderBoardList(
+          String(selectedTaskBoardId),
+          String(listId),
+          { position },
+          taskBoardApiCtx
+        );
+      } catch (err) {
+        if (rollbackLists) {
+          setTaskBoardDetail((prev) => (prev ? { ...prev, lists: rollbackLists } : prev));
+        }
+        toast.error(resolveApiErrorMessage(err, t('taskBoard.reorderListFail')));
+      }
+    },
+    [selectedTaskBoardId, taskBoardApiCtx]
+  );
+
+  const isSelectedProjectCompleted = ['closed', 'completed'].includes(
+    String(
+      taskBoardDetail?.board?.status ||
+        taskBoards.find((b) => String(b._id) === String(selectedTaskBoardId))?.status ||
+        ''
+    )
+      .trim()
+      .toLowerCase()
+  );
+
+  const handleAddBoardList = async (title) => {
+    if (!selectedTaskBoardId) return null;
+    try {
+      const res = await taskAPI.createBoardList(selectedTaskBoardId, { title }, taskBoardApiCtx);
+      const list = unwrapTaskApiPayload(res);
+      if (list?._id) {
+        setTaskBoardDetail((prev) => {
+          if (!prev) return prev;
+          const lists = [...(Array.isArray(prev.lists) ? prev.lists : []), list].sort(
+            (a, b) => Number(a.order || 0) - Number(b.order || 0)
+          );
+          return { ...prev, lists };
+        });
+        return list;
+      }
+      await loadTaskBoardDetail(selectedTaskBoardId);
+      return null;
+    } catch (err) {
+      toast.error(resolveApiErrorMessage(err, t('taskBoard.addListFail')));
+      throw err;
+    }
+  };
+
+  const handleAddBoardCard = async (listId, cardData) => {
+    if (!selectedTaskBoardId) return;
+    try {
+      const res = await taskAPI.createBoardCard(selectedTaskBoardId, cardData, taskBoardApiCtx);
+      const card = unwrapTaskApiPayload(res);
+      if (!card?._id) return;
+      setTaskBoardDetail((prev) => {
+        if (!prev) return prev;
+        const cards = Array.isArray(prev.cards) ? [...prev.cards, card] : [card];
+        const lists = Array.isArray(prev.lists)
+          ? prev.lists.map((l) =>
+              String(l._id) === String(listId)
+                ? { ...l, cardCount: Number(l.cardCount || 0) + 1 }
+                : l
+            )
+          : prev.lists;
+        return { ...prev, cards, lists };
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+    } catch (err) {
+      toast.error(resolveApiErrorMessage(err, t('taskBoard.addCardFail')));
+    }
+  };
+
+  const handleMoveBoardCard = async (cardId, toListId, index, ownerTeamId) => {
+    if (!cardId || !toListId || !selectedTaskBoardId) return;
+    try {
+      const payload = { toListId: String(toListId) };
+      if (index != null && Number.isFinite(Number(index))) {
+        payload.index = Number(index);
+      }
+      if (ownerTeamId !== undefined) {
+        payload.ownerTeamId = ownerTeamId;
+      }
+      const res = await taskAPI.moveBoardCard(String(cardId), payload, taskBoardApiCtx);
+      const moved = unwrapTaskApiPayload(res);
+      if (moved?.approvalPending) {
+        toast(t('taskBoard.approvalPendingToast'), { icon: '⏳' });
+        setTaskBoardDetail((prev) => {
+          if (!prev?.cards) return prev;
+          const cards = prev.cards.map((c) => {
+            if (String(c._id) !== String(cardId)) return c;
+            return {
+              ...c,
+              ...(moved && typeof moved === 'object' ? moved : {}),
+              status: 'awaiting_approval',
+              // giữ list cũ — transition chưa apply
+              listId: c.listId,
+            };
+          });
+          return { ...prev, cards };
+        });
+        return;
+      }
+      setTaskBoardDetail((prev) => {
+        if (!prev?.cards) return prev;
+        const cards = prev.cards.map((c) => {
+          if (String(c._id) !== String(cardId)) return c;
+          return {
+            ...c,
+            listId: toListId,
+            ...(ownerTeamId !== undefined ? { ownerTeamId } : {}),
+            ...(moved && typeof moved === 'object' ? moved : {}),
+          };
+        });
+        return { ...prev, cards };
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+    } catch (err) {
+      toast.error(resolveApiErrorMessage(err, t('taskBoard.moveCardFail')));
+      throw err;
+    }
+  };
+
+  const handleUpdateBoardCard = async (cardId, updates) => {
+    if (!cardId || !selectedTaskBoardId) return;
+    try {
+      const res = await taskAPI.updateBoardCard(String(cardId), updates || {}, taskBoardApiCtx);
+      const updated = unwrapTaskApiPayload(res);
+      if (updated?.approvalPending) {
+        toast(t('taskBoard.approvalPendingToast'), { icon: '⏳' });
+      }
+      setTaskBoardDetail((prev) => {
+        if (!prev?.cards) return prev;
+        const cards = prev.cards.map((c) =>
+          String(c._id) === String(cardId)
+            ? {
+                ...c,
+                ...(updates || {}),
+                ...(updated && typeof updated === 'object' ? updated : {}),
+                ...(updated?.approvalPending
+                  ? { status: 'awaiting_approval', listId: c.listId }
+                  : {}),
+              }
+            : c
+        );
+        return { ...prev, cards };
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+    } catch (err) {
+      if (!isHoursSoftWarning(err)) {
+        toast.error(resolveApiErrorMessage(err, t('taskBoard.updateCardFail')));
+      }
+      throw err;
+    }
+  };
+
+  /** Patch cards trên board hiện tại — không gọi API, không loading. */
+  const applyBoardCardsPatch = useCallback((updater) => {
+    setTaskBoardDetail((prev) => {
+      if (!prev) return prev;
+      const current = Array.isArray(prev.cards) ? prev.cards : [];
+      const nextCards = typeof updater === 'function' ? updater(current) : current;
+      if (!Array.isArray(nextCards) || nextCards === current) return prev;
+      return { ...prev, cards: nextCards };
+    });
+  }, []);
+
+  const canCreateWorkspaceTask = Boolean(taskWorkspaceScope?.canCreateTask);
+  const canOpenCreateProjectWizard = Boolean(canCreateProjectCapability);
+
+  const openProjectSetupWizard = useCallback(
+    (opts = {}) => {
+      const orgId = String(opts.organizationId || orgIdForTask || organizationId || '').trim();
+      if (!orgId) {
+        toast.error(t('organizations.selectOrgFirst') || 'Chọn organization trước.');
+        return;
+      }
+      if (!canOpenCreateProjectWizard) {
+        toast.error(t(createProjectDeniedKey));
+        return;
+      }
+      navigate(
+        buildCollaborateProjectsNewPath(orgId, {
+          title: opts.title || '',
+          description: opts.description || '',
+          projectCode: opts.projectCode || '',
+          briefId: opts.briefId || '',
+        })
+      );
+      onCreateTaskBoardFromTeamMenu?.(null);
+    },
+    [
+      navigate,
+      orgIdForTask,
+      organizationId,
+      canOpenCreateProjectWizard,
+      createProjectDeniedKey,
+      t,
+      onCreateTaskBoardFromTeamMenu,
+    ]
+  );
+
+  useEffect(() => {
+    if (!initialTaskBoardTeam) return;
+    openProjectSetupWizard({
+      organizationId: String(orgIdForTask || organizationId || ''),
+    });
+  }, [initialTaskBoardTeam]);
+
+  /** SoT: cùng grant project.project.create — không dùng membership owner|admin. */
+  const canCreateProjectBrief = Boolean(canCreateProjectCapability);
+
+  /** Hierarchy gợi ý PM: trưởng phòng → trưởng nhóm (team đang chọn trước). */
+  const briefDepartmentHeadUserId = useMemo(() => {
+    const head = selectedDepartment?.head;
+    if (!head) return '';
+    if (typeof head === 'object') {
+      return String(head._id || head.id || head.userId || '').trim();
+    }
+    return String(head).trim();
+  }, [selectedDepartment?.head]);
+
+  const briefTeamLeaderUserIds = useMemo(() => {
+    const deptId = String(resolvedDepartmentId || '').trim();
+    if (!deptId) return [];
+    const inDept = (teams || []).filter(
+      (team) => String(team.department || team.departmentId || '') === deptId
+    );
+    const ordered = selectedTeamId
+      ? [
+          ...inDept.filter((team) => String(team._id) === String(selectedTeamId)),
+          ...inDept.filter((team) => String(team._id) !== String(selectedTeamId)),
+        ]
+      : inDept;
+    const ids = [];
+    const seen = new Set();
+    for (const team of ordered) {
+      const raw = team?.leader;
+      const lid =
+        raw && typeof raw === 'object'
+          ? String(raw._id || raw.id || raw.userId || '').trim()
+          : String(raw || '').trim();
+      if (!lid || seen.has(lid) || lid === briefDepartmentHeadUserId) continue;
+      seen.add(lid);
+      ids.push(lid);
+    }
+    return ids;
+  }, [teams, resolvedDepartmentId, selectedTeamId, briefDepartmentHeadUserId]);
+
+  const myAssignedProjectBriefs = useMemo(() => {
+    const uid = String(currentUserId || '').trim();
+    if (!uid) return [];
+    return (projectBriefs || []).filter((b) => String(b?.assigneePmId || '') === uid);
+  }, [projectBriefs, currentUserId]);
+
+  /** Owner/Admin xem brief đã giao cho người khác — không nói «giao cho bạn». */
+  const oversightProjectBriefs = useMemo(() => {
+    const uid = String(currentUserId || '').trim();
+    return (projectBriefs || []).filter((b) => String(b?.assigneePmId || '') !== uid);
+  }, [projectBriefs, currentUserId]);
+
+  const boardCapabilities = taskBoardDetail?.capabilities || null;
+  // Caps đã load → chỉ tin board detail; không fallback workspace / canManageBoard→members.
+  const canManageListsUi =
+    Boolean(
+      boardCapabilities != null
+        ? boardCapabilities.canManageLists
+        : canCreateWorkspaceTask
+    ) && !isSelectedProjectCompleted;
+  const canCreateCardsUi =
+    Boolean(
+      boardCapabilities != null
+        ? boardCapabilities.canCreateCards
+        : canCreateWorkspaceTask
+    ) && !isSelectedProjectCompleted;
+  const canManageMembersUi = Boolean(boardCapabilities?.canManageMembers);
+  const canUpdateSettingsUi = Boolean(boardCapabilities?.canUpdateSettings);
+
+  const taskAssigneeLabel = (task) =>
+    task?.assignee?.displayName ||
+    task?.assignee?.username ||
+    (task?.assigneeId ? String(task.assigneeId).slice(-6) : t('taskBoard.unassigned'));
+
+  const taskAssignerLabel = (task) =>
+    task?.createdByUser?.displayName ||
+    task?.createdByUser?.username ||
+    (task?.createdBy ? String(task.createdBy).slice(-6) : '—');
+
+  /** Workspace (kênh tổ chức): luôn gọi hook trước mọi return sớm. */
+  const workspace = useMemo(() => {
+    const ent = entShell(isDarkMode);
+    return {
+      ...ent,
+      composerBar: suiteLayout
+        ? 'relative shrink-0 border-t border-border bg-background px-4 pb-3 pt-2'
+        : isDarkMode
+          ? 'relative mt-auto shrink-0 rounded-b-xl border-t border-white/[0.06] bg-transparent px-4 pb-3 pt-2.5'
+          : 'relative mt-auto shrink-0 rounded-b-xl border-t border-slate-200/80 bg-white px-4 pb-3 pt-2.5',
+      composerWrap: suiteLayout
+        ? 'mr-auto w-full max-w-[920px] shrink-0 bg-transparent p-0'
+        : 'shrink-0 bg-transparent p-0',
+    };
+  }, [isDarkMode, suiteLayout]);
+
+  const formatTime = (isoDate) => {
+    if (!isoDate) return '';
+    return new Date(isoDate).toLocaleTimeString('vi-VN', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  };
+
+  const plainTextForMessage = (msg) => {
+    if (!msg) return '';
+    const mt = msg.messageType || 'text';
+    if (mt === 'text') return String(msg.content || '');
+    if (mt === 'file' || mt === 'image')
+      return msg.fileMeta?.originalName || String(msg.content || '').slice(0, 200) || t('orgPanel.attachment');
+    return String(msg.content || '');
+  };
+
+  /** Ảnh / file: không hiện sao chép. Còn lại: có nội dung chuỗi (kể cả link) là cho phép. */
+  const canShowCopyTextInMenu = (msg) => {
+    if (!msg) return false;
+    const mt = String(msg.messageType || 'text').toLowerCase();
+    if (mt === 'image' || mt === 'file') return false;
+    if (msg.fileMeta) return false;
+    const raw = msg.content;
+    if (raw == null) return false;
+    const s = typeof raw === 'string' ? raw : String(raw);
+    return s.trim().length > 0;
+  };
+
+  const handleMessageRowMouseEnter = (messageId, event) => {
+    const el = event?.currentTarget;
+    if (!el) return;
+    const needBelow = shouldPlaceToolbarBelowBubble(el);
+    const next = needBelow ? 'below' : 'above';
+    setToolbarPlacementById((prev) => {
+      const key = String(messageId);
+      if (prev[key] === next) return prev;
+      return { ...prev, [key]: next };
+    });
+  };
+
+  const canEditOrgMessage = (msg) => {
+    const mt = msg?.messageType || 'text';
+    if (mt !== 'text') return false;
+    if (msg?.fileMeta) return false;
+    return true;
+  };
+
+  const cancelEdit = () => {
+    if (savingEdit) return;
+    setEditingMessageId(null);
+    setEditDraft('');
+  };
+
+  const beginEditMessage = (msg) => {
+    const id = msg?._id || msg?.id;
+    if (!id || !canEditOrgMessage(msg)) return;
+    setEditingMessageId(id);
+    setEditDraft(plainTextForMessage(msg));
+  };
+
+  const submitEdit = async (messageId) => {
+    const trimmed = editDraft.trim();
+    if (!trimmed || !messageId || savingEdit) return;
+    if (!onSaveMessageEdit) {
+      toast.error(t('organizations.editFail'));
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await onSaveMessageEdit(messageId, trimmed);
+      cancelEdit();
+    } catch {
+      /* toast ở OrganizationsPage */
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const replyToLabel = (msg) => {
+    const sid = msg?.senderId?._id || msg?.senderId;
+    if (String(sid || '') === String(currentUserId || '')) return t('orgPanel.you');
+    return t('orgPanel.member');
+  };
+
+  const handleCreateContactCard = () => {
+    setContactSearch('');
+    setContactCategory('all');
+    setSelectedContactId('');
+    setUseManualContactEntry(false);
+    setManualContactFullName('');
+    setManualContactPhone('');
+    setManualContactEmail('');
+    setIsContactModalOpen(true);
+  };
+
+  const handleCreatePoll = () => {
+    setPollQuestion('');
+    setPollOptions(['', '']);
+    setPollDuration('24h');
+    setAllowMultiAnswer(false);
+    setIsPollModalOpen(true);
+  };
+
+  useEffect(() => {
+    if (!onRegisterVoiceComposerHelpers) return undefined;
+    onRegisterVoiceComposerHelpers({
+      openPoll: handleCreatePoll,
+      openContact: handleCreateContactCard,
+      openEmoji: () => {
+        setEmojiPickerTab('emoji');
+        setShowEmojiPicker((prev) => !prev);
+      },
+    });
+    return () => onRegisterVoiceComposerHelpers(null);
+  }, [onRegisterVoiceComposerHelpers]);
+
+  const handleFileSelected = (event, kind) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !canWriteInChannel) return;
+    onSendChatOption?.({ kind, file });
+  };
+
+  const normalizedContacts = chatContacts.map((item) => {
+    const id = item.id || item._id;
+    const email = item.email || '';
+    const emailLocal = email.includes('@') ? email.split('@')[0] : '';
+    return {
+      id,
+      name: item.name || item.displayName || item.username || emailLocal || t('organizations.userFallback'),
+      username: item.username || emailLocal || '',
+      role: item.role || '',
+      phone: item.phone || item.phoneNumber || item.mobile || '',
+      email,
+      avatar: item.avatar || null,
+      category: item.category || 'friend',
+    };
+  });
+
+  const mentionLabelsForChat = useMemo(
+    () => collectMentionLabelsFromContacts(chatContacts),
+    [chatContacts]
+  );
+
+  const assignableContactOptions = useMemo(() => {
+    const list = Array.isArray(normalizedContacts) ? normalizedContacts : [];
+    if (!taskWorkspaceScope || taskWorkspaceScope.visibility === 'org') return list;
+    const allowed = new Set((taskWorkspaceScope.assignableUserIds || []).map(String));
+    if (!allowed.size) return list;
+    return list.filter((c) => allowed.has(String(c.id)));
+  }, [normalizedContacts, taskWorkspaceScope]);
+
+  const filteredContacts = normalizedContacts.filter((contact) => {
+    const byCategory = contactCategory === 'all' || contact.category === contactCategory;
+    const bySearch =
+      !contactSearch.trim() ||
+      `${contact.name} ${contact.phone} ${contact.email}`
+        .toLowerCase()
+        .includes(contactSearch.trim().toLowerCase());
+    return byCategory && bySearch;
+  });
+
+  const handlePickChatMedia = useCallback(
+    async (item) => {
+      if (!item?.url || !canWriteInChannel || sendingMessage) return false;
+      setMediaPickerSending(true);
+      try {
+        const rawFile = await fetchChatMediaFile(item);
+        const file = normalizeComposerFile(rawFile, t);
+        const kind = (file.type || '').startsWith('image/') ? 'image' : 'file';
+        await onSendChatOption?.({ kind, file });
+        setShowEmojiPicker(false);
+        setEmojiSearch('');
+        return true;
+      } catch (error) {
+        toast.error(resolveApiErrorMessage(error, { t, fallback: t('organizations.fileSendFail') }));
+        return false;
+      } finally {
+        setMediaPickerSending(false);
+      }
+    },
+    [canWriteInChannel, sendingMessage, onSendChatOption, t]
+  );
+
+  const addPollOption = () => {
+    if (pollOptions.length >= 6) return;
+    setPollOptions((prev) => [...prev, '']);
+  };
+
+  const updatePollOption = (index, value) => {
+    setPollOptions((prev) => prev.map((item, idx) => (idx === index ? value : item)));
+  };
+
+  const removePollOption = (index) => {
+    if (pollOptions.length <= 2) return;
+    setPollOptions((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleSubmitPoll = () => {
+    const question = pollQuestion.trim();
+    const options = pollOptions.map((item) => item.trim()).filter(Boolean);
+    if (!question || options.length < 2) return;
+    onSendChatOption?.({
+      kind: 'poll',
+      payload: {
+        question,
+        options,
+        duration: pollDuration,
+        allowMultiAnswer,
+      },
+    });
+    setIsPollModalOpen(false);
+  };
+
+  const handleSubmitContact = () => {
+    let payload = {};
+    
+    if (useManualContactEntry) {
+      // Manual entry mode
+      const fullName = manualContactFullName.trim();
+      if (!fullName) return;
+      payload = {
+        userId: `manual-${Date.now()}`, // Generate a temporary ID for manual entries
+        fullName,
+        phone: manualContactPhone.trim(),
+        email: manualContactEmail.trim(),
+      };
+    } else {
+      // List selection mode
+      const selected = normalizedContacts.find((item) => item.id === selectedContactId);
+      if (!selected) return;
+      payload = {
+        userId: selected.id,
+        fullName: selected.name,
+        phone: selected.phone,
+        email: selected.email,
+        avatar: selected.avatar,
+        username: selected.username,
+        role: selected.role,
+      };
+    }
+    
+    onSendChatOption?.({
+      kind: 'contact',
+      payload,
+    });
+    setIsContactModalOpen(false);
+  };
+
+  const openTaskCreateModal = () => {
+    const firstDepartmentId =
+      taskDepartmentFilter !== 'all'
+        ? taskDepartmentFilter
+        : String(selectedDepartment?._id || departments?.[0]?._id || '');
+    setTaskForm({
+      title: '',
+      description: '',
+      dueDate: '',
+      priority: 'medium',
+      assigneeId: '',
+      departmentId: firstDepartmentId,
+    });
+    setTaskCreateOpen(true);
+  };
+
+  const submitWorkspaceTask = async () => {
+    const title = String(taskForm.title || '').trim();
+    if (!title || creatingTask) return;
+    setCreatingTask(true);
+    try {
+      const department = departments.find(
+        (item) => String(item._id) === String(taskForm.departmentId)
+      );
+      await onCreateWorkspaceTask?.({
+        title,
+        description: String(taskForm.description || '').trim(),
+        dueDate: taskForm.dueDate
+          ? new Date(`${taskForm.dueDate}T23:59:00`).toISOString()
+          : undefined,
+        priority: taskForm.priority || 'medium',
+        assigneeId: taskForm.assigneeId || undefined,
+        departmentId: taskForm.departmentId || undefined,
+        departmentName: department?.name || undefined,
+        teamId: taskWorkspaceScope?.teamId || undefined,
+      });
+      setTaskCreateOpen(false);
+    } finally {
+      setCreatingTask(false);
+    }
+  };
+
+  const appendEmoji = (emoji) => {
+    if (onAppendComposerEmoji) {
+      onAppendComposerEmoji(emoji);
+    } else {
+      onChangeMessageInput?.(`${messageInput || ''}${emoji}`);
+    }
+    setShowEmojiPicker(false);
+    setEmojiSearch('');
+  };
+
+  const orgName = selectedOrganization?.name || t('orgPanel.orgFallback');
+  const deptName = selectedDepartment?.name
+    ? displayDepartmentName(selectedDepartment.name, locale)
+    : '—';
+  const useFigmaChannelHeader =
+    suiteLayout && isChatLikeTab && !isVoiceChannel;
+  const useFigmaOrgChatChrome = suiteLayout && isChatLikeTab && !isVoiceChannel;
+  const selectedBranch = branches.find((b) => String(b._id) === String(selectedBranchId)) || null;
+  const selectedDivision = selectedBranch?.divisions?.find((d) => String(d._id) === String(selectedDivisionId)) || null;
+  const branchName = selectedBranch?.name ? displayDepartmentName(selectedBranch.name, locale) : '—';
+  const divisionName = selectedDivision?.name ? displayDepartmentName(selectedDivision.name, locale) : '—';
+  const teamName = selectedTeam?.name || '—';
+  const openCreateTaskBoardModal = useCallback(() => {
+    openProjectSetupWizard();
+  }, [openProjectSetupWizard]);
+
+  const openCreateBoardFromBrief = useCallback(
+    (brief) => {
+      if (!brief?._id) return;
+      openProjectSetupWizard({
+        title: brief.title || '',
+        description: brief.body || '',
+        projectCode: brief.projectCode || '',
+        briefId: String(brief._id),
+      });
+    },
+    [openProjectSetupWizard]
+  );
+
+  const chSlug = selectedChannel
+    ? channelNameToDisplaySlug(selectedChannel.name || 'chat', locale)
+    : '';
+  const channelNameFallback = t('organizations.channelNameFallback');
+  const lineChatComposerPlaceholder = channelReadOnly
+    ? t('orgPanel.composerReadOnlyHint')
+    : !selectedChannelId
+      ? t('orgPanel.composerPlaceholder')
+      : lineChatScope === 'dept'
+        ? t('orgPanel.composerDeptHint', { ch: chSlug || channelNameFallback })
+        : lineChatScope === 'team'
+          ? t('orgPanel.composerTeamHint', { ch: chSlug || channelNameFallback })
+          : t('orgPanel.composerFigmaHint', { ch: chSlug || channelNameFallback });
+  const lineChatEmptyCopy = !selectedChannelId
+    ? lineChatScope === 'dept'
+      ? t('orgPanel.emptyDeptNoChannel')
+      : lineChatScope === 'team'
+        ? t('orgPanel.emptyTeamNoChannel')
+        : t('orgPanel.emptyChannelMsgs')
+    : lineChatScope === 'dept'
+      ? t('orgPanel.emptyDeptChannelMsgs')
+      : lineChatScope === 'team'
+        ? t('orgPanel.emptyTeamChannelMsgs')
+        : t('orgPanel.emptyChannelMsgs');
+  const activeVoiceSlug = activeVoiceChannel?.name
+    ? channelNameToDisplaySlug(activeVoiceChannel.name, locale)
+    : '';
+  const onlinePreviewIds = (workspaceOnlineUserIds || []).slice(0, 5);
+  const canReadRailChannel = (channel) => {
+    if (!channelMatrixReady) return true;
+    const perm = getChannelPerm(channel?._id);
+    return Boolean(perm.canSee || perm.canRead);
+  };
+  const railChatChannels = chatChannels.filter(canReadRailChannel);
+  const railVoiceChannels = voiceChannels.filter(canReadRailChannel);
+  const canManageScopedChannels = Boolean(
+    canManageWorkspaceStructure && (selectedTeamId || deptWorkspaceContext)
+  );
+  const moduleIconMap = {
+    chat: Hash,
+    announcement: MessageSquare,
+    voice: Mic,
+    tasks: ClipboardList,
+    documents: FileText,
+    notifications: Bell,
+    members: Users,
+    calendar: Calendar,
+    meetings: Video,
+  };
+  const moduleKind = isVoiceWorkspace
+    ? 'voice'
+    : workspaceTab === 'tasks'
+      ? 'tasks'
+      : workspaceTab === 'documents'
+        ? 'documents'
+        : workspaceTab === 'notifications'
+          ? 'notifications'
+          : workspaceTab === 'members'
+            ? 'members'
+            : workspaceTab === 'calendar'
+              ? 'calendar'
+              : workspaceTab === 'meetings'
+                ? 'meetings'
+                : workspaceTab === 'announcement'
+                  ? 'announcement'
+                  : 'chat';
+  const ModuleHeaderIcon = moduleIconMap[moduleKind] || Hash;
+  const moduleTitle =
+    moduleKind === 'chat' || moduleKind === 'announcement'
+      ? `#${chSlug || (moduleKind === 'announcement' ? t('workspace.moduleAnnouncement') : t('organizations.channelNameFallback'))}`
+      : moduleKind === 'voice'
+        ? `#${activeVoiceSlug || 'voice'}`
+        : moduleKind === 'tasks'
+          ? t('nav.tasks.label')
+          : moduleKind === 'documents'
+            ? t('documents.orgTitle')
+            : moduleKind === 'members'
+              ? t('workspace.moduleMembers')
+              : moduleKind === 'calendar'
+                ? t('workspace.moduleCalendar')
+                : moduleKind === 'meetings'
+                  ? t('workspace.moduleMeetings')
+                  : t('notifications.titleOrganization');
+  const chatHeaderFallback =
+    departmentWorkspaceActive && !selectedTeamId
+      ? t('workspace.deptTextChat')
+      : t('taskBoard.teamTextChat');
+  const voiceHeaderFallback =
+    departmentWorkspaceActive && !selectedTeamId
+      ? t('workspace.deptVoiceContext')
+      : selectedTeamId
+        ? `${teamName} · ${orgName}`
+        : orgName;
+  const moduleDescription =
+    moduleKind === 'chat' || moduleKind === 'announcement'
+      ? resolveChannelHeaderDescription(selectedChannel, chatHeaderFallback)
+      : moduleKind === 'voice'
+        ? resolveChannelHeaderDescription(selectedChannel, voiceHeaderFallback)
+        : selectedTeamId
+          ? `${teamName} · ${orgName}`
+          : departmentWorkspaceActive && deptName !== '—'
+            ? `${deptName} · ${orgName}`
+            : orgName;
+  const railTone = isDarkMode
+    ? {
+        panel: 'border-white/10 bg-[#0b1120]/95 text-slate-100',
+        card: 'border-white/10 bg-white/[0.045]',
+        item: 'text-muted-foreground hover:border-white/10 hover:bg-white/[0.055] hover:text-white',
+        active: 'border-primary/45 bg-primary/15 text-foreground shadow-[inset_3px_0_0_var(--color-primary)]',
+        muted: 'text-slate-500',
+      }
+    : {
+        panel: 'border-slate-200 bg-white text-slate-900',
+        card: 'border-slate-200 bg-slate-50',
+        item: 'text-slate-600 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-950',
+        active: 'border-primary/35 bg-primary/10 text-primary shadow-[inset_3px_0_0_var(--color-primary)]',
+        muted: 'text-slate-500',
+      };
+  const renderRailChannelButton = (channel, Icon, typeLabel) => {
+    const id = String(channel?._id || '');
+    const active = id && String(selectedChannelId || '') === id;
+    const label = channel?.name ? channelNameToDisplaySlug(channel.name, locale) : typeLabel;
+    const unread = channelUnreadCount(channel);
+    const showSettings = canManageChannelRoleAccess && onOpenChannelSettings;
+    const actionBtnClass = `absolute right-1.5 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 ${
+      isDarkMode
+        ? 'bg-[#1D2330] text-[#A1A8B3] hover:bg-[#252b3a] hover:text-white'
+        : 'bg-white text-slate-500 shadow-sm hover:bg-slate-100'
+    }`;
+    return (
+      <div key={id || label} className="group relative">
+        <button
+          type="button"
+          onClick={() => id && onSelectChannel?.(id)}
+          onContextMenu={(e) => {
+            if (!showSettings) return;
+            e.preventDefault();
+            onOpenChannelSettings(channel);
+          }}
+          className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm font-semibold transition ${
+            showSettings ? 'pr-9' : ''
+          } ${active ? railTone.active : `border-transparent ${railTone.item}`}`}
+        >
+          <Icon size={15} className="shrink-0 text-muted-foreground group-hover:text-current" />
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+          {unread > 0 ? (
+            <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-primary-foreground">
+              {unread}
+            </span>
+          ) : null}
+        </button>
+        {showSettings ? (
+          <button
+            type="button"
+            title={t('orgPanel.channelSettings')}
+            aria-label={t('orgPanel.channelSettings')}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenChannelSettings(channel);
+            }}
+            className={actionBtnClass}
+          >
+            <Settings size={14} />
+          </button>
+        ) : null}
+      </div>
+    );
+  };
+  const suiteRailScopeTitle = selectedTeamId
+    ? teamName
+    : selectedDepartment && deptName !== '—'
+      ? deptName
+      : orgName;
+
+  const suiteRailInner = (
+    <>
+      <div className="scrollbar-overlay flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
+        <div className="mb-3 flex items-center justify-between gap-2 px-1">
+          <p className="min-w-0 truncate text-sm font-semibold">{suiteRailScopeTitle}</p>
+          {deptWorkspaceContext && canManageWorkspaceStructure && onOpenDepartmentSettings ? (
+            <button
+              type="button"
+              onClick={() => onOpenDepartmentSettings(selectedDepartment)}
+              className="rounded-lg border border-border bg-surface p-1.5 text-muted-foreground transition hover:border-primary/40 hover:text-primary"
+              title={t('orgPanel.departmentPermissionSettingsTitle')}
+            >
+              <Settings size={14} />
+            </button>
+          ) : null}
+        </div>
+
+        <div>
+          <div className={`mb-2 px-1 text-[11px] font-bold uppercase tracking-[0.12em] ${railTone.muted}`}>
+            {deptWorkspaceContext
+              ? t('workspace.moduleAnnouncement')
+              : t('taskBoard.chatChannels')}
+          </div>
+          <div className="space-y-1.5">
+            {railChatChannels.length ? (
+              railChatChannels.map((channel) => renderRailChannelButton(channel, Hash, 'general'))
+            ) : (
+              <p className={`rounded-xl border border-dashed border-border px-3 py-4 text-sm ${railTone.muted}`}>
+                {t('taskBoard.noChatChannels')}
+              </p>
+            )}
+            {canManageScopedChannels && typeof onCreateChannel === 'function' ? (
+              <button
+                type="button"
+                onClick={() => onCreateChannel(deptWorkspaceContext ? 'announcement' : 'chat')}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border px-3 py-2 text-sm font-semibold text-muted-foreground transition hover:border-primary/40 hover:text-primary"
+              >
+                <Plus size={15} />
+                {deptWorkspaceContext
+                  ? t('workspace.moduleAnnouncement')
+                  : t('taskBoard.createChatChannel')}
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-5">
+          <div className={`mb-2 px-1 text-[11px] font-bold uppercase tracking-[0.12em] ${railTone.muted}`}>
+            {t('workspace.moduleMeetings')}
+          </div>
+          <div className="space-y-1.5">
+            {railVoiceChannels.length ? (
+              railVoiceChannels.map((channel) => renderRailChannelButton(channel, Mic, 'voice'))
+            ) : (
+              <p className={`rounded-xl border border-dashed border-border px-3 py-4 text-sm ${railTone.muted}`}>
+                {t('taskBoard.noVoiceChannels')}
+              </p>
+            )}
+            {canManageScopedChannels && typeof onCreateChannel === 'function' ? (
+              <button
+                type="button"
+                onClick={() => onCreateChannel('voice')}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border px-3 py-2 text-sm font-semibold text-muted-foreground transition hover:border-primary/40 hover:text-primary"
+              >
+                <Plus size={15} />
+                {t('taskBoard.createVoiceChannel')}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      {voiceConnVisible && voiceConnectionState !== 'idle' ? (
+        <OrganizationVoiceConnectionPanel
+          isDarkMode={isDarkMode}
+          t={t}
+          connected={voiceConnConnected}
+          channelLabel={
+            selectedChannel?.name
+              ? channelNameToDisplaySlug(selectedChannel.name, locale)
+              : ''
+          }
+          orgName={orgName}
+          onDisconnect={() => voiceControlActionsRef.current.disconnect?.()}
+        />
+      ) : null}
+
+      {voiceConnVisible ? (
+        <div className={`shrink-0 border-t border-border ${isDarkMode ? 'bg-[#0b1120]' : 'bg-white'}`}>
+          <OrganizationSidebarAudioBar
+            isDarkMode={isDarkMode}
+            t={t}
+            voiceUserId={orgVoiceUserId}
+            voiceInChannel={voiceConnVisible}
+            voiceAudioState={voiceAudioState}
+            onToggleMute={() => voiceControlActionsRef.current.toggleMute?.()}
+            onToggleSpeaker={() => voiceControlActionsRef.current.toggleSpeaker?.()}
+            onAudioPrefChange={handleOrgAudioPrefChange}
+            onOpenOrganizationSettings={() => onOpenOrganizationSettings?.(selectedOrganization)}
+            onOpenVoiceSettings={() => setOrgVoiceSettingsOpen(true)}
+          />
+        </div>
+      ) : null}
+    </>
+  );
+
+  const startChatRailResize = (e) => {
+    if (e.button !== 0) return;
+    leftAsideResizeRef.current = {
+      active: true,
+      startX: e.clientX,
+      startW: leftAsideW,
+      minW: CHAT_RAIL_MIN_W,
+      maxW: CHAT_RAIL_MAX_W,
+      persistChatRail: true,
+    };
+    e.preventDefault();
+  };
+
+  const hideSuiteChatRail = workspaceTab === 'documents';
+  const suiteOrgModuleRail =
+    suiteLayout && leftRailOpen && isLgViewport && !hideSuiteChatRail ? (
+      <aside
+        className={`relative hidden h-full min-h-0 shrink-0 flex-col overflow-hidden border-r lg:flex ${railTone.panel}`}
+        style={{
+          width: leftAsideW,
+          minWidth: CHAT_RAIL_MIN_W,
+          maxWidth: CHAT_RAIL_MAX_W,
+        }}
+      >
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-valuenow={leftAsideW}
+          aria-valuemin={CHAT_RAIL_MIN_W}
+          aria-valuemax={CHAT_RAIL_MAX_W}
+          title={t('organizations.layoutResizeDblClickHint', {
+            min: CHAT_RAIL_MIN_W,
+            max: CHAT_RAIL_MAX_W,
+          })}
+          className="absolute inset-y-0 right-0 z-20 w-2 cursor-col-resize touch-none hover:bg-primary/20"
+          onMouseDown={startChatRailResize}
+          onDoubleClick={() => {
+            setLeftAsideW(CHAT_RAIL_BASE_W);
+            onLeftRailWidthChange?.(CHAT_RAIL_BASE_W);
+          }}
+        />
+        {suiteRailInner}
+      </aside>
+    ) : null;
+
+  const suiteOrgModuleRailDrawer =
+    suiteLayout && leftRailOpen && !isLgViewport && !hideSuiteChatRail ? (
+      <div className="fixed inset-0 z-[240] bg-black/40 lg:hidden" role="presentation">
+        <button
+          type="button"
+          className="absolute inset-0 h-full w-full cursor-default"
+          aria-label={t('nav.close')}
+          onClick={() => onLeftRailOpenChange?.(false)}
+        />
+        <aside
+          className={`relative z-[1] flex h-full w-[min(100vw,320px)] flex-col overflow-hidden border-r ${railTone.panel}`}
+        >
+          {suiteRailInner}
+        </aside>
+      </div>
+    ) : null;
+
+  return (
+    <>
+    {suiteOrgModuleRailDrawer}
+    <div className={`${workspace.shell} h-full min-h-0 w-full max-w-full`}>
+      <div
+        className={
+          suiteLayout
+            ? 'flex h-full min-h-0 flex-1 overflow-hidden'
+            : workspace.shellInner || 'flex h-full min-h-0 flex-1 gap-2 overflow-hidden'
+        }
+      >
+        {suiteLayout ? suiteOrgModuleRail : workspaceTab === 'tasks' ? null : (
+        <aside
+          className={`${workspace.aside} relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden`}
+          style={{ width: leftAsideW, minWidth: LEFT_ASIDE_MIN_W, maxWidth: LEFT_ASIDE_MAX_W }}
+        >
+          <div
+            className="absolute inset-y-0 right-0 z-20 w-2 cursor-col-resize"
+            title={t('taskBoard.resizeAside', { min: LEFT_ASIDE_MIN_W, max: LEFT_ASIDE_MAX_W })}
+            onMouseDown={(e) => {
+              if (e.button !== 0) return;
+              leftAsideResizeRef.current = {
+                active: true,
+                startX: e.clientX,
+                startW: leftAsideW,
+                minW: LEFT_ASIDE_MIN_W,
+                maxW: LEFT_ASIDE_MAX_W,
+              };
+              e.preventDefault();
+            }}
+          />
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="scrollbar-overlay flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-3 py-2.5">
+            <div
+              className={`mb-2.5 rounded-xl border p-2.5 ${isDarkMode ? 'border-white/10 bg-[#171B24]' : 'border-slate-200 bg-slate-50'}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!canInviteMembers) return;
+                    if (selectedOrganization?._id) onInviteOrganization?.(selectedOrganization._id);
+                  }}
+                  className="min-w-0 text-left"
+                  title={canInviteMembers ? t('taskBoard.inviteOrg') : t('taskBoard.noInvitePermission')}
+                >
+                  <div className={`truncate text-lg font-semibold ${workspace.textPrimary}`}>
+                    {orgName}
+                  </div>
+                  <div className={`mt-0.5 text-xs ${isDarkMode ? 'text-emerald-400/90' : 'text-emerald-700'}`}>
+                    ● {t('orgPanel.onlineCount', { n: workspaceOnlineUserIds?.length || 0 })}
+                  </div>
+                </button>
+                {canInviteMembers ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedOrganization?._id) onInviteOrganization?.(selectedOrganization._id);
+                    }}
+                    className={`rounded-lg px-2 py-1 text-[10px] font-semibold ${
+                      isDarkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-700'
+                    }`}
+                  >
+                    Mời
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <OrganizationWorkspaceStructureSidebar
+              isDarkMode={isDarkMode}
+              locale={locale}
+              t={t}
+              branches={branches}
+              selectedBranchId={selectedBranchId}
+              onSelectBranch={onSelectBranch}
+              selectedDivisionId={selectedDivisionId}
+              onSelectDivision={onSelectDivision}
+              selectedDepartment={selectedDepartment}
+              selectedTeamId={selectedTeamId}
+              selectedChannelId={selectedChannelId}
+              teams={teams}
+              channels={channels}
+              channelPermissionMatrix={channelPermissionMatrix}
+              membershipScope={membershipScope}
+              loadingDepartments={loadingDepartments}
+              onSelectDepartment={onSelectDepartment}
+              onSelectTeam={onSelectTeam}
+              onSelectChannel={onSelectChannel}
+              onCreateChannel={onCreateChannel}
+              onOpenChannelSettings={onOpenChannelSettings}
+              onOpenDivisionSettings={onOpenDivisionSettings}
+              onOpenDepartmentSettings={onOpenDepartmentSettings}
+              onOpenTeamSettings={onOpenTeamSettings}
+              canManageWorkspaceStructure={canManageWorkspaceStructure}
+              canManageChannelRoleAccess={canManageChannelRoleAccess}
+              canSeeAllStructure={canSeeAllStructure}
+              departmentWorkspaceActive={departmentWorkspaceActive}
+              canCreateTaskBoard={canOpenCreateProjectWizard}
+              onCreateTaskBoard={
+                canOpenCreateProjectWizard
+                  ? () => {
+                      openProjectSetupWizard();
+                    }
+                  : undefined
+              }
+            />
+          </div>
+
+          {voiceConnVisible && voiceConnectionState !== 'idle' ? (
+            <OrganizationVoiceConnectionPanel
+              isDarkMode={isDarkMode}
+              t={t}
+              connected={voiceConnConnected}
+              channelLabel={
+                selectedChannel?.name
+                  ? channelNameToDisplaySlug(selectedChannel.name, locale)
+                  : ''
+              }
+              orgName={orgName}
+              onDisconnect={() => voiceControlActionsRef.current.disconnect?.()}
+            />
+          ) : null}
+          </div>
+
+          <div
+            className={`shrink-0 rounded-b-xl ${isDarkMode ? 'bg-[#11141C]' : 'bg-white'}`}
+          >
+            <OrganizationSidebarAudioBar
+              isDarkMode={isDarkMode}
+              t={t}
+              voiceUserId={orgVoiceUserId}
+              voiceInChannel={voiceConnVisible}
+              voiceAudioState={voiceAudioState}
+              onToggleMute={() => voiceControlActionsRef.current.toggleMute?.()}
+              onToggleSpeaker={() => voiceControlActionsRef.current.toggleSpeaker?.()}
+              onAudioPrefChange={handleOrgAudioPrefChange}
+              onOpenOrganizationSettings={() => onOpenOrganizationSettings?.(selectedOrganization)}
+              onOpenVoiceSettings={() => setOrgVoiceSettingsOpen(true)}
+            />
+          </div>
+        </aside>
+        )}
+
+        <div
+          className={`${
+            suiteLayout ? 'flex min-w-0 flex-1 flex-col bg-background/75 backdrop-blur-sm dark:bg-background/65' : workspace.main
+          } h-full min-h-0 overflow-hidden ${isDarkMode && !suiteLayout && !useFigmaChannelHeader ? '!bg-transparent' : ''}`}
+        >
+          {workspaceTab !== 'documents' ? (
+          <header
+            className={
+              suiteLayout
+                ? FIGMA_ORG_CHANNEL_HEADER
+                : `${workspace.header} ${isDarkMode ? '!bg-transparent' : ''}`
+            }
+          >
+            {suiteLayout ? (
+              <>
+                {typeof onBackFromTeam === 'function' && selectedTeamId ? (
+                  <button
+                    type="button"
+                    onClick={() => onBackFromTeam()}
+                    title={t('workspace.backToDepartments')}
+                    aria-label={t('workspace.backToDepartments')}
+                    className={FIGMA_ORG_CHANNEL_ICON_BTN}
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                ) : null}
+                <ModuleHeaderIcon size={16} className="shrink-0 text-muted-foreground" />
+                <span className={FIGMA_ORG_CHANNEL_HEADER_TITLE}>
+                  {moduleTitle}
+                </span>
+                <div className="h-4 w-px shrink-0 bg-border" />
+                <span className={FIGMA_ORG_CHANNEL_HEADER_DESC}>
+                  {moduleDescription}
+                </span>
+                <div className="ml-auto flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    title={
+                      leftRailOpen
+                        ? t('organizations.hideChannelRail')
+                        : t('organizations.showChannelRail')
+                    }
+                    aria-label={
+                      leftRailOpen
+                        ? t('organizations.hideChannelRail')
+                        : t('organizations.showChannelRail')
+                    }
+                    onClick={() => onLeftRailOpenChange?.(!leftRailOpen)}
+                    className={`${FIGMA_ORG_CHANNEL_ICON_BTN} ${
+                      leftRailOpen ? 'bg-muted text-primary' : ''
+                    }`}
+                  >
+                    <PanelLeft size={14} />
+                  </button>
+                  {typeof onRightPanelOpenChange === 'function' ? (
+                    <button
+                      type="button"
+                      title={
+                        rightPanelOpen
+                          ? t('organizations.hideMemberDock')
+                          : t('organizations.showMemberDock')
+                      }
+                      aria-label={
+                        rightPanelOpen
+                          ? t('organizations.hideMemberDock')
+                          : t('organizations.showMemberDock')
+                      }
+                      onClick={() => onRightPanelOpenChange?.(!rightPanelOpen)}
+                      className={`${FIGMA_ORG_CHANNEL_ICON_BTN} ${
+                        rightPanelOpen ? 'bg-muted text-primary' : ''
+                      }`}
+                    >
+                      <Users size={14} />
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    title={t('orgPanel.workspaceSearchAria')}
+                    aria-label={t('orgPanel.workspaceSearchAria')}
+                    onClick={() => onWorkspaceSearchOpenChange?.(true)}
+                    className={`${FIGMA_ORG_CHANNEL_ICON_BTN} ${
+                      workspaceSearchOpen ? 'bg-muted text-primary' : ''
+                    }`}
+                  >
+                    <Search size={14} />
+                  </button>
+                </div>
+              </>
+            ) : (
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <nav
+                  aria-label={t('orgPanel.workspaceBreadcrumbAria')}
+                  className={`mb-0.5 flex flex-wrap items-center gap-1 text-[11px] ${
+                    isDarkMode ? 'text-[#8e9297]' : 'text-slate-500'
+                  }`}
+                >
+                  <span className="truncate">{branchName}</span>
+                  <span className="opacity-50">/</span>
+                  <span className="truncate">{divisionName}</span>
+                  {selectedTeamId && teamName !== '—' ? (
+                    <>
+                      <span className="opacity-50">/</span>
+                      <span className="truncate">{teamName}</span>
+                    </>
+                  ) : deptName !== '—' && !selectedTeamId ? (
+                    <>
+                      <span className="opacity-50">/</span>
+                      <span className="truncate">{deptName}</span>
+                    </>
+                  ) : null}
+                  {selectedChannelId ? (
+                    <>
+                      <span className="opacity-50">/</span>
+                      <span
+                        className={`truncate font-medium ${isDarkMode ? 'text-[#A1A8B3]' : 'text-slate-700'}`}
+                      >
+                        #{chSlug || t('organizations.channelNameFallback')}
+                      </span>
+                    </>
+                  ) : null}
+                </nav>
+                <h2
+                  className={`truncate text-base font-semibold ${workspace.textPrimary}`}
+                >
+                  {workspaceTab === 'tasks'
+                    ? t('nav.tasks.label')
+                    : workspaceTab === 'documents'
+                      ? t('documents.orgTitle')
+                      : workspaceTab === 'notifications'
+                        ? t('notifications.titleOrganization')
+                        : selectedChannelId
+                          ? `#${chSlug || t('organizations.channelNameFallback')}`
+                          : deptName}
+                </h2>
+                {isChatLikeTab && !isVoiceChannel && sortedWorkspaceMessages.length > 0 ? (
+                  <p className={`mt-0.5 text-[10px] ${isDarkMode ? 'text-[#6d7380]' : 'text-slate-500'}`}>
+                    {t('orgPanel.msgCountLine', { n: sortedWorkspaceMessages.length })}
+                  </p>
+                ) : null}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  title={t('orgPanel.workspaceSearchAria')}
+                  aria-label={t('orgPanel.workspaceSearchAria')}
+                  onClick={() => {
+                    onWorkspaceSearchOpenChange?.(true);
+                  }}
+                  className={`rounded-lg p-2 transition ${
+                    workspaceSearchOpen
+                      ? isDarkMode
+                        ? 'bg-[#5865F2]/25 text-white'
+                        : 'bg-indigo-100 text-indigo-700'
+                      : isDarkMode
+                        ? 'text-[#b4b8c4] hover:bg-white/[0.06] hover:text-white'
+                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`}
+                >
+                  <Search className="h-5 w-5" strokeWidth={2} />
+                </button>
+                </div>
+              </div>
+            </div>
+            )}
+          </header>
+          ) : null}
+
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div
+            ref={isChatLikeTab && !isVoiceChannel ? undefined : isVoiceChannel ? undefined : chatScrollRef}
+            className={
+              (isChatLikeTab && !isVoiceChannel) ||
+              isVoiceChannel ||
+              workspaceTab === 'tasks' || workspaceTab === 'documents'
+                ? 'min-h-0 flex-1 overflow-hidden'
+                : 'scrollbar-chat min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain'
+            }
+            onScroll={
+              (isChatLikeTab && !isVoiceChannel) ||
+              isVoiceChannel ||
+              workspaceTab === 'tasks' ||
+              workspaceTab === 'documents'
+                ? undefined
+                : handleChatScroll
+            }
+          >
+            {workspaceTab === 'documents' ? (
+              <OrganizationDocumentsWorkspacePanel
+                files={workspaceDocFiles}
+                loading={loadingWorkspaceDocuments}
+                error={workspaceDocumentsError}
+                onReload={onWorkspaceDocumentsReload}
+                isDarkMode={isDarkMode}
+                onOpenInWorkspace={onOpenDocumentInWorkspace}
+                organizationId={organizationId ? String(organizationId) : ''}
+                departmentId={deptWorkspaceContext || selectedTeamId ? resolvedDepartmentId : ''}
+                teamId={selectedTeamId ? String(selectedTeamId) : ''}
+                departmentChannelIds={
+                  deptWorkspaceContext && !selectedTeamId
+                    ? scopedChannels.map((ch) => String(ch._id || ch.id || '')).filter(Boolean)
+                    : null
+                }
+                teamChannelIds={
+                  selectedTeamId
+                    ? scopedChannels.map((ch) => String(ch._id || ch.id || '')).filter(Boolean)
+                    : null
+                }
+                memberDepartmentIds={memberDepartmentIds}
+                memberChannelIds={memberDepartmentChannelIds}
+                initialCategory="all"
+              />
+            ) : workspaceTab === 'members' ? (
+              <DepartmentMembersPanel
+                department={selectedDepartment}
+                orgMembers={orgMembers}
+                isDarkMode={isDarkMode}
+              />
+            ) : workspaceTab === 'calendar' || workspaceTab === 'meetings' ? (
+              <DepartmentMeetingsPanel
+                organizationId={organizationId ? String(organizationId) : ''}
+                departmentId={resolvedDepartmentId}
+                departmentName={deptName !== '—' ? deptName : ''}
+                mode={workspaceTab === 'calendar' ? 'calendar' : 'meetings'}
+                canManage={canManageDeptMeetings}
+                isDarkMode={isDarkMode}
+                onAnnounceMeetingJoin={onAnnounceMeetingJoin}
+              />
+            ) : workspaceTab === 'notifications' ? (
+              <OrganizationNotificationsWorkspacePanel
+                organizationId={organizationId ? String(organizationId) : ''}
+                organizationSlug={String(selectedOrganization?.slug || '').trim()}
+                isDarkMode={isDarkMode}
+                fetchEnabled={notificationsFetchEnabled}
+              />
+            ) : isVoiceChannel ? (
+                selectedChannelId && (
+                  <OrganizationVoiceChannelView
+                    channelId={String(selectedChannelId)}
+                    channelDisplayName={
+                      selectedChannel?.name
+                        ? channelNameToDisplaySlug(selectedChannel.name, locale)
+                        : ''
+                    }
+                    organizationId={organizationId ? String(organizationId) : ''}
+                    channelLabel={selectedChannel?.name || ''}
+                    isDarkMode={isDarkMode}
+                    compactSuite={suiteLayout}
+                    canVoice={canVoiceChannel}
+                    micDeviceId={orgMicId}
+                    speakerDeviceId={orgSpeakerId}
+                    speakerVolume={orgSpeakerVolume}
+                    landingDemo={landingDemo}
+                    onConnectionStateChange={setVoiceConnectionState}
+                    onAudioStateChange={setVoiceAudioState}
+                    onRoomSessionEnd={onVoiceRoomSessionEnd}
+                    onDisconnect={onDisconnectVoice}
+                    onControlActionsReady={(actions) => {
+                      voiceControlActionsRef.current = actions || {
+                        toggleMute: null,
+                        toggleSpeaker: null,
+                        disconnect: null,
+                      };
+                    }}
+                  />
+                )
+              ) : (
+              <OrganizationChatView
+                scrollRef={chatScrollRef}
+                onScroll={handleChatScroll}
+                className={useFigmaOrgChatChrome ? undefined : 'contents'}
+              >
+              <div
+                className={
+                  useFigmaOrgChatChrome
+                    ? 'mr-auto flex w-full max-w-[920px] flex-col gap-3 px-5 py-5'
+                    : 'flex min-h-full flex-col px-4 py-3'
+                }
+              >
+              <div className={useFigmaOrgChatChrome ? 'flex flex-col gap-3' : 'mt-auto flex flex-col gap-3'}>
+              <>
+              {hasMoreOlderMessages && onLoadOlderMessages && (
+                <div className="flex justify-center pb-1">
+                  <button
+                    type="button"
+                    disabled={loadingOlderMessages}
+                    onClick={onLoadOlderMessages}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      isDarkMode
+                        ? 'border border-white/10 bg-white/5 text-gray-300 hover:bg-white/10 disabled:opacity-50'
+                        : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50'
+                    }`}
+                  >
+                    {loadingOlderMessages
+                      ? t('friendChat.loadingOlder')
+                      : t('friendChat.loadOlder')}
+                  </button>
+                </div>
+              )}
+              {loadingMessages && (
+                <div
+                  className={`rounded-xl p-4 text-sm ${
+                    isDarkMode ? 'bg-white/5 text-gray-300' : 'bg-white/80 text-slate-600 shadow-sm'
+                  }`}
+                >
+                  {t('orgPanel.loadingMsgs')}
+                </div>
+              )}
+
+              {!loadingMessages && messages.length === 0 && (
+                <div
+                  className={`rounded-xl p-4 text-sm ${
+                    isDarkMode ? 'bg-white/5 text-gray-300' : 'bg-white/80 text-slate-600 shadow-sm'
+                  }`}
+                >
+                  {lineChatEmptyCopy}
+                </div>
+              )}
+
+              {!loadingMessages &&
+                sortedWorkspaceMessages.map((message, idx) => {
+                  const mid = message._id || message.id;
+                  const senderId = message?.senderId?._id || message?.senderId;
+                  const isMine = String(senderId || '') === String(currentUserId || '');
+                  const type = message?.messageType || 'text';
+                  const typeLabel =
+                    type === 'image'
+                      ? t('orgPanel.msgTypeImage')
+                      : type === 'file'
+                        ? t('orgPanel.msgTypeFile')
+                        : type === 'system'
+                          ? t('orgPanel.msgTypeSystem')
+                          : t('orgPanel.msgTypeText');
+                  const replyId = message.replyToMessageId;
+                  const parentMsg = replyId
+                    ? sortedWorkspaceMessages.find((m) => String(m._id || m.id) === String(replyId))
+                    : null;
+                  const replyPreview = parentMsg
+                    ? plainTextForMessage(parentMsg).slice(0, 160)
+                    : t('orgPanel.threadRoot');
+                  const isEditing = editingMessageId && String(editingMessageId) === String(mid);
+                  const showToolbar =
+                    !isEditing && !sendingMessage && type !== 'system';
+
+                  const toolbarPlace = toolbarPlacementById[String(mid)] ?? 'above';
+
+                  const prev = idx > 0 ? sortedWorkspaceMessages[idx - 1] : null;
+                  const showDayDivider =
+                    !prev || messageDayKey(message.createdAt) !== messageDayKey(prev.createdAt);
+
+                  const displayName = senderDisplayName(
+                    message,
+                    isMine,
+                    currentUser,
+                    t('orgPanel.member')
+                  );
+                  const avatarUrl = senderAvatarUrl(message, isMine, currentUser);
+                  const avatarInitials = isMine
+                    ? userInitialsFromProfile(currentUser)
+                    : senderInitials(message);
+                  const messageRoleKey =
+                    type === 'system'
+                      ? 'system'
+                      : String(message?.senderOrgRole || message?.membershipRole || 'member').toLowerCase();
+                  const roleCapsule = roleBadgeLabel(messageRoleKey, t);
+
+                  const contentTextCls = isDarkMode ? 'text-[#dcddde]' : 'text-slate-800';
+
+                  return (
+                    <Fragment key={mid}>
+                      {showDayDivider && (
+                        <div className="flex justify-center py-2">
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wide ${
+                              isDarkMode
+                                ? 'border-white/[0.06] bg-[#12151f] text-[#8e9297]'
+                                : 'border-slate-200 bg-white text-slate-500 shadow-sm'
+                            }`}
+                          >
+                            {formatDateDividerLabel(message.createdAt)}
+                          </span>
+                        </div>
+                      )}
+                      <div
+                        className={`group/msg relative -mx-4 px-4 py-0.5 transition-colors ${
+                          isDarkMode ? 'hover:bg-white/[0.035]' : 'hover:bg-slate-100/90'
+                        }`}
+                        onMouseEnter={(e) => handleMessageRowMouseEnter(mid, e)}
+                      >
+                        {showToolbar && (
+                          <div
+                            className={`pointer-events-none absolute right-4 z-30 opacity-0 transition-opacity duration-150 group-hover/msg:pointer-events-auto group-hover/msg:opacity-100 ${
+                              toolbarPlace === 'below'
+                                ? 'top-full mt-1'
+                                : '-top-1 -translate-y-full'
+                            }`}
+                          >
+                            {useFigmaChannelHeader ? (
+                              <OrgMessageHoverActions
+                                visible
+                                onEmojiPick={(emoji) => onQuickReactMessage?.(message, emoji)}
+                                onReply={() => onReplyToMessage?.(message)}
+                                onMenu={(e) => {
+                                  const r = e?.currentTarget?.getBoundingClientRect?.();
+                                  if (r) {
+                                    setMoreMenu({
+                                      open: true,
+                                      anchorRect: r,
+                                      message,
+                                    });
+                                  }
+                                }}
+                              />
+                            ) : (
+                            <ChannelMessageToolbar
+                              compact
+                              isMine={isMine}
+                              showEdit={isMine && canEditOrgMessage(message)}
+                              disabled={sendingMessage}
+                              onQuickReact={(emoji) => onQuickReactMessage?.(message, emoji)}
+                              onOpenEmojiPicker={() => {}}
+                              onMiddleAction={() => {
+                                if (isMine && canEditOrgMessage(message)) {
+                                  beginEditMessage(message);
+                                } else {
+                                  onReplyToMessage?.(message);
+                                }
+                              }}
+                              onForward={() => onForwardMessage?.(message)}
+                              onMore={(e) => {
+                                const r = e?.currentTarget?.getBoundingClientRect?.();
+                                if (r) {
+                                  setMoreMenu({
+                                    open: true,
+                                    anchorRect: r,
+                                    message,
+                                  });
+                                }
+                              }}
+                            />
+                            )}
+                          </div>
+                        )}
+                        <div className="flex w-full items-start justify-start gap-3.5">
+                        {/* Slot cố định — tránh khung/tai avatar đụng sát tên & nội dung */}
+                        <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl">
+                          <UserAvatar
+                            avatar={avatarUrl}
+                            userId={senderUserId(message, isMine, currentUser)}
+                            name={displayName}
+                            size="md"
+                            title={displayName}
+                            ringClassName="shadow-inner"
+                          />
+                        </div>
+                        <div className="min-w-0 max-w-[min(100%,42rem)] flex-1">
+                          <div
+                            className="mb-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5"
+                          >
+                            <span
+                              className={`text-sm font-bold leading-snug ${isDarkMode ? 'text-white' : 'text-slate-900'}`}
+                            >
+                              {displayName}
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${roleBadgeClass(messageRoleKey, isDarkMode)}`}
+                            >
+                              {roleCapsule}
+                            </span>
+                            {type !== 'text' && type !== 'system' ? (
+                            <span
+                              className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${
+                                isDarkMode ? 'bg-white/[0.06] text-[#6B7280]' : 'bg-slate-100 text-slate-500'
+                              }`}
+                            >
+                              {typeLabel}
+                            </span>
+                            ) : null}
+                            <span
+                              className={`text-[11px] tabular-nums leading-snug ${isDarkMode ? 'text-[#6d7380]' : 'text-slate-500'}`}
+                            >
+                              {formatTime(message.createdAt)}
+                            </span>
+                            {message.editedAt && (
+                              <span
+                                className={`text-[10px] ${isDarkMode ? 'text-[#6d7380]' : 'text-slate-500'}`}
+                              >
+                                {t('orgPanel.edited')}
+                              </span>
+                            )}
+                          </div>
+                          <div
+                            className={`text-sm leading-relaxed text-left ${contentTextCls}`}
+                          >
+                            {replyId && (
+                              <div
+                                className={`mb-2 border-l-2 pl-2 text-[11px] text-left ${isMine ? 'border-[#5865F2]/50 text-[#949ba4]' : 'border-[#5865F2]/40 text-[#8e9297]'}`}
+                              >
+                                <span className={`font-semibold ${isMine ? 'text-[#a29bfe]' : 'text-[#a29bfe]'}`}>
+                                  @{replyToLabel(parentMsg || {})}{' '}
+                                </span>
+                                <span className="line-clamp-2">{replyPreview}</span>
+                              </div>
+                            )}
+                            {isEditing ? (
+                              <OrgMessageInlineEditor
+                                value={editDraft}
+                                onChange={setEditDraft}
+                                onSave={() => submitEdit(mid)}
+                                onCancel={cancelEdit}
+                                isDarkMode={isDarkMode}
+                                saving={savingEdit}
+                                escapeHint={t('orgPanel.editEscape')}
+                                enterHint={t('orgPanel.editEnter')}
+                                cancelLabel={t('orgPanel.editCancelShort')}
+                                saveLabel={t('orgPanel.editSaveShort')}
+                              />
+                            ) : (
+                              <>
+                                {isContextCallMessage(message) || normalizeMessageRefs(message).length ? (
+                                  <MessageContextChips
+                                    message={message}
+                                    isDarkMode={isDarkMode}
+                                    t={t}
+                                    onOpen={setContextPreviewTarget}
+                                  />
+                                ) : null}
+                                {!isContextCallMessage(message) ||
+                                String(message.content || '').trim() !==
+                                  String(message.visibility?.projectName || '').trim() ? (
+                                  <ChatMessageAttachmentBody
+                                    message={message}
+                                    mentionVariant="org"
+                                    mentionLabels={mentionLabelsForChat}
+                                    mentionContacts={normalizedContacts}
+                                  />
+                                ) : null}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        </div>
+                      </div>
+                    </Fragment>
+                  );
+                })}
+              </>
+              <div ref={messagesEndRef} className="h-px w-full shrink-0" aria-hidden />
+              </div>
+              </div>
+              </OrganizationChatView>
+              )}
+
+          </div>
+
+          {showJumpToLatest &&
+            sortedWorkspaceMessages.length > 0 &&
+            isChatLikeTab &&
+            !isVoiceChannel &&
+            !loadingMessages && (
+            <button
+              type="button"
+              title={t('orgPanel.scrollToLatest')}
+              aria-label={t('orgPanel.scrollToLatest')}
+              onClick={() => scrollChatToLatest('smooth')}
+              className={`pointer-events-auto absolute bottom-4 right-4 z-20 flex h-10 w-10 items-center justify-center rounded-full shadow-lg transition-all duration-200 hover:scale-105 active:scale-95 ${
+                isDarkMode
+                  ? 'border border-white/10 bg-[#171B24] text-[#A1A8B3] hover:bg-[#1D2330] hover:text-[#F3F4F6]'
+                  : 'border border-slate-200/90 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <ChevronsDown className="h-5 w-5" strokeWidth={2.25} />
+            </button>
+          )}
+
+          {isVoiceChannel && (
+            <button
+              type="button"
+              title={t('taskBoard.openVoiceChat')}
+              aria-label={t('taskBoard.openVoiceChat')}
+              onClick={() => onOpenVoiceChatSidebar?.()}
+              className={`pointer-events-auto absolute bottom-4 right-4 z-20 inline-flex h-10 items-center gap-2 rounded-full border px-3 text-sm font-semibold shadow-lg transition hover:scale-[1.02] active:scale-[0.98] ${
+                voiceChatSidebarOpen
+                  ? isDarkMode
+                    ? 'border-[#5865F2]/40 bg-[#5865F2]/20 text-[#cdd2ff]'
+                    : 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                  : isDarkMode
+                    ? 'border-white/10 bg-[#141821] text-white hover:bg-[#1a2230]'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <MessageSquare className="h-4 w-4" />
+              <span className="hidden sm:inline">Chat</span>
+            </button>
+          )}
+
+          </div>
+
+          {isChatLikeTab && !isVoiceChannel && (
+            <div className={workspace.composerBar}>
+              {channelReadOnly ? (
+                <p
+                  className={`mb-2 rounded-lg border px-3 py-2 text-xs ${
+                    isDarkMode
+                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-100/90'
+                      : 'border-amber-200 bg-amber-50 text-amber-900'
+                  }`}
+                >
+                  {t('orgPanel.composerReadOnly')}
+                </p>
+              ) : null}
+              {canWriteInChannel && selectedChannelId ? (
+                <div className="relative mb-2">
+                  {contextProject || contextRef ? (
+                    <div
+                      className={`mb-2 flex items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-xs ${
+                        isDarkMode
+                          ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-100'
+                          : 'border-indigo-200 bg-indigo-50 text-indigo-900'
+                      }`}
+                    >
+                      <span className="min-w-0 truncate font-medium">
+                        {t('orgPanel.contextCallAttached', {
+                          name:
+                            contextRef?.label ||
+                            contextRef?.title ||
+                            contextProject?.name ||
+                            contextProject?.title ||
+                            '',
+                        })}
+                      </span>
+                      <button
+                        type="button"
+                        className="shrink-0 rounded p-0.5 hover:bg-black/10"
+                        aria-label={t('orgPanel.contextCallClear')}
+                        onClick={() => {
+                          setContextProject(null);
+                          setContextRef(null);
+                        }}
+                      >
+                        <X size={14} aria-hidden />
+                      </button>
+                    </div>
+                  ) : null}
+                  <ChatContextPicker
+                    open={contextPickerOpen}
+                    isDarkMode={isDarkMode}
+                    t={t}
+                    projects={contextProjects}
+                    loadingProjects={contextProjectsLoading}
+                    apiCtx={taskBoardApiCtx}
+                    onSelectProject={(row) => {
+                      setContextProject(row);
+                      setContextRef(null);
+                      setContextPickerOpen(false);
+                    }}
+                    onSelectRef={(item) => {
+                      setContextRef(item);
+                      setContextProject(null);
+                      setContextPickerOpen(false);
+                    }}
+                  />
+                </div>
+              ) : null}
+              <ChatUploadProgressBar
+                percent={channelUploadProgress}
+                label={t('orgPanel.uploadChannel')}
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={(event) => handleFileSelected(event, 'file')}
+              />
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => handleFileSelected(event, 'image')}
+              />
+              {useFigmaOrgChatChrome ? (
+                <FigmaOrgChatComposer
+                  canWriteInChannel={canWriteInChannel}
+                  channelReadOnly={channelReadOnly}
+                  chSlug={chSlug}
+                  placeholder={lineChatComposerPlaceholder}
+                  fileInputRef={fileInputRef}
+                  imageInputRef={imageInputRef}
+                  messageInput={messageInput}
+                  mentionItems={normalizedContacts.slice(0, 40).map((contact) => ({
+                    value: contact.id,
+                    label: contact.name,
+                    username: contact.username || '',
+                    avatar: contact.avatar,
+                  }))}
+                  onChangeMessageInput={onChangeMessageInput}
+                  onClearReply={onClearReply}
+                  onCreateContactCard={handleCreateContactCard}
+                  onCreatePoll={handleCreatePoll}
+                  onOpenContextPicker={openContextPicker}
+                  onOpenEmoji={() => {
+                    setEmojiPickerTab('emoji');
+                    setShowEmojiPicker((prev) => !prev);
+                  }}
+                  onSendMessage={handleComposerSend}
+                  hasContextCall={Boolean(contextCallProjectId(contextProject) || contextRef?.id)}
+                  replyingToMessage={replyingToMessage}
+                  replyToLabel={replyToLabel}
+                  selectedChannelId={selectedChannelId}
+                  sendingMessage={sendingMessage}
+                  t={t}
+                />
+              ) : (
+                <UnifiedChatComposer
+                richToolbar
+                flatInner
+                showSendButton={false}
+                mentionItems={normalizedContacts.slice(0, 30).map((contact) => ({
+                  value: contact.id,
+                  label: contact.name,
+                  username: contact.username || '',
+                  avatar: contact.avatar,
+                }))}
+                wrapperClassName={workspace.composerWrap}
+                topSlot={
+                  replyingToMessage ? (
+                    <div
+                      className={`mb-2 flex items-center justify-between gap-2 rounded-t-xl border px-3 py-2 text-sm ${
+                        isDarkMode
+                          ? 'border-border/80 bg-[#1a1d21]'
+                          : 'border-slate-200 bg-slate-50'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <span className={isDarkMode ? 'text-gray-500' : 'text-slate-500'}>
+                          {t('orgPanel.replying')}
+                        </span>
+                        <span
+                          className={`font-semibold ${isDarkMode ? 'text-[#a29bfe]' : 'text-cyan-700'}`}
+                        >
+                          {replyToLabel(replyingToMessage)}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onClearReply?.()}
+                        className={`rounded-full p-1.5 transition ${
+                          isDarkMode
+                            ? 'text-muted-foreground hover:bg-white/10 hover:text-white'
+                            : 'text-slate-500 hover:bg-slate-200 hover:text-slate-900'
+                        }`}
+                        aria-label={t('orgPanel.cancelReplyAria')}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : null
+                }
+                value={messageInput}
+                onChange={onChangeMessageInput}
+                onSend={handleComposerSend}
+                placeholder={lineChatComposerPlaceholder}
+                disabled={!selectedChannelId || sendingMessage || channelReadOnly}
+                sendDisabled={
+                  (!messageInput.trim() &&
+                    !contextCallProjectId(contextProject) &&
+                    !contextRef?.id) ||
+                  channelReadOnly
+                }
+                plusItems={
+                  canWriteInChannel
+                    ? [
+                        {
+                          key: 'context-call',
+                          icon: '📋',
+                          label: t('orgPanel.menuContextCall'),
+                          onClick: openContextPicker,
+                        },
+                        {
+                          key: 'upload-file',
+                          icon: '📁',
+                          label: t('orgPanel.menuUploadFile'),
+                          onClick: () => fileInputRef.current?.click(),
+                        },
+                        {
+                          key: 'upload-image',
+                          icon: '🖼️',
+                          label: t('orgPanel.menuUploadImage'),
+                          onClick: () => imageInputRef.current?.click(),
+                        },
+                        {
+                          key: 'topic',
+                          icon: '🧵',
+                          label: t('orgPanel.menuTopic'),
+                          onClick: () => onSendChatOption?.({ kind: 'topic' }),
+                        },
+                        {
+                          key: 'poll',
+                          icon: '🗳️',
+                          label: t('orgPanel.menuPoll'),
+                          onClick: handleCreatePoll,
+                        },
+                        {
+                          key: 'contact',
+                          icon: '👤',
+                          label: t('orgPanel.menuContact'),
+                          onClick: handleCreateContactCard,
+                        },
+                      ]
+                    : []
+                }
+                actionItems={[
+                  {
+                    key: 'emoji',
+                    title: 'Emoji',
+                    content: '🙂',
+                    className: 'w-8 text-lg',
+                    onClick: () => {
+                      setEmojiPickerTab('emoji');
+                      setShowEmojiPicker((prev) => !prev);
+                    },
+                  },
+                ]}
+                />
+              )}
+
+            </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <ComposerEmojiPicker
+        open={isChatLikeTab && showEmojiPicker}
+        onClose={() => setShowEmojiPicker(false)}
+        onPick={appendEmoji}
+        onPickMedia={handlePickChatMedia}
+        mediaLoading={mediaPickerSending || sendingMessage}
+        activeTab={emojiPickerTab}
+        onTabChange={setEmojiPickerTab}
+        search={emojiSearch}
+        onSearchChange={setEmojiSearch}
+      />
+
+      <ChannelMessageMoreMenu
+        open={moreMenu.open}
+        anchorRect={moreMenu.anchorRect}
+        onClose={() => setMoreMenu({ open: false, anchorRect: null, message: null })}
+        isMine={
+          moreMenu.message
+            ? String(moreMenu.message?.senderId?._id || moreMenu.message?.senderId || '') ===
+              String(currentUserId || '')
+            : false
+        }
+        canCopy={canShowCopyTextInMenu(moreMenu.message)}
+        onCopyText={() => {
+          const t = plainTextForMessage(moreMenu.message);
+          if (t) navigator.clipboard.writeText(t);
+        }}
+        onReply={() => moreMenu.message && onReplyToMessage?.(moreMenu.message)}
+        onForward={() => moreMenu.message && onForwardMessage?.(moreMenu.message)}
+        onEdit={
+          moreMenu.message && canEditOrgMessage(moreMenu.message)
+            ? () => beginEditMessage(moreMenu.message)
+            : undefined
+        }
+        onDelete={() => {
+          const m = moreMenu.message;
+          if (m) onDeleteMessage?.(m._id || m.id);
+        }}
+      />
+
+      <Modal
+        isOpen={orgVoiceSettingsOpen}
+        onClose={() => setOrgVoiceSettingsOpen(false)}
+        title={t('voiceRoom.voiceSettingsTitle')}
+        size="md"
+      >
+        <p className={`mb-4 text-sm ${isDarkMode ? 'text-muted-foreground' : 'text-slate-600'}`}>
+          {t('voiceRoom.voiceSettingsDesc')}
+        </p>
+        <VoiceAudioSettingsPanel
+          t={t}
+          isDarkMode={isDarkMode}
+          micId={orgMicId}
+          speakerId={orgSpeakerId}
+          micVolume={orgMicVolume}
+          speakerVolume={orgSpeakerVolume}
+          onMicIdChange={setOrgMicId}
+          onSpeakerIdChange={setOrgSpeakerId}
+          onMicVolumeChange={setOrgMicVolume}
+          onSpeakerVolumeChange={setOrgSpeakerVolume}
+          active={orgVoiceSettingsOpen}
+          voiceSessionActive={voiceConnConnected}
+        />
+      </Modal>
+
+      <Modal
+        isOpen={taskCreateOpen}
+        onClose={() => setTaskCreateOpen(false)}
+        title={t('taskBoard.createTaskTitle')}
+        size="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <div className="mb-1 text-sm font-semibold text-white">{t('taskBoard.taskName')}</div>
+            <input
+              value={taskForm.title}
+              maxLength={180}
+              onChange={(event) => setTaskForm((prev) => ({ ...prev, title: event.target.value }))}
+              placeholder={t('taskBoard.taskNamePh')}
+              className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder:text-gray-500"
+            />
+          </div>
+          <div>
+            <div className="mb-1 text-sm font-semibold text-white">{t('taskBoard.taskDesc')}</div>
+            <textarea
+              value={taskForm.description}
+              rows={3}
+              onChange={(event) => setTaskForm((prev) => ({ ...prev, description: event.target.value }))}
+              placeholder={t('taskBoard.taskDescPh')}
+              className="w-full resize-none rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder:text-gray-500"
+            />
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-sm font-semibold text-white">{t('taskBoard.dueDate')}</span>
+              <input
+                type="date"
+                value={taskForm.dueDate}
+                onChange={(event) => setTaskForm((prev) => ({ ...prev, dueDate: event.target.value }))}
+                className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-sm text-white outline-none"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-sm font-semibold text-white">{t('taskBoard.priority')}</span>
+              <select
+                value={taskForm.priority}
+                onChange={(event) => setTaskForm((prev) => ({ ...prev, priority: event.target.value }))}
+                className="w-full rounded-xl border border-white/15 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none"
+              >
+                <option value="low">{t('tasks.priorityLow')}</option>
+                <option value="medium">{t('tasks.priorityMedium')}</option>
+                <option value="high">{t('tasks.priorityHigh')}</option>
+                <option value="urgent">{t('tasks.priorityUrgent')}</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-sm font-semibold text-white">{t('taskBoard.department')}</span>
+              <select
+                value={taskForm.departmentId}
+                onChange={(event) => setTaskForm((prev) => ({ ...prev, departmentId: event.target.value }))}
+                className="w-full rounded-xl border border-white/15 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none"
+              >
+                <option value="">{t('taskBoard.deptGeneral')}</option>
+                {departments.map((department) => (
+                  <option key={department._id} value={String(department._id)}>
+                    {displayDepartmentName(department.name, locale)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-sm font-semibold text-white">{t('taskBoard.assignTo')}</span>
+              <select
+                value={taskForm.assigneeId}
+                onChange={(event) => setTaskForm((prev) => ({ ...prev, assigneeId: event.target.value }))}
+                className="w-full rounded-xl border border-white/15 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none"
+              >
+                <option value="">{t('taskBoard.unassigned')}</option>
+                {assignableContactOptions.map((contact) => (
+                  <option key={contact.id} value={String(contact.id)}>
+                    {contact.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setTaskCreateOpen(false)}
+              className="rounded-xl border border-white/15 px-4 py-2 text-sm text-white transition hover:bg-white/10"
+            >
+              Hủy
+            </button>
+            <button
+              type="button"
+              onClick={submitWorkspaceTask}
+              disabled={!taskForm.title.trim() || creatingTask}
+              className="rounded-xl bg-[#5865F2] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
+            >
+              {creatingTask ? t('taskBoard.creatingTask') : t('taskBoard.createTask')}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={isPollModalOpen}
+        onClose={() => setIsPollModalOpen(false)}
+        title={t('orgPanel.pollModalTitle')}
+        size="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <div className="mb-1 text-sm font-semibold text-white">{t('orgPanel.pollQuestion')}</div>
+            <input
+              value={pollQuestion}
+              maxLength={300}
+              onChange={(event) => setPollQuestion(event.target.value)}
+              placeholder={t('orgPanel.pollQuestionPh')}
+              className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder:text-gray-500"
+            />
+            <div className="mt-1 text-right text-xs text-muted-foreground">{pollQuestion.length} / 300</div>
+          </div>
+
+          <div>
+            <div className="mb-1 text-sm font-semibold text-white">{t('orgPanel.pollAnswers')}</div>
+            <div className="space-y-2">
+              {pollOptions.map((option, index) => (
+                <div key={`poll-option-${index}`} className="flex items-center gap-2">
+                  <input
+                    value={option}
+                    onChange={(event) => updatePollOption(index, event.target.value)}
+                    placeholder={t('orgPanel.pollAnswerPh')}
+                    className="flex-1 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-gray-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removePollOption(index)}
+                    disabled={pollOptions.length <= 2}
+                    className="rounded-lg border border-white/15 px-2 py-1 text-sm text-white transition hover:bg-white/10 disabled:opacity-40"
+                  >
+                    🗑
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={addPollOption}
+                className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
+              >
+                {t('orgPanel.pollAddAnswer')}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-1 text-sm font-semibold text-white">{t('orgPanel.pollDuration')}</div>
+            <select
+              value={pollDuration}
+              onChange={(event) => setPollDuration(event.target.value)}
+              className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+            >
+              <option value="1h">{t('orgPanel.dur1h')}</option>
+              <option value="6h">{t('orgPanel.dur6h')}</option>
+              <option value="24h">{t('orgPanel.dur24h')}</option>
+              <option value="3d">{t('orgPanel.dur3d')}</option>
+              <option value="7d">{t('orgPanel.dur7d')}</option>
+            </select>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-gray-200">
+            <input
+              type="checkbox"
+              checked={allowMultiAnswer}
+              onChange={(event) => setAllowMultiAnswer(event.target.checked)}
+              className="h-4 w-4 rounded border-white/20 bg-white/5"
+            />
+            {t('orgPanel.pollMultiAnswer')}
+          </label>
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setIsPollModalOpen(false)}
+              className="rounded-xl border border-white/15 px-4 py-2 text-sm text-white transition hover:bg-white/10"
+            >
+              {t('nav.cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmitPoll}
+              disabled={!pollQuestion.trim() || pollOptions.map((item) => item.trim()).filter(Boolean).length < 2}
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+            >
+              {t('orgPanel.pollPost')}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={isContactModalOpen}
+        onClose={() => setIsContactModalOpen(false)}
+        title={t('orgPanel.contactModalTitle')}
+        size="lg"
+      >
+        <div className="space-y-3">
+          {/* Toggle between list and manual entry */}
+          <div className="flex gap-2 border-b border-white/10 pb-3">
+            <button
+              type="button"
+              onClick={() => {
+                setUseManualContactEntry(false);
+                setSelectedContactId('');
+              }}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                !useManualContactEntry
+                  ? 'bg-blue-600 text-white'
+                  : 'border border-white/15 text-gray-300 hover:bg-white/10'
+              }`}
+            >
+              Chọn từ danh sách
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setUseManualContactEntry(true);
+                setContactSearch('');
+                setContactCategory('all');
+              }}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                useManualContactEntry
+                  ? 'bg-blue-600 text-white'
+                  : 'border border-white/15 text-gray-300 hover:bg-white/10'
+              }`}
+            >
+              Nhập thủ công
+            </button>
+          </div>
+
+          {!useManualContactEntry ? (
+            <>
+              <input
+                value={contactSearch}
+                onChange={(event) => setContactSearch(event.target.value)}
+                placeholder={t('orgPanel.contactSearchPh')}
+                className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder:text-gray-500"
+              />
+
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { key: 'all', label: t('orgPanel.catAll') },
+                  { key: 'friend', label: t('orgPanel.catFriend') },
+                  { key: 'work', label: t('orgPanel.catWork') },
+                  { key: 'family', label: t('orgPanel.catFamily') },
+                ].map((category) => (
+                  <button
+                    key={category.key}
+                    type="button"
+                    onClick={() => setContactCategory(category.key)}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                      contactCategory === category.key
+                        ? 'bg-blue-500 text-white'
+                        : 'border border-white/15 text-gray-300 hover:bg-white/10'
+                    }`}
+                  >
+                    {category.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="max-h-80 space-y-2 overflow-y-auto rounded-xl border border-white/10 bg-white/[0.02] p-2">
+                {loadingChatContacts && (
+                  <div className="rounded-lg bg-white/5 px-3 py-2 text-sm text-gray-300">{t('orgPanel.loadingContacts')}</div>
+                )}
+                {!loadingChatContacts && filteredContacts.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-white/15 px-3 py-2 text-sm text-muted-foreground">
+                    {t('orgPanel.contactNoMatch')}
+                  </div>
+                )}
+                {!loadingChatContacts &&
+                  filteredContacts.map((contact) => (
+                    <label
+                      key={contact.id}
+                      className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 transition hover:bg-white/5"
+                    >
+                      <input
+                        type="radio"
+                        name="contact-card"
+                        checked={selectedContactId === contact.id}
+                        onChange={() => setSelectedContactId(contact.id)}
+                        className="h-4 w-4"
+                      />
+                      <UserAvatar name={contact.name || 'U'} size="sm" />
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-white">{contact.name}</div>
+                        <div className="truncate text-xs text-muted-foreground">{contact.phone || contact.email || '-'}</div>
+                      </div>
+                    </label>
+                  ))}
+              </div>
+            </>
+          ) : (
+            <div className="space-y-2">
+              <div>
+                <label className="block text-xs font-semibold text-gray-300 mb-1">{t('taskBoard.contactName')}</label>
+                <input
+                  type="text"
+                  value={manualContactFullName}
+                  onChange={(e) => setManualContactFullName(e.target.value)}
+                  placeholder={t('taskBoard.contactNamePh')}
+                  className="w-full rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-gray-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-300 mb-1">{t('taskBoard.contactPhone')}</label>
+                <input
+                  type="text"
+                  value={manualContactPhone}
+                  onChange={(e) => setManualContactPhone(e.target.value)}
+                  placeholder={t('taskBoard.contactPhonePh')}
+                  className="w-full rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-gray-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-300 mb-1">{t('taskBoard.contactEmail')}</label>
+                <input
+                  type="text"
+                  value={manualContactEmail}
+                  onChange={(e) => setManualContactEmail(e.target.value)}
+                  placeholder={t('taskBoard.contactEmailPh')}
+                  className="w-full rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-gray-500"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setIsContactModalOpen(false)}
+              className="rounded-xl border border-white/15 px-4 py-2 text-sm text-white transition hover:bg-white/10"
+            >
+              {t('nav.cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmitContact}
+              disabled={useManualContactEntry ? !manualContactFullName.trim() : !selectedContactId}
+              className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+            >
+              {t('orgPanel.menuContact')}
+            </button>
+          </div>
+        </div>
+      </Modal>
+      <ChatContextPreview
+        target={contextPreviewTarget}
+        t={t}
+        onClose={() => setContextPreviewTarget(null)}
+        onOpenWork={(payload, target) => {
+          void openChatContextDetail(payload, target, 'detail');
+        }}
+        onOpenDiscussion={(payload, target) => {
+          void openChatContextDetail(payload, target, 'activity');
+        }}
+      />
+      {chatWorkDetail?.workItem ? (
+        <WorkItemDetail
+          open
+          chrome="modal"
+          workItem={chatWorkDetail.workItem}
+          projectId={chatWorkDetail.projectId}
+          projectCode={chatWorkDetail.projectCode}
+          boardId={chatWorkDetail.boardId}
+          apiCtx={taskBoardApiCtx}
+          isDarkMode={isDarkMode}
+          locale={locale}
+          initialPanel={chatWorkDetail.initialPanel || 'detail'}
+          onClose={() => setChatWorkDetail(null)}
+        />
+      ) : null}
+      <ProjectHubChangeRequestDetailDrawer
+        open={Boolean(chatCrDetail?.crId)}
+        projectId={chatCrDetail?.projectId || ''}
+        crId={chatCrDetail?.crId || ''}
+        locale={locale}
+        initialTab={chatCrDetail?.initialTab || 'overview'}
+        onClose={() => setChatCrDetail(null)}
+      />
+    </>
+  );
+};
+
+export default OrganizationMainPanel;

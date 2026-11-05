@@ -1,228 +1,1056 @@
-import { useState } from 'react';
-import NavigationSidebar from '../../components/Layout/NavigationSidebar';
-import { GlassCard, Toast } from '../../components/Shared';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { ConfirmDialog } from '../../components/Shared';
+import { useSocket } from '../../context/SocketContext';
+import { useWorkspace } from '../../context/WorkspaceContext';
+import { useAppStrings } from '../../locales/appStrings';
+import api from '../../services/api';
+import NotificationsFigmaView from '../../components/Notifications/NotificationsFigmaView';
+import { useNotificationInboxShortcuts } from '../../hooks/useNotificationInboxShortcuts';
+import {
+  NOTIFICATIONS_REFRESH_EVENT,
+  markFriendNotificationsResolved,
+  markVoiceRoomJoinRequestNotificationsResolved,
+} from '../../services/notificationSync';
+import { useFriendPending, useNotificationsInfinite, useOrganizationsMy } from '../../hooks/queries';
+import { useOrgShell } from '../../hooks/queries/useOrgShell';
+import { queryKeys } from '../../lib/queryKeys';
+import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
+import { findOrgBySlug, orgRecordId } from '../../utils/orgListUtils';
+import {
+  buildCollaborateDocumentsPath,
+  buildCollaborateTasksPath,
+  buildCommunicateChannelsPath,
+  buildProjectsPickerPath,
+} from '../../utils/suitePathUtils';
+import {
+  isVoiceRoomInviteNotification,
+  resolveVoiceRoomInvitePath,
+  resolveNotificationAppPath,
+} from '../../utils/notificationNavigation';
+import { isP0Notification, mapNotificationUiType } from '../../utils/notificationP0Policy';
 
-function NotificationsPage() {
-  const [filter, setFilter] = useState('all');
-  const [notifications, setNotifications] = useState([
-    { id: 1, type: 'task', icon: '✅', title: 'Task được gán', message: 'Sarah Chen đã gán bạn vào task "Thiết kế Landing Page"', time: '5 phút trước', read: false, priority: 'high', action: 'Xem Task' },
-    { id: 2, type: 'mention', icon: '💬', title: '@mentions trong chat', message: 'Mike Ross đã nhắc đến bạn trong #general', time: '15 phút trước', read: false, priority: 'medium', action: 'Xem Chat' },
-    { id: 3, type: 'deadline', icon: '⏰', title: 'Deadline sắp đến', message: 'Task "Review Pull Request" sẽ đến hạn trong 2 giờ', time: '30 phút trước', read: false, priority: 'high', action: 'Cập Nhật' },
-    { id: 4, type: 'meeting', icon: '📅', title: 'Meeting sắp diễn ra', message: 'Họp nhóm hàng ngày bắt đầu lúc 10:00 AM', time: '1 giờ trước', read: true, priority: 'medium', action: 'Tham Gia' },
-    { id: 5, type: 'file', icon: '📁', title: 'File mới được chia sẻ', message: 'Emma Wilson đã upload "BaoCaoQ4.pdf" vào Documents', time: '2 giờ trước', read: true, priority: 'low', action: 'Xem File' },
-    { id: 6, type: 'friend', icon: '👥', title: 'Yêu cầu kết bạn', message: 'Anna Lee đã gửi lời mời kết bạn', time: '3 giờ trước', read: false, priority: 'low', action: 'Xem Profile' },
-    { id: 7, type: 'task', icon: '✅', title: 'Task hoàn thành', message: 'David Kim đã hoàn thành task "Setup CI/CD Pipeline"', time: '5 giờ trước', read: true, priority: 'low', action: 'Xem Chi Tiết' },
-    { id: 8, type: 'system', icon: '🔔', title: 'Cập nhật hệ thống', message: 'VoiceHub đã được cập nhật lên phiên bản 2.1.0', time: '1 ngày trước', read: true, priority: 'low', action: 'Xem Changelog' }
+function getNotificationTimeGroup(createdAt) {
+  if (!createdAt) return 'earlier';
+  const target = new Date(createdAt);
+  if (!Number.isFinite(target.getTime())) return 'earlier';
+  const startOf = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const t0 = startOf(target);
+  const now = new Date();
+  const today0 = startOf(now);
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (t0 === today0) return 'today';
+  if (t0 === startOf(yesterday)) return 'yesterday';
+  return 'earlier';
+}
+
+function parseNotificationDataField(raw) {
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  if (typeof raw !== 'string') return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function rawNotificationHasOrgScope(item) {
+  const data = parseNotificationDataField(item?.data);
+  const orgId = data?.organizationId || data?.workspaceId || '';
+  return Boolean(String(orgId).trim());
+}
+
+const ORG_NOTIFICATIONS_PATH = '/notifications/organization';
+const COLLABORATE_NOTIFICATIONS_PATH = '/app/collaborate/notifications';
+
+function unwrapApiBody(res) {
+  const body = res?.data;
+  if (body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'data')) {
+    return body.data;
+  }
+  return body ?? null;
+}
+
+function resolveNotificationOrgId(notif, { organizations = [], organizationIdFilter = '' } = {}) {
+  const data = notif?.data && typeof notif.data === 'object' ? notif.data : {};
+  const direct = String(
+    notif?.organizationId ||
+      data?.organizationId ||
+      data?.workspaceId ||
+      ''
+  ).trim();
+  if (direct) return direct;
+
+  const slug = String(notif?.organizationSlug || data?.organizationSlug || data?.workspaceSlug || '').trim();
+  if (slug) {
+    const matched = findOrgBySlug(organizations, slug);
+    const id = orgRecordId(matched);
+    if (id) return String(id);
+  }
+
+  return String(organizationIdFilter || '').trim();
+}
+
+function getNotifActionKind(notif) {
+  if (!notif || notif.read || notif.data?.resolved) return 'none';
+  if (notif.data?.kind === 'voice_room_join_request') return 'voice_join';
+  if (isVoiceRoomInviteNotification(notif)) return 'voice_invite';
+  if (notif.rawType === 'friend_request') return 'friend_request';
+  return 'navigate';
+}
+
+/**
+ * Inbox thông báo — một UI (NotificationsFigmaView).
+ * @param {object} [props]
+ * @param {boolean} [props.orgScope] — scope organization (route company hoặc embed workspace)
+ * @param {string} [props.organizationIdOverride] — orgId từ workspace panel (ưu tiên hơn URL)
+ * @param {boolean} [props.fetchEnabled=true] — tắt fetch khi panel chưa sẵn sàng
+ * @param {string} [props.pageTitle] — title header (mặc định i18n)
+ * @param {boolean} [props.embedded=false] — nhúng trong OrganizationMainPanel
+ */
+function NotificationsPage({
+  orgScope = false,
+  organizationIdOverride = '',
+  fetchEnabled = true,
+  pageTitle = '',
+  embedded = false,
+} = {}) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const { t } = useAppStrings();
+  const { activeWorkspace } = useWorkspace();
+  const isOrgNotificationsPage =
+    orgScope ||
+    embedded ||
+    location.pathname.startsWith(COLLABORATE_NOTIFICATIONS_PATH) ||
+    location.pathname.startsWith(ORG_NOTIFICATIONS_PATH) ||
+    location.pathname.startsWith('/app/company/notifications');
+  const notificationScope = isOrgNotificationsPage ? 'organization' : 'personal';
+  const organizationIdFilter = useMemo(() => {
+    const fromProp = String(organizationIdOverride || '').trim();
+    if (fromProp) return fromProp;
+    const fromQuery = String(searchParams.get('organizationId') || searchParams.get('orgId') || '').trim();
+    if (fromQuery) return fromQuery;
+    if (!isOrgNotificationsPage) return '';
+    return (
+      activeWorkspace?._id ||
+      activeWorkspace?.id ||
+      activeWorkspace?.organizationId ||
+      ''
+    );
+  }, [
+    organizationIdOverride,
+    searchParams,
+    isOrgNotificationsPage,
+    activeWorkspace?._id,
+    activeWorkspace?.id,
+    activeWorkspace?.organizationId,
   ]);
-  const [toast, setToast] = useState(null);
 
-  const showToast = (message, type = "success") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+  const orgsQuery = useOrganizationsMy();
+
+  /** URL cũ ?scope=organization → trang org riêng */
+  useEffect(() => {
+    const legacyScope = String(searchParams.get('scope') || '').trim().toLowerCase();
+    if (location.pathname !== '/notifications' || legacyScope !== 'organization') return;
+    const params = new URLSearchParams(searchParams);
+    params.delete('scope');
+    const qs = params.toString();
+    navigate(`${COLLABORATE_NOTIFICATIONS_PATH}${qs ? `?${qs}` : ''}`, { replace: true });
+  }, [location.pathname, navigate, searchParams]);
+
+  const [primaryFilter, setPrimaryFilter] = useState('needsAction');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [selectedId, setSelectedId] = useState(null);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [checkedIds, setCheckedIds] = useState(() => new Set());
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  const [pendingDeleteIds, setPendingDeleteIds] = useState(null);
+  const [notifSearch, setNotifSearch] = useState('');
+  const [notifications, setNotifications] = useState([]);
+  const [actingNotifId, setActingNotifId] = useState('');
+  const [markingAll, setMarkingAll] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [markingReadId, setMarkingReadId] = useState('');
+  const [bulkMarking, setBulkMarking] = useState(false);
+  const { on, off } = useSocket();
+  const queryClient = useQueryClient();
+
+  const notifInfiniteQuery = useNotificationsInfinite({
+    scope: notificationScope,
+    organizationId: organizationIdFilter,
+    enabled: fetchEnabled && (!isOrgNotificationsPage || Boolean(organizationIdFilter)),
+  });
+
+  useFriendPending({
+    enabled: !isOrgNotificationsPage,
+  });
+
+  const { data: orgShellForBadge } = useOrgShell(organizationIdFilter, {
+    enabled: isOrgNotificationsPage && Boolean(organizationIdFilter) && fetchEnabled,
+  });
+
+  useEffect(() => {
+    if (!isOrgNotificationsPage || !organizationIdFilter || !orgShellForBadge) return;
+    const unread = Number(orgShellForBadge?.badges?.notificationsUnreadOrg);
+    if (!Number.isFinite(unread)) return;
+    queryClient.setQueryData(
+      queryKeys.notifications.badge('organization', organizationIdFilter),
+      { unreadCount: Math.max(0, unread) },
+      { updatedAt: Date.now() }
+    );
+  }, [isOrgNotificationsPage, organizationIdFilter, orgShellForBadge, queryClient]);
+
+  const notificationsLoading = notifInfiniteQuery.isLoading;
+
+  const getRelativeTime = (input) => {
+    if (!input) return t('time.justNow');
+    const target = new Date(input).getTime();
+    if (!Number.isFinite(target)) return t('time.justNow');
+
+    const diffMinutes = Math.max(1, Math.floor((Date.now() - target) / 60000));
+    if (diffMinutes < 60) return t('time.minutesAgo', { n: diffMinutes });
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return t('time.hoursAgo', { n: diffHours });
+    const diffDays = Math.floor(diffHours / 24);
+    return t('time.daysAgo', { n: diffDays });
   };
 
-  const handleMarkAsRead = (id) => {
-    setNotifications(notifications.map(n => 
-      n.id === id ? { ...n, read: true } : n
-    ));
-    showToast("Đã đánh dấu đã đọc", "success");
+  const parseNotificationData = (item) => parseNotificationDataField(item?.data);
+
+  const iconByType = {
+    task: '✅',
+    task_assigned: '✅',
+    task_completed: '✅',
+    mention: '💬',
+    message: '💬',
+    deadline: '⏰',
+    meeting: '📅',
+    file: '📁',
+    document: '📁',
+    friend: '👥',
+    system: '🔔',
+    org_join_application: '🏢',
   };
 
-  const handleMarkAllAsRead = () => {
-    setNotifications(notifications.map(n => ({ ...n, read: true })));
-    showToast("Đã đánh dấu tất cả đã đọc", "success");
+  const getActionLabel = (rawType, mappedType) => {
+    const r = String(rawType || '');
+    if (r === 'task' || r === 'task_assigned' || r === 'task_completed') return t('notifications.actionTask');
+    if (r === 'mention' || r === 'message') return t('notifications.actionChat');
+    if (r === 'deadline') return t('notifications.actionUpdate');
+    if (r === 'meeting') return t('notifications.actionJoin');
+    if (r === 'file' || r === 'document') return t('notifications.actionFile');
+    if (r === 'friend' || r === 'friend_request' || r === 'friend_accepted') return t('notifications.actionFriend');
+    if (r === 'org_join_application') return t('notifications.actionJoinApp');
+    if (r === 'system') {
+      // task due reminders use type=system + data.kind
+      return mappedType === 'deadline' ? t('notifications.actionUpdate') : t('notifications.actionDetail');
+    }
+    const m = String(mappedType || '');
+    if (m === 'task' || m === 'deadline') return t('notifications.actionTask');
+    if (m === 'mention') return t('notifications.actionChat');
+    if (m === 'friend') return t('notifications.actionFriend');
+    return t('notifications.actionDetail');
   };
 
-  const handleDeleteNotification = (id) => {
-    setNotifications(notifications.filter(n => n.id !== id));
-    showToast("Đã xóa thông báo", "success");
+  const toViewNotification = (item) => {
+    const data = parseNotificationData(item);
+    const id = item?._id || item?.id;
+    const rawType = String(item?.type || 'system');
+    const kind = String(data?.kind || '').trim();
+    const type = mapNotificationUiType(rawType, kind);
+    const orgLabel =
+      data?.workspaceName ||
+      data?.organizationName ||
+      data?.companyName ||
+      item?.workspaceName ||
+      item?.organizationName ||
+      item?.companyName ||
+      '';
+    const orgSlug =
+      data?.workspaceSlug ||
+      data?.organizationSlug ||
+      item?.workspaceSlug ||
+      item?.organizationSlug ||
+      '';
+    const orgId =
+      data?.workspaceId ||
+      data?.organizationId ||
+      item?.workspaceId ||
+      item?.organizationId ||
+      organizationIdFilter ||
+      '';
+    const actionUrl = String(item?.actionUrl || '').trim();
+    return {
+      id,
+      type,
+      rawType,
+      icon: iconByType[type] || iconByType[rawType] || '🔔',
+      title: item?.title || t('notifications.defaultTitle'),
+      message: item?.content || item?.message || '',
+      time: getRelativeTime(item?.createdAt),
+      read: Boolean(item?.isRead),
+      priority: data?.priority || 'low',
+      action: getActionLabel(rawType, type),
+      actionUrl,
+      data,
+      organizationLabel: orgLabel,
+      organizationName: orgLabel,
+      organizationSlug: orgSlug,
+      organizationId: orgId,
+      createdAt: item?.createdAt || null,
+      timeGroup: getNotificationTimeGroup(item?.createdAt),
+      /** Chuông + badge đỏ giống sidebar (chủ yếu lời mời kết bạn) */
+      useBellCard: rawType === 'friend_request' || type === 'friend',
+    };
   };
 
-  const filteredNotifications = filter === 'all' 
-    ? notifications 
-    : filter === 'unread' 
-      ? notifications.filter(n => !n.read)
-      : notifications.filter(n => n.type === filter);
+  useEffect(() => {
+    const pages = notifInfiniteQuery.data?.pages || [];
+    const list = pages.flatMap((p) => (Array.isArray(p?.notifications) ? p.notifications : []));
+    setNotifications(list.map(toViewNotification));
+  }, [notifInfiniteQuery.data]);
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  useEffect(() => {
+    if (notifInfiniteQuery.isError) {
+      const err = notifInfiniteQuery.error;
+      const msg = resolveApiErrorMessage(err, { t, fallback: t('notifications.loadFail') });
+      toast.error(msg);
+    }
+  }, [notifInfiniteQuery.isError, notifInfiniteQuery.error, t]);
+
+  const reloadNotifications = useCallback(() => {
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.notifications.infinite(notificationScope, organizationIdFilter),
+    });
+  }, [queryClient, notificationScope, organizationIdFilter]);
+
+  /** Đồng bộ sau accept/reject kết bạn (cùng tab hoặc sau markFriendNotificationsResolved) */
+  useEffect(() => {
+    const onRefresh = () => reloadNotifications();
+    window.addEventListener(NOTIFICATIONS_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(NOTIFICATIONS_REFRESH_EVENT, onRefresh);
+  }, [reloadNotifications]);
+
+  useEffect(() => {
+    if (!on || !off) return;
+
+    const upsertNotification = (raw) => {
+      const inOrg = rawNotificationHasOrgScope(raw);
+      if (notificationScope === 'organization' && !inOrg) return;
+      if (notificationScope === 'personal' && inOrg) return;
+      if (notificationScope === 'organization' && organizationIdFilter) {
+        const data = parseNotificationDataField(raw?.data);
+        const oid = String(data?.organizationId || data?.workspaceId || '').trim();
+        if (oid && oid !== organizationIdFilter) return;
+      }
+      const item = toViewNotification(raw);
+      setNotifications((prev) => {
+        if (!item?.id) return prev;
+        const exists = prev.some((n) => n.id === item.id);
+        if (exists) {
+          return prev.map((n) => (n.id === item.id ? { ...n, ...item } : n));
+        }
+        return [item, ...prev];
+      });
+    };
+
+    const handleNotificationNew = (payload) => {
+      if (payload?.notification) {
+        upsertNotification(payload.notification);
+      }
+    };
+
+    const handleNotificationBulk = (payload) => {
+      const list = Array.isArray(payload?.notifications) ? payload.notifications : [];
+      list.forEach((item) => upsertNotification(item));
+    };
+
+    const handleRead = (payload) => {
+      const targetId = payload?.notificationId;
+      if (!targetId) return;
+      setNotifications((prev) => prev.map((n) => (String(n.id) === String(targetId) ? { ...n, read: true } : n)));
+    };
+
+    const handleReadAll = (payload) => {
+      const eventScope = String(payload?.scope || '').trim().toLowerCase();
+      const eventOrg = String(payload?.organizationId || '').trim();
+      if (eventScope === 'organization' || eventScope === 'personal') {
+        if (eventScope !== notificationScope) return;
+        if (
+          eventScope === 'organization' &&
+          organizationIdFilter &&
+          eventOrg &&
+          eventOrg !== organizationIdFilter
+        ) {
+          return;
+        }
+      }
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    };
+
+    const handleReadMany = (payload) => {
+      const ids = new Set((payload?.notificationIds || []).map(String));
+      if (ids.size === 0) return;
+      setNotifications((prev) =>
+        prev.map((n) =>
+          ids.has(String(n.id))
+            ? { ...n, read: true, data: { ...(n.data || {}), resolved: true } }
+            : n
+        )
+      );
+    };
+
+    const handleDeleted = (payload) => {
+      const targetId = payload?.notificationId;
+      if (!targetId) return;
+      setNotifications((prev) => prev.filter((n) => String(n.id) !== String(targetId)));
+    };
+
+    const handleDeletedReadAll = (payload) => {
+      const eventScope = String(payload?.scope || '').trim().toLowerCase();
+      const eventOrg = String(payload?.organizationId || '').trim();
+      if (eventScope === 'organization' || eventScope === 'personal') {
+        if (eventScope !== notificationScope) return;
+        if (
+          eventScope === 'organization' &&
+          organizationIdFilter &&
+          eventOrg &&
+          eventOrg !== organizationIdFilter
+        ) {
+          return;
+        }
+      }
+      setNotifications((prev) => prev.filter((n) => !n.read));
+    };
+
+    on('notification:new', handleNotificationNew);
+    on('notification:bulk_new', handleNotificationBulk);
+    on('notification:read', handleRead);
+    on('notification:read_many', handleReadMany);
+    on('notification:read_all', handleReadAll);
+    on('notification:deleted', handleDeleted);
+    on('notification:deleted_read_all', handleDeletedReadAll);
+
+    return () => {
+      off('notification:new', handleNotificationNew);
+      off('notification:bulk_new', handleNotificationBulk);
+      off('notification:read', handleRead);
+      off('notification:read_many', handleReadMany);
+      off('notification:read_all', handleReadAll);
+      off('notification:deleted', handleDeleted);
+      off('notification:deleted_read_all', handleDeletedReadAll);
+    };
+  }, [on, off, notificationScope, organizationIdFilter]);
+
+  const markNotifResolvedLocal = useCallback((notifId, patchData = {}) => {
+    if (!notifId) return;
+    setNotifications((prev) =>
+      prev.map((n) =>
+        String(n.id) === String(notifId)
+          ? {
+              ...n,
+              read: true,
+              data: { ...(n.data || {}), resolved: true, ...patchData },
+            }
+          : n
+      )
+    );
+  }, []);
+
+  const resolveVoiceJoinRequestId = async (notif) => {
+    const roomId = String(notif?.data?.roomId || '').trim();
+    let requestId = String(notif?.data?.requestId || '').trim();
+    if (requestId || !roomId) return { roomId, requestId };
+    const requestUserId = String(notif?.data?.requestUserId || '').trim();
+    try {
+      const res = await api.get(`/voice/rooms/${encodeURIComponent(roomId)}/join-requests`, {
+        skipGlobalErrorHandling: true,
+      });
+      const rows = unwrapApiBody(res);
+      const list = Array.isArray(rows) ? rows : [];
+      const match = requestUserId
+        ? list.find((r) => String(r.userId) === requestUserId)
+        : list[0];
+      requestId = match?.id ? String(match.id) : '';
+    } catch {
+      requestId = '';
+    }
+    return { roomId, requestId };
+  };
+
+  const handleApproveVoiceJoin = async (notif) => {
+    if (!notif?.id || actingNotifId) return;
+    setActingNotifId(notif.id);
+    try {
+      const { roomId, requestId } = await resolveVoiceJoinRequestId(notif);
+      if (!roomId || !requestId) {
+        toast.error(t('notifications.toastVoiceApproveFail'));
+        return;
+      }
+      await api.post(
+        `/voice/rooms/${encodeURIComponent(roomId)}/join-requests/${encodeURIComponent(requestId)}/approve`,
+        {},
+        { skipGlobalErrorHandling: true }
+      );
+      await markVoiceRoomJoinRequestNotificationsResolved({
+        roomId,
+        requestId,
+        requestUserId: notif.data?.requestUserId,
+      });
+      markNotifResolvedLocal(notif.id);
+      toast.success(t('notifications.toastVoiceApproved'));
+    } catch (err) {
+      toast.error(resolveApiErrorMessage(err, { t, fallback: t('notifications.toastVoiceApproveFail') }));
+    } finally {
+      setActingNotifId('');
+    }
+  };
+
+  const handleAcceptFriendRequest = async (notif) => {
+    if (!notif?.id) return;
+    markNotifResolvedLocal(notif.id);
+    toast(t('notifications.toastFriendActionFail'));
+  };
+
+  const handleRejectFriendRequest = async (notif) => {
+    if (!notif?.id) return;
+    markNotifResolvedLocal(notif.id);
+    toast(t('notifications.toastFriendActionFail'));
+  };
+
+  const handleMarkAsRead = async (id, { silent = false } = {}) => {
+    if (!id) return;
+    if (!silent && markingReadId) return;
+    if (!silent) setMarkingReadId(id);
+    try {
+      await api.patch(`/notifications/${id}/read`);
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+      if (!silent) toast.success(t('notifications.markRead'));
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('notifications.markReadErr') }));
+    } finally {
+      if (!silent) setMarkingReadId('');
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    if (markingAll) return;
+    setMarkingAll(true);
+    try {
+      const body =
+        notificationScope === 'organization'
+          ? {
+              scope: 'organization',
+              organizationId: String(organizationIdFilter || '').trim(),
+            }
+          : { scope: 'personal' };
+      if (body.scope === 'organization' && !body.organizationId) {
+        toast.error(t('notifications.markAllErr'));
+        return;
+      }
+      await api.patch('/notifications/read-all', body, { skipGlobalErrorHandling: true });
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.notifications.infinite(notificationScope, organizationIdFilter),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.notifications.badge(notificationScope, organizationIdFilter),
+      });
+      toast.success(t('notifications.markAllRead'));
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('notifications.markAllErr') }));
+    } finally {
+      setMarkingAll(false);
+    }
+  };
+
+  const confirmDeleteNotification = async () => {
+    const ids = Array.isArray(pendingDeleteIds) ? pendingDeleteIds.filter(Boolean) : [];
+    if (!ids.length || deleting) return;
+    setDeleting(true);
+    let deleted = 0;
+    try {
+      for (const id of ids) {
+        await api.delete(`/notifications/${id}`);
+        deleted += 1;
+      }
+      const idSet = new Set(ids.map(String));
+      setNotifications((prev) => prev.filter((n) => !idSet.has(String(n.id))));
+      setSelectedId((prev) => (prev != null && idSet.has(String(prev)) ? null : prev));
+      setCheckedIds((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(String(id)));
+        return next;
+      });
+      toast.success(
+        ids.length > 1
+          ? t('notifications.bulkDeleteDone', { n: deleted })
+          : t('notifications.deleted')
+      );
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('notifications.deleteErr') }));
+    } finally {
+      setDeleting(false);
+      setPendingDeleteIds(null);
+    }
+  };
+
+  const handleSelectNotification = (notif) => {
+    if (!notif?.id) return;
+    if (bulkMode) {
+      setCheckedIds((prev) => {
+        const next = new Set(prev);
+        const key = String(notif.id);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+      setSelectedId(notif.id);
+      return;
+    }
+    setSelectedId(notif.id);
+    if (!notif.read) {
+      handleMarkAsRead(notif.id, { silent: true });
+    }
+  };
+
+  const handleToggleCheck = (notif) => {
+    if (!notif?.id) return;
+    setBulkMode(true);
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      const key = String(notif.id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    setSelectedId(notif.id);
+  };
+
+  const handleOpenNotification = (notif) => {
+    if (!notif) return;
+
+    // Mark as read immediately when user opens a notification target
+    if (!notif.read) {
+      handleMarkAsRead(notif.id);
+    }
+
+    const orgId = resolveNotificationOrgId(notif, {
+      organizations: orgsQuery.data || [],
+      organizationIdFilter,
+    });
+    const targetWorkspacePath = orgId ? buildCommunicateChannelsPath(orgId) : null;
+
+    if (notif.rawType === 'message') {
+      const senderId = String(
+        notif.data?.senderId || notif.data?.friendId || ''
+      ).trim();
+      const fromAction = (() => {
+        const url = String(notif.actionUrl || '');
+        const m = url.match(/[?&]openDmUserId=([^&]+)/);
+        return m ? decodeURIComponent(m[1]) : '';
+      })();
+      const peerId = senderId || fromAction;
+      if (peerId) {
+        navigate(`/app/communicate/chat/friends?openDmUserId=${encodeURIComponent(peerId)}`);
+      } else {
+        navigate('/app/communicate/chat/friends');
+      }
+      toast(t('notifications.toastOpenFriendChat'), { icon: '💬' });
+      return;
+    }
+
+    if (notif.type === 'friend') {
+      navigate('/app/communicate/chat/friends?tab=requests');
+      toast(t('notifications.toastOpenFriendReq'), { icon: '👥' });
+      return;
+    }
+
+    if (
+      isVoiceRoomInviteNotification(notif) ||
+      notif.data?.kind === 'voice_room_join_request'
+    ) {
+      if (isVoiceRoomInviteNotification(notif)) {
+        const invitePath = resolveVoiceRoomInvitePath(notif);
+        navigate(invitePath || '/app/communicate/voice');
+        toast(t('notifications.toastOpenVoiceRoom'), { icon: '🎙️' });
+        return;
+      }
+      const voiceUrl = String(notif.actionUrl || '').trim();
+      if (voiceUrl.startsWith('/app/communicate/voice')) {
+        navigate(voiceUrl);
+      } else if (voiceUrl.startsWith('/voice')) {
+        navigate(voiceUrl.replace(/^\/voice/, '/app/communicate/voice'));
+      } else if (notif.data?.roomId) {
+        navigate(`/app/communicate/voice/${encodeURIComponent(notif.data.roomId)}`);
+      } else {
+        navigate('/app/communicate/voice');
+      }
+      toast(t('notifications.toastOpenVoiceRoom'), { icon: '🎙️' });
+      return;
+    }
+
+    const appPath = resolveNotificationAppPath(notif);
+    if (appPath) {
+      navigate(appPath);
+      if (notif.type === 'file') {
+        toast(t('notifications.toastOpenDocs'), { icon: '📁' });
+      } else if (notif.type === 'task' || notif.type === 'deadline') {
+        toast(t('notifications.toastOpenTasks'), { icon: '✅' });
+      } else if (notif.type === 'mention') {
+        toast(t('notifications.toastOpenOrgChat'), { icon: '💬' });
+      } else {
+        toast(t('notifications.toastOpenDetail'), { icon: 'ℹ️' });
+      }
+      return;
+    }
+
+    switch (notif.type) {
+      case 'mention':
+        navigate(targetWorkspacePath || '/app/communicate/channels');
+        toast(t('notifications.toastOpenOrgChat'), { icon: '💬' });
+        break;
+      case 'meeting':
+        navigate('/app/me/calendar');
+        toast(t('notifications.toastOpenCalendar'), { icon: '📅' });
+        break;
+      case 'system':
+        navigate(targetWorkspacePath || '/app/me/settings');
+        toast(t('notifications.toastOpenSettings'), { icon: '⚙️' });
+        break;
+      case 'task':
+      case 'deadline': {
+        const dueUrl = String(notif.actionUrl || notif.data?.actionUrl || '').trim();
+        if (dueUrl.startsWith('/app/')) {
+          navigate(dueUrl);
+        } else {
+          navigate(
+            orgId ? buildCollaborateTasksPath(orgId) : buildProjectsPickerPath('')
+          );
+        }
+        toast(t('notifications.toastOpenTasks'), { icon: notif.type === 'deadline' ? '⏰' : '✅' });
+        break;
+      }
+      case 'file':
+        navigate(
+          orgId ? buildCollaborateDocumentsPath(orgId) : '/app/collaborate/documents'
+        );
+        toast(t('notifications.toastOpenDocs'), { icon: '📁' });
+        break;
+      default:
+        navigate(targetWorkspacePath || '/app/me/dashboard');
+        toast(t('notifications.toastOpenDetail'), { icon: 'ℹ️' });
+    }
+  };
+
+  const filteredNotifications = useMemo(() => {
+    let list = notifications;
+    if (primaryFilter === 'unread') {
+      list = list.filter((n) => !n.read);
+    } else if (primaryFilter === 'needsAction') {
+      list = list.filter((n) => isP0Notification(n));
+    }
+    if (typeFilter === 'friend') {
+      list = list.filter((n) => n.type === 'friend');
+    } else if (typeFilter !== 'all') {
+      list = list.filter((n) => n.type === typeFilter);
+    }
+    if (notificationScope === 'organization' && organizationIdFilter) {
+      list = list.filter((n) => String(n.organizationId || '').trim() === organizationIdFilter);
+    }
+    const q = notifSearch.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((n) => {
+      const hay = `${n.title || ''} ${n.message || ''} ${n.action || ''} ${n.type || ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [
+    notifications,
+    primaryFilter,
+    typeFilter,
+    notifSearch,
+    organizationIdFilter,
+    notificationScope,
+  ]);
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+  const needsActionCount = useMemo(
+    () => notifications.filter((n) => isP0Notification(n) && !n.read).length,
+    [notifications]
+  );
+
+  const primaryFilterOptions = useMemo(
+    () => [
+      { id: 'needsAction', label: t('notifications.filterNeedsAction') },
+      { id: 'all', label: t('notifications.filterAll') },
+      { id: 'unread', label: t('notifications.filterUnread') },
+    ],
+    [t]
+  );
+
+  const typeFilterOptions = useMemo(
+    () => [
+      { id: 'all', label: t('notifications.filterTypeAll') },
+      { id: 'friend', label: t('notifications.filterFriend') },
+      { id: 'mention', label: t('notifications.filterMentions') },
+      { id: 'meeting', label: t('notifications.filterMeetings') },
+      { id: 'task', label: t('notifications.filterTasks') },
+      { id: 'deadline', label: t('notifications.filterDeadline') },
+    ],
+    [t]
+  );
+
+  const emptyHint = useMemo(() => {
+    if (primaryFilter === 'needsAction' && typeFilter === 'all' && !notifSearch.trim()) {
+      return t('notifications.emptyHintNeedsAction');
+    }
+    if (primaryFilter !== 'all' || typeFilter !== 'all' || notifSearch.trim()) {
+      return t('notifications.emptyHintFilter');
+    }
+    return t('notifications.emptyHintAllRead');
+  }, [primaryFilter, typeFilter, notifSearch, t]);
+
+  const groupedNotifications = useMemo(() => {
+    const labels = {
+      today: t('notifications.groupToday'),
+      yesterday: t('notifications.groupYesterday'),
+      earlier: t('notifications.groupEarlier'),
+    };
+    return ['today', 'yesterday', 'earlier']
+      .map((key) => ({
+        key,
+        label: labels[key],
+        items: filteredNotifications.filter((n) => (n.timeGroup || 'earlier') === key),
+      }))
+      .filter((group) => group.items.length > 0);
+  }, [filteredNotifications, t]);
+
+  const selectedNotification = useMemo(
+    () => filteredNotifications.find((n) => String(n.id) === String(selectedId)) || null,
+    [filteredNotifications, selectedId]
+  );
+
+  const visibleIds = useMemo(
+    () => filteredNotifications.map((n) => String(n.id)),
+    [filteredNotifications]
+  );
+
+  useEffect(() => {
+    if (selectedId == null) return;
+    if (!filteredNotifications.some((n) => String(n.id) === String(selectedId))) {
+      setSelectedId(null);
+    }
+  }, [filteredNotifications, selectedId]);
+
+  useEffect(() => {
+    setCheckedIds((prev) => {
+      if (!prev.size) return prev;
+      const allowed = new Set(visibleIds);
+      const next = new Set([...prev].filter((id) => allowed.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [visibleIds]);
+
+  const moveSelection = useCallback(
+    (delta) => {
+      if (!visibleIds.length) return;
+      const current = selectedId != null ? visibleIds.indexOf(String(selectedId)) : -1;
+      let nextIndex = current + delta;
+      if (current < 0) nextIndex = delta > 0 ? 0 : visibleIds.length - 1;
+      if (nextIndex < 0) nextIndex = 0;
+      if (nextIndex >= visibleIds.length) nextIndex = visibleIds.length - 1;
+      setSelectedId(visibleIds[nextIndex]);
+    },
+    [visibleIds, selectedId]
+  );
+
+  const handleBulkSelectAll = useCallback(() => {
+    setBulkMode(true);
+    setCheckedIds(new Set(visibleIds));
+  }, [visibleIds]);
+
+  const handleBulkClear = useCallback(() => {
+    setCheckedIds(new Set());
+  }, []);
+
+  const handleBulkMarkRead = useCallback(async () => {
+    const ids = [...checkedIds];
+    if (!ids.length || bulkMarking) return;
+    setBulkMarking(true);
+    let ok = 0;
+    try {
+      for (const id of ids) {
+        await api.patch(`/notifications/${id}/read`);
+        ok += 1;
+      }
+      const idSet = new Set(ids.map(String));
+      setNotifications((prev) =>
+        prev.map((n) => (idSet.has(String(n.id)) ? { ...n, read: true } : n))
+      );
+      toast.success(t('notifications.bulkMarkReadDone', { n: ok }));
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('notifications.markReadErr') }));
+    } finally {
+      setBulkMarking(false);
+    }
+  }, [bulkMarking, checkedIds, t]);
+
+  const handleShortcutMarkRead = useCallback(() => {
+    if (bulkMode && checkedIds.size > 0) {
+      handleBulkMarkRead();
+      return;
+    }
+    if (selectedId != null) handleMarkAsRead(selectedId);
+  }, [bulkMode, checkedIds, selectedId, handleBulkMarkRead]);
+
+  const handleShortcutDelete = useCallback(() => {
+    if (bulkMode && checkedIds.size > 0) {
+      setPendingDeleteIds([...checkedIds]);
+      return;
+    }
+    if (selectedId != null) setPendingDeleteIds([selectedId]);
+  }, [bulkMode, checkedIds, selectedId]);
+
+  const handleShortcutOpen = useCallback(() => {
+    if (bulkMode) return;
+    if (selectedNotification) handleOpenNotification(selectedNotification);
+  }, [bulkMode, selectedNotification]);
+
+  const handleShortcutEscape = useCallback(() => {
+    if (shortcutHelpOpen) {
+      setShortcutHelpOpen(false);
+      return;
+    }
+    if (bulkMode) {
+      setBulkMode(false);
+      setCheckedIds(new Set());
+      return;
+    }
+    setSelectedId(null);
+  }, [shortcutHelpOpen, bulkMode]);
+
+  const handleShortcutToggleCheck = useCallback(() => {
+    if (selectedId == null && visibleIds[0]) {
+      const first = filteredNotifications.find((n) => String(n.id) === visibleIds[0]);
+      if (first) handleToggleCheck(first);
+      return;
+    }
+    const current = filteredNotifications.find((n) => String(n.id) === String(selectedId));
+    if (current) handleToggleCheck(current);
+  }, [selectedId, visibleIds, filteredNotifications]);
+
+  useNotificationInboxShortcuts({
+    enabled: true,
+    itemIds: visibleIds,
+    selectedId,
+    bulkMode,
+    dialogOpen: pendingDeleteIds != null,
+    onMove: moveSelection,
+    onOpen: handleShortcutOpen,
+    onMarkRead: handleShortcutMarkRead,
+    onDelete: handleShortcutDelete,
+    onEscape: handleShortcutEscape,
+    onToggleCheck: handleShortcutToggleCheck,
+    onToggleHelp: () => setShortcutHelpOpen((v) => !v),
+  });
+
+  const pendingDeleteCount = Array.isArray(pendingDeleteIds) ? pendingDeleteIds.length : 0;
+  const inboxTitle =
+    pageTitle ||
+    (isOrgNotificationsPage ? t('notifications.titleOrganization') : t('notifications.defaultTitle'));
+  const inboxEmptyMessage = isOrgNotificationsPage
+    ? t('notifications.emptyOrg')
+    : t('notifications.emptyNew');
 
   return (
     <>
-      <div className="min-h-screen flex">
-        <NavigationSidebar currentPage="Thông Báo" />
-        <div className="flex-1 p-6 overflow-y-auto overflow-x-visible scrollbar-gradient">
-        {/* Header */}
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-4xl font-black text-gradient mb-2">Trung Tâm Thông Báo</h1>
-            <p className="text-gray-400">Theo dõi tất cả hoạt động và cập nhật quan trọng</p>
-          </div>
-          <div className="flex gap-3">
-            <button 
-              onClick={() => showToast("Cài đặt thông báo", "info")}
-              className="glass px-4 py-2 rounded-xl hover:bg-white/10 transition-all font-semibold"
-            >
-              ⚙️ Cài Đặt Thông Báo
-            </button>
-            <button 
-              onClick={handleMarkAllAsRead}
-              className="glass px-4 py-2 rounded-xl hover:bg-white/10 transition-all font-semibold"
-            >
-              ✓ Đánh Dấu Đã Đọc Tất Cả
-            </button>
-          </div>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          <GlassCard hover>
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-2xl">
-                🔔
-              </div>
-              <div>
-                <div className="text-2xl font-black text-white">{notifications.length}</div>
-                <div className="text-xs text-gray-400">Tổng thông báo</div>
-              </div>
-            </div>
-          </GlassCard>
-          <GlassCard hover>
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center text-2xl">
-                ⭐
-              </div>
-              <div>
-                <div className="text-2xl font-black text-white">{unreadCount}</div>
-                <div className="text-xs text-gray-400">Chưa đọc</div>
-              </div>
-            </div>
-          </GlassCard>
-          <GlassCard hover>
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-2xl">
-                ✅
-              </div>
-              <div>
-                <div className="text-2xl font-black text-white">{notifications.filter(n => n.type === 'task').length}</div>
-                <div className="text-xs text-gray-400">Công việc</div>
-              </div>
-            </div>
-          </GlassCard>
-          <GlassCard hover>
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center text-2xl">
-                💬
-              </div>
-              <div>
-                <div className="text-2xl font-black text-white">{notifications.filter(n => n.type === 'mention').length}</div>
-                <div className="text-xs text-gray-400">Mentions</div>
-              </div>
-            </div>
-          </GlassCard>
-        </div>
-
-        {/* Filters */}
-        <div className="flex gap-2 mb-6">
-          {[
-            { id: 'all', label: 'Tất Cả', icon: '📋' },
-            { id: 'unread', label: 'Chưa Đọc', icon: '⭐' },
-            { id: 'task', label: 'Công Việc', icon: '✅' },
-            { id: 'mention', label: 'Mentions', icon: '💬' },
-            { id: 'deadline', label: 'Deadline', icon: '⏰' },
-            { id: 'meeting', label: 'Meetings', icon: '📅' }
-          ].map(f => (
-            <button
-              key={f.id}
-              onClick={() => setFilter(f.id)}
-              className={`px-4 py-2 rounded-xl font-semibold transition-all ${
-                filter === f.id
-                  ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white'
-                  : 'glass hover:bg-white/10 text-gray-400'
-              }`}
-            >
-              <span className="mr-2">{f.icon}</span>
-              {f.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Notifications List */}
-        <div className="space-y-3">
-          {filteredNotifications.map((notif, idx) => (
-            <GlassCard key={notif.id} hover className={`animate-slideUp ${!notif.read ? 'border-l-4 border-purple-500' : ''}`} style={{animationDelay: `${idx * 0.05}s`}}>
-              <div className="flex items-start gap-4">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${
-                  notif.priority === 'high' ? 'from-red-500 to-orange-500' :
-                  notif.priority === 'medium' ? 'from-blue-500 to-cyan-500' :
-                  'from-green-500 to-emerald-500'
-                } flex items-center justify-center text-2xl flex-shrink-0`}>
-                  {notif.icon}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="font-bold text-white">{notif.title}</h3>
-                    {!notif.read && (
-                      <span className="px-2 py-0.5 rounded-full bg-purple-600 text-xs font-bold">MỚI</span>
-                    )}
-                    {notif.priority === 'high' && (
-                      <span className="px-2 py-0.5 rounded-full bg-red-600 text-xs font-bold">QUAN TRỌNG</span>
-                    )}
-                  </div>
-                  <p className="text-gray-300 text-sm mb-2">{notif.message}</p>
-                  <div className="flex items-center gap-3 text-xs text-gray-500">
-                    <span>🕐 {notif.time}</span>
-                    <span>•</span>
-                    <span className="capitalize">{notif.type}</span>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <button 
-                    onClick={() => showToast(`Đang mở ${notif.action}...`, "info")}
-                    className="glass px-4 py-2 rounded-lg hover:bg-white/10 transition-all text-sm font-semibold whitespace-nowrap"
-                  >
-                    {notif.action}
-                  </button>
-                  {!notif.read && (
-                    <button 
-                      onClick={() => handleMarkAsRead(notif.id)}
-                      className="glass px-4 py-2 rounded-lg hover:bg-white/10 transition-all text-xs text-gray-400 hover:text-white"
-                    >
-                      Đánh dấu đã đọc
-                    </button>
-                  )}
-                  <button 
-                    onClick={() => {
-                      if (confirm('Xóa thông báo này?')) {
-                        handleDeleteNotification(notif.id);
-                      }
-                    }}
-                    className="glass px-4 py-2 rounded-lg hover:bg-white/10 transition-all text-xs text-red-400 hover:text-red-300"
-                  >
-                    🗑️ Xóa
-                  </button>
-                </div>
-              </div>
-            </GlassCard>
-          ))}
-        </div>
-
-        {filteredNotifications.length === 0 && (
-          <div className="text-center py-20">
-            <div className="text-6xl mb-4">🎉</div>
-            <p className="text-xl text-gray-400">Không có thông báo nào!</p>
-          </div>
-        )}
-      </div>
-    </div>
-
-    {/* Toast */}
-    {toast && (
-      <Toast 
-        message={toast.message} 
-        type={toast.type}
-        onClose={() => setToast(null)}
+      <NotificationsFigmaView
+        title={
+          isOrgNotificationsPage
+            ? t('notifications.titleOrganization')
+            : t('notifications.title')
+        }
+        unreadCount={unreadCount}
+        needsActionCount={needsActionCount}
+        search={notifSearch}
+        onSearchChange={setNotifSearch}
+        searchPlaceholder={t('notifications.searchPlaceholder')}
+        primaryFilter={primaryFilter}
+        onPrimaryFilterChange={setPrimaryFilter}
+        primaryFilterOptions={primaryFilterOptions}
+        typeFilter={typeFilter}
+        onTypeFilterChange={setTypeFilter}
+        typeFilterOptions={typeFilterOptions}
+        groups={groupedNotifications}
+        selectedId={selectedId}
+        selectedNotification={selectedNotification}
+        bulkMode={bulkMode}
+        checkedIds={checkedIds}
+        checkedCount={checkedIds.size}
+        shortcutHelpOpen={shortcutHelpOpen}
+        loading={!fetchEnabled || notificationsLoading}
+        emptyMessage={inboxEmptyMessage}
+        emptyHint={emptyHint}
+        getActionKind={getNotifActionKind}
+        actingNotifId={actingNotifId}
+        markingAll={markingAll}
+        bulkActing={bulkMarking || deleting}
+        markingReadId={markingReadId}
+        onSelectNotification={handleSelectNotification}
+        onOpenNotification={handleOpenNotification}
+        onMarkReadNotification={handleMarkAsRead}
+        onClearSelection={() => setSelectedId(null)}
+        onDeleteNotification={(notif) => setPendingDeleteIds([notif.id])}
+        onAcceptFriend={handleAcceptFriendRequest}
+        onRejectFriend={handleRejectFriendRequest}
+        onJoinVoice={handleOpenNotification}
+        onMarkAllRead={handleMarkAllRead}
+        onToggleBulkMode={() => {
+          setBulkMode((v) => {
+            if (v) setCheckedIds(new Set());
+            return !v;
+          });
+        }}
+        onToggleCheck={handleToggleCheck}
+        onBulkSelectAll={handleBulkSelectAll}
+        onBulkClear={handleBulkClear}
+        onBulkMarkRead={handleBulkMarkRead}
+        onBulkDelete={() => {
+          if (checkedIds.size) setPendingDeleteIds([...checkedIds]);
+        }}
+        onToggleShortcutHelp={() => setShortcutHelpOpen((v) => !v)}
+        markAllReadLabel={t('notifications.markAllReadShort')}
+        actionLabels={{
+          accept: t('notifications.actionAccept'),
+          reject: t('notifications.actionReject'),
+          joinVoice: t('notifications.actionJoin'),
+          delete: t('notifications.deleteBtn'),
+          open: t('notifications.actionOpen'),
+          markRead: t('notifications.markOneRead'),
+          checkItem: t('notifications.bulkCheckItem'),
+        }}
       />
-    )}
+
+      <ConfirmDialog
+        isOpen={pendingDeleteIds != null}
+        onClose={() => setPendingDeleteIds(null)}
+        onConfirm={confirmDeleteNotification}
+        title={t('notifications.confirmDeleteTitle')}
+        message={
+          pendingDeleteCount > 1
+            ? t('notifications.bulkDeleteConfirm', { n: pendingDeleteCount })
+            : t('notifications.confirmDeleteMsg')
+        }
+        confirmText={t('common.delete')}
+        cancelText={t('nav.cancel')}
+      />
     </>
   );
 }

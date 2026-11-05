@@ -6,16 +6,37 @@
 import api from './api';
 
 const userService = {
-  // Lấy profile của 1 user - GET /users/:userId
-  // Dùng khi: xem profile người khác, click vào avatar
-  getProfile: async (userId) => {
-    return await api.get(`/users/${userId}`);
+  /** User hiện tại — GET /api/users/me (user-service) */
+  getMe: async () => {
+    return await api.get('/users/me');
   },
 
-  // Cập nhật profile của mình - PUT /users/profile
-  // data: { name, bio, location, website, ... }
+  // Lấy profile của 1 user - GET /users/:userId
+  // Dùng khi: xem profile người khác, click vào avatar
+  getProfile: async (userId, config = {}) => {
+    return await api.get(`/users/${userId}`, {
+      skipGlobalErrorHandling: true,
+      ...config,
+    });
+  },
+
+  // Cập nhật profile của mình — PATCH /users/me (user-service user.routes.js)
   updateProfile: async (data) => {
-    return await api.put('/users/profile', data);
+    return await api.patch('/users/me', data);
+  },
+
+  /** C1 — lưu nháp / nộp hồ sơ năng lực */
+  saveCapability: async (capabilityAction, capability) => {
+    return await api.patch('/users/me', { capabilityAction, capability });
+  },
+
+  /** C2 — Upload PDF CV (multipart field name: file) */
+  uploadCapabilityCv: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return await api.post('/users/me/capability/cv', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
   },
 
   // Upload avatar - POST /users/avatar
@@ -41,10 +62,10 @@ const userService = {
     return await api.get(`/users/${userId}/status`);
   },
 
-  // Cập nhật status của mình - PUT /users/status
+  // Cập nhật status của mình - PATCH /users/me/status
   // status: 'online' | 'away' | 'busy' | 'offline'
   updateStatus: async (status) => {
-    return await api.put('/users/status', { status });
+    return await api.patch('/users/me/status', { status });
   },
 };
 

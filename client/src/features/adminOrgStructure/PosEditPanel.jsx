@@ -1,0 +1,137 @@
+/** Position (HR) — admin RBAC */
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import {
+  AdminUserFormCard,
+  AdminUserPanelShell,
+  adminInputClass,
+  adminLabelClass,
+  adminPrimaryBtnClass,
+} from '../../components/adminUsers/adminUserPanelUi';
+import {
+  AdminBusySpinner,
+  AdminListSkeleton,
+} from '../../components/adminUsers/adminPanelStates';
+import { adminUserAPI } from '../../services/api/adminUserAPI';
+import useAdminMembers from '../../hooks/useAdminMembers';
+import { useAppStrings } from '../../locales/appStrings';
+import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
+import { memberUserId } from '../../utils/adminUserUtils';
+import { memberJobTitle } from '../../utils/userTaxonomyUtils';
+
+export default function PosEditPanel({ orgId, embedded = false }) {
+  const { t } = useAppStrings();
+  const [searchParams] = useSearchParams();
+  const titleParam = String(searchParams.get('title') || '').trim();
+  const { members, loading, loadMembers, error: membersError } = useAdminMembers(orgId, { view: 'directory' });
+  const [oldTitle, setOldTitle] = useState(titleParam);
+  const [newTitle, setNewTitle] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (titleParam) setOldTitle(titleParam);
+  }, [titleParam]);
+
+  const titles = useMemo(() => {
+    const set = new Set();
+    for (const m of members) {
+      const title = memberJobTitle(m);
+      if (title) set.add(title);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [members]);
+
+  const save = async (e) => {
+    e.preventDefault();
+    if (!orgId || saving) return;
+    const from = String(oldTitle || '').trim();
+    const to = String(newTitle || '').trim();
+    if (!from || !to || from === to) {
+      toast.error(t('adminOrg.posEditValidation'));
+      return;
+    }
+    const targets = members.filter((m) => memberJobTitle(m) === from);
+    if (!targets.length) {
+      toast.error(t('adminOrg.posEditEmpty'));
+      return;
+    }
+    setSaving(true);
+    try {
+      await Promise.all(
+        targets.map((m) => adminUserAPI.patchProfile(orgId, memberUserId(m), { jobTitle: to }))
+      );
+      toast.success(t('adminOrg.posSaved'));
+      setNewTitle('');
+      await loadMembers();
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('adminOrg.posSaveFail') }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const body = (
+    <AdminUserFormCard>
+      {membersError ? (
+        <div className="space-y-3">
+          <p role="alert" className="rounded-xl border border-destructive bg-card px-3 py-2 text-sm text-destructive">
+            {resolveApiErrorMessage(membersError, { t, fallback: t('companyAdmin.loadMembersFail') })}
+          </p>
+          <button type="button" className={adminPrimaryBtnClass()} disabled={saving} onClick={() => loadMembers()}>
+            {t('adminRbac.retry')}
+          </button>
+        </div>
+      ) : loading ? (
+        <AdminListSkeleton rows={3} />
+      ) : (
+        <form className="mx-auto max-w-lg space-y-4" onSubmit={save}>
+          <label className="block">
+            <span className={adminLabelClass()}>{t('adminOrg.posTitle')}</span>
+            <select
+              required
+              className={adminInputClass()}
+              value={oldTitle}
+              onChange={(e) => setOldTitle(e.target.value)}
+            >
+              <option value="">{t('adminOrg.selectTitle')}</option>
+              {titles.map((title) => (
+                <option key={title} value={title}>
+                  {title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className={adminLabelClass()}>{t('adminOrg.posNewTitle')}</span>
+            <input
+              maxLength={120}
+              required
+              className={adminInputClass()}
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              placeholder={t('adminOrg.posNewTitle')}
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={saving}
+            aria-busy={saving || undefined}
+            className={adminPrimaryBtnClass()}
+          >
+            <AdminBusySpinner busy={saving} />
+            {saving ? t('common.saving') : t('common.save')}
+          </button>
+        </form>
+      )}
+    </AdminUserFormCard>
+  );
+
+  if (embedded) return body;
+
+  return (
+    <AdminUserPanelShell title={t('adminDomains.rbac.posEdit')} hint={t('adminOrg.posEditHint')}>
+      {body}
+    </AdminUserPanelShell>
+  );
+}

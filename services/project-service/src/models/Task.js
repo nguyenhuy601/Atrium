@@ -1,0 +1,555 @@
+const mongoose = require('../db');
+
+// CẤM populate User/Organization/Server/Document — các model không đăng ký trong task-service.
+// Dùng HTTP client hoặc enrich DTO sau query .lean().
+
+const taskSchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    summary: {
+      type: String,
+      maxlength: 500,
+      default: '',
+    },
+    description: {
+      type: String,
+      maxlength: 12000,
+      default: '',
+    },
+    assigneeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    /**
+     * Multi-slot assignments (P6). Dual-write: primary.userId ↔ assigneeId.
+     * slot: primary | reviewer | approver | collaborator | qa_owner | devops_owner | watcher
+     */
+    assignments: {
+      type: [
+        {
+          userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+          slot: {
+            type: String,
+            enum: [
+              'primary',
+              'reviewer',
+              'approver',
+              'collaborator',
+              'qa_owner',
+              'devops_owner',
+              'watcher',
+            ],
+            default: 'primary',
+          },
+          projectRoleId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'ProjectRole',
+            default: null,
+          },
+        },
+      ],
+      default: [],
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      ref: 'User',
+    },
+    serverId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Server',
+    },
+    organizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      ref: 'Organization',
+    },
+    departmentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Department',
+      default: null,
+    },
+    divisionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Division',
+      default: null,
+    },
+    teamId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Team',
+      default: null,
+    },
+    /** Swimlane: team sở hữu việc (khác teamId = scope board). null = chưa gán team. */
+    ownerTeamId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Team',
+      default: null,
+      index: true,
+    },
+    /** Work-group chat channel (kind 'workgroup'). Set on level-2 parent only. */
+    workGroupChannelId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+    boardId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TaskBoard',
+      default: null,
+      index: true,
+    },
+    /** Denorm từ board.projectId */
+    projectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Project',
+      default: null,
+      index: true,
+    },
+    /** Sub-task: parent card trên cùng board */
+    parentTaskId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Task',
+      default: null,
+      index: true,
+    },
+    /** Sprint gắn thẻ (nullable). */
+    sprintId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Sprint',
+      default: null,
+      index: true,
+    },
+    /** Epic (PlanningItem type=epic). */
+    epicId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'PlanningItem',
+      default: null,
+      index: true,
+    },
+    /** Feature (PlanningItem type=feature) — parent planning, additive. */
+    featureId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'PlanningItem',
+      default: null,
+      index: true,
+    },
+    issueType: {
+      type: String,
+      enum: ['task', 'bug', 'story'],
+      default: 'task',
+      index: true,
+    },
+    retestStatus: {
+      type: String,
+      enum: ['pending', 'passed', 'failed', null],
+      default: null,
+    },
+    sourceTestCaseId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TestCase',
+      default: null,
+    },
+    /** P2 HITL — WBS PlanningArtifact that seeded this card. */
+    sourceWbsArtifactId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'PlanningArtifact',
+      default: null,
+      index: true,
+    },
+    /** Soft FR key from Analysis (optional). */
+    sourceFrKey: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: 120,
+    },
+    /** Soft UC key from Analysis (P2-B gap). */
+    sourceUcKey: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: 120,
+      index: true,
+    },
+    /** HOW blueprint task id — Gate2 promote idMap / sprint pbi link */
+    blueprintTaskId: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: 120,
+      index: true,
+    },
+    /** Plan C — dedupe stamp for ready_to_done_proposed notify. */
+    readyToDoneNotifiedAt: {
+      type: Date,
+      default: null,
+    },
+    /** Dedupe stamp: card entered Ready for QA column. */
+    readyForQaNotifiedAt: {
+      type: Date,
+      default: null,
+    },
+    fixSuggestion: {
+      status: {
+        type: String,
+        enum: ['none', 'pending', 'accepted', 'rejected'],
+        default: 'none',
+      },
+      text: { type: String, trim: true, default: '', maxlength: 4000 },
+      proposedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+      proposedAt: { type: Date, default: null },
+      decidedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+      decidedAt: { type: Date, default: null },
+    },
+    changeRequestIds: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'ChangeRequest' }],
+      default: [],
+      index: true,
+    },
+    checklists: {
+      type: [
+        {
+          title: { type: String, trim: true, default: 'Checklist', maxlength: 180 },
+          items: {
+            type: [
+              {
+                text: { type: String, trim: true, maxlength: 500 },
+                done: { type: Boolean, default: false },
+              },
+            ],
+            default: [],
+          },
+        },
+      ],
+      default: [],
+    },
+    /** Legacy field — app no longer reads/writes; kept for Mongo compatibility. */
+    responsibilityKey: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: '',
+      index: true,
+    },
+    listId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TaskBoardList',
+      default: null,
+      index: true,
+    },
+    position: {
+      type: Number,
+      default: 1000,
+      index: true,
+    },
+    departmentName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    status: {
+      type: String,
+      trim: true,
+      default: 'todo',
+      index: true,
+    },
+    priority: {
+      type: String,
+      trim: true,
+      default: 'medium',
+      maxlength: 32,
+    },
+    dueDate: {
+      type: Date,
+      default: null,
+    },
+    /** Job hạn: đã gửi bell sắp đến hạn / quá hạn (idempotent). */
+    dueSoonNotifiedAt: {
+      type: Date,
+      default: null,
+    },
+    overdueNotifiedAt: {
+      type: Date,
+      default: null,
+    },
+    /** Ngày bắt đầu (calendar). Máy chia giờ T2–T6 từ startDate → dueDate. */
+    startDate: {
+      type: Date,
+      default: null,
+    },
+    /**
+     * Planned work estimate in hours (Phase 3b).
+     * Same unit as Worklog — not story points (P3b.2).
+     */
+    estimateHours: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    completedAt: {
+      type: Date,
+      default: null,
+    },
+    /**
+     * Lần đầu chuyển sang trạng thái in-progress (cycle time = completedAt − firstInProgressAt).
+     * Không ghi đè sau khi đã set.
+     */
+    firstInProgressAt: {
+      type: Date,
+      default: null,
+    },
+    /** Idempotent due-soon reminder (taskDueReminders job). Cleared when dueDate changes. */
+    dueSoonNotifiedAt: {
+      type: Date,
+      default: null,
+    },
+    /** Idempotent overdue reminder. Cleared when dueDate changes. */
+    overdueNotifiedAt: {
+      type: Date,
+      default: null,
+    },
+    tags: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
+    attachments: [
+      {
+        documentId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'Document',
+        },
+        name: String,
+        url: String,
+      },
+    ],
+    comments: [
+      {
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        content: String,
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+    /** Last QA rework hint shown on board card (open-bug HITL). */
+    qaReworkNote: {
+      type: String,
+      trim: true,
+      default: '',
+      maxlength: 500,
+    },
+    /**
+     * Execution Control — remaining effort SoT is confirmed remainingHours.
+     * inferredRemainingHours is UI hint only (never sole AT_RISK input).
+     */
+    remainingHours: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    remainingSource: {
+      type: String,
+      enum: ['confirmed', 'inferred', null],
+      default: null,
+    },
+    remainingUpdatedAt: {
+      type: Date,
+      default: null,
+    },
+    remainingConfirmedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    inferredRemainingHours: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    /** Meaningful progress stamp (not comment-only). */
+    lastProgressAt: {
+      type: Date,
+      default: null,
+    },
+    /** Snapshot at Gate2 promote / WBS publish / CR apply — not living plan source. */
+    baselineRef: {
+      type: {
+        planningBaselineId: { type: mongoose.Schema.Types.ObjectId, default: null },
+        revisionId: { type: String, trim: true, default: '' },
+        promotedAt: { type: Date, default: null },
+        source: {
+          type: String,
+          enum: ['gate2_promote', 'wbs_publish', 'cr_apply', 'manual', 'missing'],
+          default: 'missing',
+        },
+        missing: { type: Boolean, default: true },
+      },
+      default: () => ({ missing: true, source: 'missing' }),
+    },
+    baseline: {
+      type: {
+        startDate: { type: Date, default: null },
+        dueDate: { type: Date, default: null },
+        estimateHours: { type: Number, min: 0, default: null },
+        assigneeId: { type: mongoose.Schema.Types.ObjectId, default: null },
+        sprintId: { type: mongoose.Schema.Types.ObjectId, default: null },
+      },
+      default: () => ({}),
+    },
+    baselineVersion: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    /** Optimistic concurrency for execution apply. */
+    entityVersion: {
+      type: Number,
+      min: 0,
+      default: 0,
+      index: true,
+    },
+    forecast: {
+      type: {
+        finishDate: { type: Date, default: null },
+        remainingHours: { type: Number, min: 0, default: null },
+        riskLabel: { type: String, trim: true, default: '', maxlength: 64 },
+        computedAt: { type: Date, default: null },
+        inputVersion: { type: String, trim: true, default: '', maxlength: 128 },
+        baselineVersion: { type: Number, min: 0, default: 0 },
+        completeness: {
+          type: String,
+          enum: ['FULL', 'PARTIAL', 'UNKNOWN', null],
+          default: null,
+        },
+      },
+      default: () => ({}),
+    },
+    /**
+     * Execution-time dependency edges (synced from Gate2 DEPENDENCY when possible).
+     * type: FS|SS|FF|SF — MVP impact engine FULL only for FS.
+     */
+    dependsOn: {
+      type: [
+        {
+          predecessorId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Task',
+            required: true,
+          },
+          type: {
+            type: String,
+            enum: ['FS', 'SS', 'FF', 'SF'],
+            default: 'FS',
+          },
+          lagHours: { type: Number, default: 0 },
+          inputReadyRule: { type: String, trim: true, default: '', maxlength: 120 },
+          sourceVersion: { type: String, trim: true, default: '', maxlength: 64 },
+          source: {
+            type: String,
+            enum: ['gate2_artifact', 'manual', 'cr'],
+            default: 'gate2_artifact',
+          },
+        },
+      ],
+      default: [],
+    },
+    blockers: {
+      type: [
+        {
+          kind: {
+            type: String,
+            enum: ['task', 'decision', 'document', 'external', 'other'],
+            default: 'other',
+          },
+          reason: { type: String, trim: true, default: '', maxlength: 1000 },
+          ownerId: { type: mongoose.Schema.Types.ObjectId, default: null },
+          relatedTaskId: { type: mongoose.Schema.Types.ObjectId, ref: 'Task', default: null },
+          since: { type: Date, default: Date.now },
+          resolvedAt: { type: Date, default: null },
+          dueAt: { type: Date, default: null },
+        },
+      ],
+      default: [],
+    },
+    /** Times card left Done / completed (quality reopen signal). */
+    reopenCount: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    servesSprintGoal: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    costActual: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    costBaseline: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+    encV: {
+      type: Number,
+      default: 0,
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    aiGenerated: {
+      type: Boolean,
+      default: false,
+    },
+    sourceMessageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Indexes
+taskSchema.index({ assigneeId: 1, status: 1 });
+taskSchema.index({ organizationId: 1, status: 1 });
+taskSchema.index({ organizationId: 1, divisionId: 1, status: 1 });
+taskSchema.index({ organizationId: 1, departmentId: 1, status: 1 });
+taskSchema.index({ organizationId: 1, teamId: 1, status: 1 });
+taskSchema.index({ boardId: 1, listId: 1, position: 1, isActive: 1 });
+taskSchema.index({ boardId: 1, ownerTeamId: 1, listId: 1, isActive: 1 });
+taskSchema.index({ boardId: 1, status: 1, createdAt: -1 });
+taskSchema.index({ projectId: 1, isActive: 1, createdAt: -1 });
+/** List card progress aggregate: $match organizationId + projectId $in + isActive */
+taskSchema.index({ organizationId: 1, projectId: 1, isActive: 1 });
+taskSchema.index({ projectId: 1, sprintId: 1, isActive: 1 });
+taskSchema.index({ projectId: 1, epicId: 1, isActive: 1 });
+taskSchema.index({ projectId: 1, featureId: 1, isActive: 1 });
+taskSchema.index({ projectId: 1, sourceWbsArtifactId: 1, isActive: 1 });
+taskSchema.index({ projectId: 1, sourceUcKey: 1, isActive: 1 });
+taskSchema.index({ parentTaskId: 1, isActive: 1 });
+taskSchema.index({ serverId: 1 });
+taskSchema.index({ createdBy: 1 });
+taskSchema.index({ dueDate: 1 });
+taskSchema.index({ isActive: 1, status: 1, dueDate: 1, assigneeId: 1 });
+taskSchema.index({ priority: 1, status: 1 });
+
+const Task = mongoose.model('Task', taskSchema);
+
+module.exports = Task;
+
+
+

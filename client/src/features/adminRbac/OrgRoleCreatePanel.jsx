@@ -1,0 +1,207 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
+
+import {
+  AdminUserFormCard,
+  AdminUserPanelShell,
+  adminInputClass,
+  adminLabelClass,
+  adminPrimaryBtnClass,
+  adminSecondaryBtnClass,
+} from '../../components/adminUsers/adminUserPanelUi';
+import AdminRoleInsertPositionPicker from '../../components/adminUsers/AdminRoleInsertPositionPicker';
+import { AdminBusySpinner, AdminLoadErrorState } from '../../components/adminUsers/adminPanelStates';
+import { useAppStrings } from '../../locales/appStrings';
+import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
+import { slugifyRoleKey, ensureRoleKeyNamespace } from '../../utils/roleKeySlug';
+import { looksLikeHrPositionForOrgRole } from '../../utils/roleLayerNaming';
+import { orgRoleCatalogAPI } from '../../services/api/orgRoleCatalogAPI';
+import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
+import { useAdminActionGate } from '../../hooks/useAdminActionGate';
+import { filterOrgRoleCatalogRows } from '../../utils/orgRoleLocale';
+
+export default function OrgRoleCreatePanel({ orgId }) {
+  const { t } = useAppStrings();
+  const navigate = useNavigate();
+  const { can, assertOrToast } = useAdminActionGate(orgId);
+  const canUpdateOrgRole = can(RBAC_GRANT.ORG_ROLE_UPDATE);
+
+  const [suffix, setSuffix] = useState('');
+  const [description, setDescription] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [roles, setRoles] = useState([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [rolesError, setRolesError] = useState('');
+  const [reloadTick, setReloadTick] = useState(0);
+  const [insertPlace, setInsertPlace] = useState({ place: 'end' });
+
+  const keyPreview = useMemo(
+    () => (suffix.trim() ? ensureRoleKeyNamespace(slugifyRoleKey(suffix), 'org') : ''),
+    [suffix]
+  );
+
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    (async () => {
+      setRolesLoading(true);
+      setRolesError('');
+      try {
+        const res = await orgRoleCatalogAPI.listCatalog(orgId);
+        const list = res?.data?.roles || res?.data?.data?.roles || [];
+        if (!cancelled) {
+          setRoles(
+            filterOrgRoleCatalogRows(
+              [...list].sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0))
+            )
+          );
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const msg = resolveApiErrorMessage(error, { t, fallback: t('common.loadFail') });
+          toast.error(msg);
+          setRolesError(msg);
+          setRoles([]);
+        }
+      } finally {
+        if (!cancelled) setRolesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId, t, reloadTick]);
+
+  const submit = async () => {
+    if (!orgId || busy) return;
+    if (!assertOrToast(RBAC_GRANT.ORG_ROLE_UPDATE)) return;
+    if (!suffix.trim()) return;
+    const label = suffix.trim();
+    setBusy(true);
+    try {
+      await orgRoleCatalogAPI.createCatalog(orgId, {
+        label,
+        description,
+        key: keyPreview,
+        place: insertPlace.place,
+        afterRoleId: insertPlace.afterRoleId,
+      });
+      toast.success(t('common.saveSuccess', { defaultValue: 'Saved' }));
+      navigate('/app/admin/rbac/org-roles');
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('common.saveFail') }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AdminUserPanelShell title={t('adminDomains.rbac.orgRoleCreate')} hint={t('adminRbac.orgRoleCatalogHint')}>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <AdminUserFormCard title={t('adminDomains.rbac.orgRoleCreate')}>
+          <label className="mb-4 block">
+            <span className={adminLabelClass()}>{t('adminRbac.roleLabelField')}</span>
+            <input
+              className={adminInputClass()}
+              maxLength={120}
+              value={suffix}
+              onChange={(e) => setSuffix(e.target.value)}
+              placeholder={t('adminRbac.orgRoleLabelPlaceholder')}
+            />
+            {suffix.trim() && looksLikeHrPositionForOrgRole(suffix) ? (
+              <p className="mt-1 text-xs text-warning">{t('adminRbac.orgRoleLooksLikePositionHint')}</p>
+            ) : null}
+          </label>
+          <label className="mb-4 block">
+            <span className={adminLabelClass()}>{t('adminRbac.roleKeyField')}</span>
+            <input
+              className={adminInputClass()}
+              value={suffix.trim() ? keyPreview : ''}
+              maxLength={64}
+              readOnly
+              placeholder={t('adminRbac.roleKeyAutoPlaceholder')}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">{t('adminRbac.roleKeyAutoHint')}</p>
+          </label>
+          <label className="mb-4 block">
+            <span className={adminLabelClass()}>{t('adminRbac.roleDescriptionField')}</span>
+            <textarea
+              className={adminInputClass()}
+              value={description}
+              maxLength={1000}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+            />
+          </label>
+
+          {rolesError ? (
+            <AdminLoadErrorState
+              className="mb-4"
+              message={rolesError}
+              disabled={busy}
+              onRetry={() => setReloadTick((n) => n + 1)}
+            />
+          ) : (
+            <AdminRoleInsertPositionPicker
+              roles={roles}
+              value={insertPlace}
+              onChange={setInsertPlace}
+              loading={rolesLoading}
+              title={t('adminRbac.roleInsertPlaceTitle')}
+              hint={t('adminRbac.roleInsertPlaceHint')}
+              startLabel={t('adminRbac.roleInsertStart')}
+              endLabel={t('adminRbac.roleInsertEnd')}
+              afterPrefix={t('adminRbac.roleInsertAfter')}
+              emptyLabel={t('adminRbac.roleInsertEmpty')}
+              previewLabel={suffix.trim() || keyPreview || ''}
+            />
+          )}
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {canUpdateOrgRole ? (
+              <button
+                type="button"
+                disabled={!suffix.trim() || busy || Boolean(rolesError)}
+                aria-busy={busy}
+                className={adminPrimaryBtnClass()}
+                onClick={submit}
+              >
+                <AdminBusySpinner busy={busy} />
+                {busy ? t('common.saving') : t('common.save')}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              disabled={busy}
+              className={adminSecondaryBtnClass()}
+              onClick={() => navigate('/app/admin/rbac/org-roles')}
+            >
+              {t('common.cancel')}
+            </button>
+          </div>
+        </AdminUserFormCard>
+
+        <div>
+          <div className="rounded-xl border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
+            {t('adminRbac.orgRoleCreateHint')}
+          </div>
+          <div className="mt-4 rounded-xl border border-border bg-card p-4">
+            <p className="text-sm font-medium">{t('adminDomains.rbac.orgRoleAssign')}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {t('adminRbac.orgRoleCreateAfterHint')}
+            </p>
+            <button
+              type="button"
+              disabled={busy}
+              className={adminSecondaryBtnClass('mt-3')}
+              onClick={() => navigate('/app/admin/rbac/org-roles/assign')}
+            >
+              {t('adminDomains.rbac.orgRoleAssign')}
+            </button>
+          </div>
+        </div>
+      </div>
+    </AdminUserPanelShell>
+  );
+}

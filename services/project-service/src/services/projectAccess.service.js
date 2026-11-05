@@ -1,0 +1,287 @@
+const Project = require('../models/Project');
+const ProjectMembership = require('../models/ProjectMembership');
+const ProjectRole = require('../models/ProjectRole');
+const TaskBoard = require('../models/TaskBoard');
+const { fetchTaskWorkspaceScope } = require('./taskWorkspaceScope');
+const { fetchProjectVisibilityContext } = require('../clients/orgVisibility.client');
+const { createTtlCoalesceCache } = require('../utils/ttlCoalesceCache');
+const {
+  isProjectRbacEnabled,
+  unionPermissionsFromRoles,
+  matrixPermissionsFromRoleKeys,
+  applyInformationLevelToPermissions,
+  permissionsToBoardCapabilities,
+  hasPermission,
+  assertPermission,
+  normalizePermissionList,
+  VIEW_ONLY,
+  PROJECT_PERMISSION_KEYS,
+} = require('../utils/project/projectPermissionMatrix');
+const { resolveProjectAccess } = require('../utils/project/projectVisibility');
+const { readStoredSystemAdminState } = require('../clients/storedSystemRole.client');
+const logger = require('@enterprise/shared/utils/logger');
+
+/**
+ * systemRole=admin (IT / platform) — cao hơn org membership admin / org roles.
+ * Xác minh DB rồi bypass: cấp đủ PROJECT_PERMISSION_KEYS (không gán từng grant vào profile).
+ */
+async function resolveStoredPlatformAdmin(userId) {
+  const stored = await readStoredSystemAdminState(userId);
+  if (stored.state === 'unavailable') {
+    logger.warn('[projectAccess] stored systemRole lookup unavailable user=%s', String(userId || ''));
+    return false;
+  }
+  return stored.state === 'admin';
+}
+
+const RESOLVE_CACHE_TTL_MS = 15_000;
+const resolveCache = createTtlCoalesceCache({ ttlMs: RESOLVE_CACHE_TTL_MS });
+
+function resolvePermissionsCacheKey({ userId, projectId, boardId } = {}) {
+  const uid = String(userId || '').trim();
+  if (!uid) return '';
+  const pid = String(projectId || '').trim();
+  if (pid) return `${uid}|p:${pid}`;
+  const bid = String(boardId || '').trim();
+  if (bid) return `${uid}|b:${bid}`;
+  return '';
+}
+
+/**
+ * Resolve effective project permissions for a user on a project (uncached).
+ */
+async function resolveUserProjectPermissionsUncached({ userId, projectId, boardId } = {}) {
+  const uid = String(userId || '').trim();
+  let project = null;
+  if (projectId) {
+    project = await Project.findById(projectId).lean();
+  } else if (boardId) {
+    const board = await TaskBoard.findById(boardId).select('projectId organizationId createdBy').lean();
+    if (board?.projectId) {
+      project = await Project.findById(board.projectId).lean();
+      if (project && !project.createdBy && board.createdBy) {
+        project = { ...project, createdBy: board.createdBy };
+      }
+    }
+  }
+  if (!project || project.isActive === false) {
+    return {
+      permissions: [],
+      capabilities: permissionsToBoardCapabilities([]),
+      isOrgAdmin: false,
+      isCreator: false,
+      isSystemAdmin: false,
+      informationLevel: 'summary',
+      rbac: isProjectRbacEnabled(),
+    };
+  }
+
+  const isSystemAdmin = await resolveStoredPlatformAdmin(uid);
+  const scope = isSystemAdmin
+    ? null
+    : await fetchTaskWorkspaceScope(uid, project.organizationId);
+  const orgRole = String(scope?.membershipRole || '').toLowerCase();
+  const isOrgAdmin = orgRole === 'owner' || orgRole === 'admin';
+  const isCreator = String(project.createdBy || '') === uid;
+
+  // Platform admin > org admin — đủ key API (archive, settings, team, …).
+  if (isSystemAdmin) {
+    const perms = normalizePermissionList([...PROJECT_PERMISSION_KEYS]);
+    return {
+      permissions: perms,
+      capabilities: permissionsToBoardCapabilities(perms),
+      isOrgAdmin: false,
+      isCreator,
+      isSystemAdmin: true,
+      informationLevel: 'details',
+      rbac: isProjectRbacEnabled(),
+      project,
+      roles: [],
+    };
+  }
+
+  if (!isProjectRbacEnabled()) {
+    return {
+      permissions: [],
+      capabilities: permissionsToBoardCapabilities([]),
+      isOrgAdmin,
+      isCreator,
+      isSystemAdmin: false,
+      informationLevel: 'details',
+      rbac: false,
+      project,
+      roles: [],
+    };
+  }
+
+  // Snapshot SoT: đảm bảo project có role clone + membership không còn trỏ org template.
+  try {
+    const { ensureProjectRolesCloned } = require('./projectTeam.service');
+    await ensureProjectRolesCloned(project._id, project.organizationId);
+  } catch (err) {
+    logger.warn(
+      '[projectAccess] ensureProjectRolesCloned failed project=%s: %s',
+      String(project._id),
+      err?.message || err
+    );
+  }
+
+  const memberships = await ProjectMembership.find({
+    projectId: project._id,
+    userId: uid,
+  })
+    .select('projectRoleId')
+    .lean();
+  const hasMembership = memberships.length > 0;
+  const roleIds = memberships.map((m) => m.projectRoleId).filter(Boolean);
+  const roles = roleIds.length
+    ? await ProjectRole.find({ _id: { $in: roleIds } }).select('key permissions canAssign projectId').lean()
+    : [];
+
+  const orgScopedRoleCount = roles.filter((r) => r && (r.projectId == null || r.projectId === undefined)).length;
+  if (orgScopedRoleCount > 0) {
+    logger.warn(
+      '[projectAccess] membership still resolves org-template roles project=%s user=%s count=%s',
+      String(project._id),
+      uid,
+      orgScopedRoleCount
+    );
+  }
+
+  // Board/hub ops: SoT = doc.permissions trên ProjectRole membership.
+  // Membership owner/admin và cờ người tạo không nhận full key.
+
+  // Align with getProject: membership row ⇒ member even if role docs failed to resolve.
+  let perms = unionPermissionsFromRoles(roles);
+  if (hasMembership && roles.length === 0) {
+    logger.warn(
+      '[projectAccess] orphan membership (no resolvable roles) project=%s user=%s — VIEW_ONLY fallback',
+      String(project._id),
+      uid
+    );
+    perms = normalizePermissionList(VIEW_ONLY);
+  }
+
+  let informationLevel = 'details';
+  try {
+    const visibilityCtx = await fetchProjectVisibilityContext(project.organizationId, uid);
+    const projectRoleKeys = roles.map((r) => String(r.key || '').trim()).filter(Boolean);
+    const access = resolveProjectAccess({
+      actor: {
+        userId: uid,
+        isOrgMember: visibilityCtx.isOrgMember,
+        membershipRole: visibilityCtx.membershipRole,
+        organizationRoleKeys: visibilityCtx.organizationRoleKeys,
+        headedDepartmentIds: visibilityCtx.headedDepartmentIds,
+        memberDepartmentIds: visibilityCtx.memberDepartmentIds,
+      },
+      project,
+      membership: {
+        isMember: hasMembership || roles.length > 0,
+        projectRoleKeys,
+      },
+      orgPolicy: visibilityCtx.policy,
+    });
+    informationLevel = access.informationLevel || 'details';
+    perms = applyInformationLevelToPermissions(perms, informationLevel);
+  } catch {
+    /* keep details */
+  }
+
+  return {
+    permissions: normalizePermissionList(perms),
+    capabilities: permissionsToBoardCapabilities(perms),
+    isOrgAdmin,
+    isCreator,
+    isSystemAdmin: false,
+    informationLevel,
+    rbac: true,
+    project,
+    roles,
+  };
+}
+
+/**
+ * Resolve effective project permissions for a user on a project.
+ * Process-local TTL + in-flight coalesce (key prefers projectId).
+ */
+async function resolveUserProjectPermissions(opts = {}) {
+  const key = resolvePermissionsCacheKey(opts);
+  if (!key) return resolveUserProjectPermissionsUncached(opts);
+  return resolveCache.getOrLoad(key, () => resolveUserProjectPermissionsUncached(opts));
+}
+
+async function assertUserProjectPermission({ userId, projectId, boardId, permission, message }) {
+  const resolved = await resolveUserProjectPermissions({ userId, projectId, boardId });
+  assertPermission(resolved.permissions, permission, message);
+  return resolved;
+}
+
+/**
+ * BA-only ops (Raw/Analysis import): matrix theo role key hiện tại —
+ * bỏ qua permissions array seed cũ trên ProjectRole doc; không creator/org-admin bypass.
+ */
+async function assertUserProjectRoleMatrixPermission({
+  userId,
+  projectId,
+  boardId,
+  permission,
+  message,
+}) {
+  const resolved = await resolveUserProjectPermissions({ userId, projectId, boardId });
+  const rolePerms = matrixPermissionsFromRoleKeys(resolved.roles || []);
+  assertPermission(rolePerms, permission, message || `Thiếu quyền ${permission}`);
+  return resolved;
+}
+
+/**
+ * Cho phép một trong các key (vd. sprint:start fallback sprint:create).
+ */
+async function assertUserAnyProjectPermission({
+  userId,
+  projectId,
+  boardId,
+  permissions = [],
+  message,
+} = {}) {
+  const resolved = await resolveUserProjectPermissions({ userId, projectId, boardId });
+  const keys = (Array.isArray(permissions) ? permissions : [permissions])
+    .map((k) => String(k || '').trim())
+    .filter(Boolean);
+  if (keys.some((k) => hasPermission(resolved.permissions, k))) return resolved;
+  assertPermission(resolved.permissions, keys[0] || 'project:view', message);
+  return resolved;
+}
+
+function _clearResolveUserProjectPermissionsCacheForTests() {
+  resolveCache.clear();
+}
+
+/** Clear all resolve entries (org-default role permission updates affect many projects). */
+function clearResolveUserProjectPermissionsCache() {
+  resolveCache.clear();
+}
+
+function _setResolveUserProjectPermissionsCacheTtlForTests(ttlMs) {
+  resolveCache.setTtlMs(ttlMs);
+}
+
+/** Invalidate all resolve entries for a project (and board keys for that project are harder — clear by projectId suffix). */
+function invalidateResolveCacheForProject(projectId) {
+  const pid = String(projectId || '').trim();
+  if (!pid) return;
+  resolveCache.invalidateWhere((k) => k.includes(`|p:${pid}`));
+}
+
+module.exports = {
+  resolveUserProjectPermissions,
+  assertUserProjectPermission,
+  assertUserProjectRoleMatrixPermission,
+  assertUserAnyProjectPermission,
+  hasPermission,
+  resolveStoredPlatformAdmin,
+  invalidateResolveCacheForProject,
+  clearResolveUserProjectPermissionsCache,
+  _clearResolveUserProjectPermissionsCacheForTests,
+  _setResolveUserProjectPermissionsCacheTtlForTests,
+};

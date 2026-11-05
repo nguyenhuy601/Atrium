@@ -1,0 +1,1783 @@
+import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import api from '../../services/api';
+import { organizationAPI } from '../../services/api/organizationAPI';
+import {
+  taskAPI,
+  unwrapTaskBoardDetailPayload,
+  unwrapTaskBoardListPayload,
+} from '../../services/api/taskAPI';
+import roleAPI from '../../services/api/roleAPI';
+import userService from '../../services/userService';
+import friendService from '../../services/friendService';
+import { ConfirmDialog, Modal } from '../Shared';
+import { Plus, X } from 'lucide-react';
+import { handlePickerListKeyDown } from '../adminUsers/pickerListKeyboard';
+import { CHAT_MESSAGE_MAX_LENGTH } from '../../utils/chatComposerLimits';
+import { adminPrimaryBtnClass } from '../adminUsers/adminUserPanelUi';
+import { AdminBusySpinner } from '../adminUsers/adminPanelStates';
+import { useAppStrings } from '../../locales/appStrings';
+import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
+import { collectTeamMemberIds, filterAddTeamMemberCandidates, filterMembersForTeam } from '../../utils/filterTeamMembers';
+import { RBAC_GRANT, parseUserPermissionsPayload } from '../../config/rbacUiGrantMap';
+import useCompanyAdminAccess from '../../hooks/useCompanyAdminAccess';
+import { useTheme } from '../../context/ThemeContext';
+import { shellNavRailBackdrop, shellNavRailMenuBackdropZ } from '../../theme/shellTheme';
+import OrgWorkspaceSearchSidebar from '../../features/search/components/OrgWorkspaceSearchSidebar';
+import OrgMemberSidebarAttachments from '../../features/orgAttachments/OrgMemberSidebarAttachments';
+import UserAvatar from '../Shared/UserAvatar';
+import { isAvatarImageUrl } from '../../utils/avatarDisplay';
+import { usePresenceSubscribe } from '../../hooks/usePresenceSubscribe';
+import { enrichMembershipsWithProfiles } from '../../features/search/enrichOrgMembers';
+import {
+  FIGMA_ORG_MEMBER_SIDEBAR_HEAD,
+  FIGMA_ORG_MEMBER_SIDEBAR_ROOT,
+  FIGMA_ORG_MEMBER_SIDEBAR_SUB,
+  FIGMA_ORG_MEMBER_SIDEBAR_TITLE,
+  FIGMA_ORG_MEMBER_TAB_BTN,
+  FIGMA_ORG_MEMBER_TAB_BTN_ACTIVE,
+  FIGMA_ORG_MEMBER_TAB_STRIP,
+} from './figmaOrganizationClasses';
+
+const unwrapBody = (payload) => payload?.data ?? payload;
+
+const MEMBERSHIP_ROLE_ORDER = ['owner', 'admin', 'member'];
+
+function canOrgResourceAction(permissions, resource, action = 'read') {
+  if (!Array.isArray(permissions)) return false;
+  for (const perm of permissions) {
+    const res = perm?.resource;
+    const actions = Array.isArray(perm?.actions) ? perm.actions : [];
+    if (res !== resource && res !== '*') continue;
+    if (
+      actions.includes(action) ||
+      actions.includes('*') ||
+      actions.includes('admin')
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Fallback khi chưa lấy được RBAC từ role-permission-service */
+function fallbackOrgTabFlags(myRole) {
+  const role = String(myRole || 'member').toLowerCase();
+  if (role === 'owner' || role === 'admin') {
+    return { tasks: true, files: true };
+  }
+  if (role === 'hr') {
+    return { tasks: true, files: false };
+  }
+  return { tasks: true, files: false };
+}
+
+function memberUserId(m) {
+  const u = m?.user;
+  if (u && typeof u === 'object') return String(u._id || u.id || '');
+  return String(u || '');
+}
+
+async function fetchMembersWithRolesBundle(orgId, departmentId = '') {
+  const deptId = String(departmentId || '').trim();
+  const payload = await organizationAPI.getMembersWithRoles(orgId, {
+    ...(deptId ? { departmentId: deptId } : {}),
+  });
+  const body = unwrapBody(payload);
+  const bundle = body?.data ?? body;
+  const list = Array.isArray(bundle?.members)
+    ? bundle.members
+    : normalizeApiList(payload);
+  const roles = Array.isArray(bundle?.roles) ? bundle.roles : [];
+  const members = list.filter((m) => String(m?.status || 'active') === 'active');
+  return { members, roles };
+}
+
+async function enrichMembersWithProfiles(members, memberFallback) {
+  return enrichMembershipsWithProfiles(members, { fallback: memberFallback });
+}
+
+/**
+ * Danh sách thành viên tổ chức: theo vai trò (khi org có định nghĩa roles hệ thống)
+ * hoặc Trực tuyến / Ngoại tuyến (mặc định).
+ */
+const CONTEXT_MENU_PAD = 8;
+const contextMenuItemClass =
+  'flex w-full items-center px-3 py-2 text-left text-foreground transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none';
+
+/**
+ * Vị trí khởi tạo tại con trỏ; căn chính xác theo chiều cao thật của menu trong useLayoutEffect.
+ */
+function computeContextMenuPosition(clientX, clientY) {
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1024;
+  const menuW = Math.min(260, vw - 2 * CONTEXT_MENU_PAD);
+
+  const left = Math.min(Math.max(CONTEXT_MENU_PAD, clientX), vw - menuW - CONTEXT_MENU_PAD);
+  const top = Math.max(CONTEXT_MENU_PAD, clientY);
+
+  return { left, top, menuW };
+}
+
+function canRemoveMember(myRole, targetRole, targetUserId, currentUserId) {
+  if (!currentUserId || String(targetUserId) === String(currentUserId)) return false;
+  const my = String(myRole || '').toLowerCase();
+  const tr = String(targetRole || '').toLowerCase();
+  if (my !== 'owner' && my !== 'admin') return false;
+  if (tr === 'owner') return false;
+  if (my === 'admin' && tr === 'admin') return false;
+  return true;
+}
+
+function normalizeRoleRecord(role) {
+  if (!role || typeof role !== 'object') return null;
+  const roleId = String(role.id || role._id || '');
+  if (!roleId) return null;
+  const rawName = String(role.name || role.label || 'Role');
+  const displayName = rawName
+    .replace(/\s*[•·]\s*(div|dep|team|branch)_[a-z0-9_-]+$/i, '')
+    .replace(
+      /^\s*(khối|khoi|phòng ban|phong ban|team|chi nhánh|chi nhanh|division|department|branch)\s*:\s*/i,
+      ''
+    )
+    .trim();
+  return {
+    roleId,
+    name: rawName,
+    displayName: displayName || rawName,
+    raw: role,
+  };
+}
+
+function normalizeApiList(payload) {
+  const body = unwrapBody(payload);
+  if (Array.isArray(body?.data)) return body.data;
+  if (Array.isArray(body)) return body;
+  if (Array.isArray(body?.members)) return body.members;
+  return [];
+}
+
+function safeArray(input) {
+  return Array.isArray(input) ? input : [];
+}
+
+function formatTaskDueDate(input) {
+  if (!input) return '';
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('vi-VN');
+}
+
+function toLowerStr(input) {
+  return String(input || '').trim().toLowerCase();
+}
+
+function OrganizationMemberSidebar({
+  organizationId,
+  departmentId = '',
+  workspaceSlug = '',
+  organizationName = '',
+  selectedTeamId = '',
+  teams = [],
+  canAddTeamMembers = false,
+  onTeamMembersSaved,
+  onlineUsers = [],
+  socketConnected = false,
+  refreshKey = 0,
+  currentUserId = null,
+  myRole = 'member',
+  onMentionUser,
+  onMemberRemoved,
+  /** Khi bọc trong OrganizationMemberPeekDock: false = panel đang thu → đóng menu portal */
+  memberDockOpen,
+  onMemberMenuOpenChange,
+  onMemberMenuClosed,
+  selectedChannelId = '',
+  channelPermissionMatrix = {},
+  workspaceSearchOpen = false,
+  onWorkspaceSearchOpenChange,
+  searchChannels = [],
+  serverId,
+  onWorkspaceSearchJump,
+}) {
+  const { isFullAccess } = useCompanyAdminAccess();
+  const { t } = useAppStrings();
+  const { isDarkMode } = useTheme();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [rows, setRows] = useState([]);
+  const [organizationRoles, setOrganizationRoles] = useState([]);
+  const [groupMode, setGroupMode] = useState('role'); // 'presence' | 'role'
+  const [menu, setMenu] = useState({
+    open: false,
+    x: 0,
+    y: 0,
+    member: null,
+    /** Chỉ đặt khi nội dung cao hơn viewport — lúc đó mới cần cuộn trong menu */
+    menuMaxHeight: undefined,
+  });
+  const menuPanelRef = useRef(null);
+  const rolesMenuBtnRef = useRef(null);
+  const rolesSubmenuRef = useRef(null);
+  const memberCardRef = useRef(null);
+  const [rolesSubmenu, setRolesSubmenu] = useState({
+    open: false,
+    x: 0,
+    y: 0,
+    member: null,
+    loading: false,
+    busyRoleId: '',
+    selectedRoleIds: {},
+  });
+  const [memberCard, setMemberCard] = useState({
+    open: false,
+    x: 0,
+    y: 0,
+    loading: false,
+    member: null,
+    profile: null,
+    assignedRoleNames: [],
+    quickMessage: '',
+  });
+  const [friendIdsSet, setFriendIdsSet] = useState(null);
+  /** Xóa thành viên / Chặn — dùng modal thay cho window.confirm (tránh tiêu đề localhost) */
+  const [memberConfirm, setMemberConfirm] = useState(null);
+  /** Tab panel phải — mặc định danh sách thành viên */
+  const [sidebarTab, setSidebarTab] = useState('people');
+  const [addMemberOpen, setAddMemberOpen] = useState(false);
+  const [addMemberIds, setAddMemberIds] = useState([]);
+  const [savingTeamMembers, setSavingTeamMembers] = useState(false);
+  const [orgPermissions, setOrgPermissions] = useState([]);
+  const [orgPermissionsLoaded, setOrgPermissionsLoaded] = useState(false);
+  const [orgGrantCodes, setOrgGrantCodes] = useState([]);
+  const [teamTaskSections, setTeamTaskSections] = useState([]);
+  const [loadingSidebarTasks, setLoadingSidebarTasks] = useState(false);
+  const [sidebarTasksError, setSidebarTasksError] = useState('');
+  const memberUserIds = useMemo(
+    () => rows.map((m) => String(m.userId || '')).filter(Boolean),
+    [rows]
+  );
+  usePresenceSubscribe(memberUserIds, {
+    enabled: Boolean(organizationId) && sidebarTab === 'people' && memberDockOpen !== false,
+  });
+
+  useEffect(() => {
+    if (!organizationId || !currentUserId) {
+      setOrgPermissions([]);
+      setOrgGrantCodes([]);
+      setOrgPermissionsLoaded(false);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      setOrgPermissionsLoaded(false);
+      try {
+        const payload = await api.get(
+          `/permissions/user/${encodeURIComponent(String(currentUserId))}/server/${encodeURIComponent(String(organizationId))}`
+        );
+        const parsed = parseUserPermissionsPayload(payload);
+        const body = unwrapBody(payload);
+        const list = parsed.permissions.length
+          ? parsed.permissions
+          : Array.isArray(body?.data)
+            ? body.data
+            : Array.isArray(body)
+              ? body
+              : [];
+        if (!cancelled) {
+          setOrgPermissions(list);
+          setOrgGrantCodes(Object.keys(parsed.grantScopes || {}));
+        }
+      } catch {
+        if (!cancelled) {
+          setOrgPermissions([]);
+          setOrgGrantCodes([]);
+        }
+      } finally {
+        if (!cancelled) setOrgPermissionsLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId, currentUserId]);
+
+  const hasReadableChannel = useMemo(() => {
+    const matrix = channelPermissionMatrix || {};
+    return Object.values(matrix).some((p) => p?.canRead || p?.canSee);
+  }, [channelPermissionMatrix]);
+
+  const { canShowTasksTab, canShowFilesTab } = useMemo(() => {
+    const fallback = fallbackOrgTabFlags(myRole);
+    if (!orgPermissionsLoaded || !orgPermissions.length) {
+      return {
+        canShowTasksTab: fallback.tasks,
+        canShowFilesTab: fallback.files || hasReadableChannel,
+      };
+    }
+    return {
+      canShowTasksTab: canOrgResourceAction(orgPermissions, 'task', 'read'),
+      canShowFilesTab:
+        canOrgResourceAction(orgPermissions, 'document', 'read') || hasReadableChannel,
+    };
+  }, [orgPermissions, orgPermissionsLoaded, myRole, hasReadableChannel]);
+
+  const showSidebarTabs = true;
+  const teamNameById = useMemo(() => {
+    const map = new Map();
+    for (const row of safeArray(teams)) {
+      const id = String(row?._id || '');
+      if (!id) continue;
+      map.set(id, String(row?.name || '').trim() || 'Team');
+    }
+    return map;
+  }, [teams]);
+
+  const selectedTeam = useMemo(
+    () =>
+      safeArray(teams).find(
+        (row) => String(row?._id || row?.id || '') === String(selectedTeamId || '')
+      ) || null,
+    [teams, selectedTeamId]
+  );
+
+  const visibleRows = useMemo(
+    () => filterMembersForTeam(rows, selectedTeamId, selectedTeam),
+    [rows, selectedTeamId, selectedTeam]
+  );
+
+  const showAddTeamMember = Boolean(selectedTeamId) && (
+    Boolean(canAddTeamMembers) ||
+    orgGrantCodes.some((k) => String(k || '').trim().toLowerCase() === RBAC_GRANT.TEAM_UPDATE)
+  );
+
+  const teamMemberIdSet = useMemo(
+    () => collectTeamMemberIds(selectedTeam),
+    [selectedTeam]
+  );
+
+  const addMemberCandidates = useMemo(
+    () => filterAddTeamMemberCandidates(rows, selectedTeamId, selectedTeam),
+    [rows, selectedTeamId, selectedTeam]
+  );
+
+  const currentUserIdStr = String(currentUserId || '').trim();
+
+  useEffect(() => {
+    if (sidebarTab !== 'tasks') return;
+    if (!organizationId || !currentUserIdStr) {
+      setTeamTaskSections([]);
+      setSidebarTasksError('');
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setLoadingSidebarTasks(true);
+      setSidebarTasksError('');
+      try {
+        const boardRes = await taskAPI.getBoards({
+          organizationId: String(organizationId),
+          ...(selectedTeamId ? { teamId: String(selectedTeamId) } : {}),
+          ...(workspaceSlug ? { workspaceSlug } : {}),
+        });
+        const boards = unwrapTaskBoardListPayload(boardRes);
+        const boardDetailOpts = workspaceSlug ? { workspaceSlug } : {};
+        const detailResults = await Promise.allSettled(
+          boards.map(async (board) => {
+            const detailRes = await taskAPI.getBoardDetail(
+              String(board?._id || ''),
+              boardDetailOpts
+            );
+            return {
+              board,
+              detail: unwrapTaskBoardDetailPayload(detailRes),
+            };
+          })
+        );
+
+        if (cancelled) return;
+
+        const teamBuckets = new Map();
+        for (const result of detailResults) {
+          if (result.status !== 'fulfilled') continue;
+          const board = result.value?.board || {};
+          const detail = result.value?.detail || null;
+          if (!detail?.board?._id) continue;
+
+          const boardData = detail.board || board;
+          const boardVisibility = toLowerStr(boardData.visibility);
+          const isTeamPublicBoard = boardVisibility === 'workspace' || boardVisibility === 'public';
+          const listsMap = new Map(
+            safeArray(detail.lists).map((list) => [String(list?._id || ''), String(list?.title || '')])
+          );
+          const cards = safeArray(detail.cards)
+            .filter((card) => {
+              const assigneeId = String(card?.assigneeId || '');
+              return assigneeId === currentUserIdStr || isTeamPublicBoard;
+            })
+            .map((card) => ({
+              _id: String(card?._id || ''),
+              title: String(card?.title || '').trim() || t('organizations.memberSidebarTaskUntitled'),
+              status: String(card?.status || 'todo'),
+              dueDate: card?.dueDate || null,
+              listTitle: listsMap.get(String(card?.listId || '')) || '',
+              boardTitle: String(boardData?.title || board?.title || '').trim(),
+              assigneeId: String(card?.assigneeId || ''),
+              createdAt: card?.createdAt || null,
+            }))
+            .filter((card) => Boolean(card._id));
+
+          if (!cards.length) continue;
+          const teamId = String(boardData?.teamId || board?.teamId || '') || 'no-team';
+          const existing = teamBuckets.get(teamId) || [];
+          teamBuckets.set(teamId, existing.concat(cards));
+        }
+
+        const nextSections = [...teamBuckets.entries()]
+          .map(([teamId, tasks]) => {
+            const sorted = [...tasks].sort((a, b) => {
+              const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.POSITIVE_INFINITY;
+              const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.POSITIVE_INFINITY;
+              if (aDue !== bDue) return aDue - bDue;
+              return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+            });
+            return {
+              teamId,
+              teamName: teamNameById.get(teamId) || t('organizations.memberSidebarTeamUnknown'),
+              tasks: sorted,
+            };
+          })
+          .sort((a, b) => a.teamName.localeCompare(b.teamName, 'vi'));
+
+        setTeamTaskSections(nextSections);
+      } catch (err) {
+        if (cancelled) return;
+        setTeamTaskSections([]);
+        setSidebarTasksError(
+          resolveApiErrorMessage(err, { t, fallback: t('organizations.memberSidebarTasksLoadError') })
+        );
+      } finally {
+        if (!cancelled) setLoadingSidebarTasks(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sidebarTab, organizationId, currentUserIdStr, selectedTeamId, teamNameById]);
+
+  const activityFeedItems = useMemo(
+    () => [
+      { id: 'a1', kind: 'join', label: t('organizations.memberActivityJoined', { name: rows[0]?.displayName || '—' }) },
+      { id: 'a2', kind: 'task', label: t('organizations.memberActivityTask') },
+      { id: 'a3', kind: 'file', label: t('organizations.memberActivityFile') },
+      { id: 'a4', kind: 'meet', label: t('organizations.memberActivityMeeting') },
+    ],
+    [rows, t]
+  );
+
+  useEffect(() => {
+    if (sidebarTab === 'tasks' && !canShowTasksTab) setSidebarTab('people');
+    if (sidebarTab === 'files' && !canShowFilesTab) setSidebarTab('people');
+  }, [sidebarTab, canShowTasksTab, canShowFilesTab]);
+
+  useEffect(() => {
+    if (!organizationId || sidebarTab !== 'people') return;
+    if (memberDockOpen === false) return;
+    let cancelled = false;
+    const deptId = String(departmentId || '').trim();
+    (async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const { members: rawMembers, roles: rolesList } =
+          await fetchMembersWithRolesBundle(organizationId, deptId);
+        if (cancelled) return;
+
+        const normalizedRoles = rolesList.map(normalizeRoleRecord).filter(Boolean);
+        setOrganizationRoles(normalizedRoles);
+        const hasCustomRoles = Array.isArray(rolesList) && rolesList.length > 0;
+        setGroupMode(hasCustomRoles ? 'role' : 'presence');
+
+        const enriched = await enrichMembersWithProfiles(rawMembers, t('organizations.memberFallbackShort'));
+        if (cancelled) return;
+        setRows(enriched);
+      } catch (e) {
+        if (!cancelled) {
+          setError(t('organizations.loadMembersError'));
+          setRows([]);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId, departmentId, refreshKey, sidebarTab, memberDockOpen, t]);
+
+  useEffect(() => {
+    setAddMemberOpen(false);
+    setAddMemberIds([]);
+    setMemberCard((prev) => ({ ...prev, open: false, member: null }));
+    setRolesSubmenu((prev) => ({ ...prev, open: false, member: null }));
+  }, [organizationId, selectedTeamId]);
+
+  const onlineSet = useMemo(
+    () => new Set((onlineUsers || []).map((id) => String(id))),
+    [onlineUsers]
+  );
+
+  const checkOnline = (userId) => socketConnected && onlineSet.has(String(userId));
+
+  const groupedByPresence = useMemo(() => {
+    const on = [];
+    const off = [];
+    for (const r of visibleRows) {
+      const online = socketConnected && onlineSet.has(String(r.userId));
+      if (online) on.push(r);
+      else off.push(r);
+    }
+    return [
+      { key: 'on', title: t('organizations.presenceOnline'), items: on },
+      { key: 'off', title: t('organizations.presenceOffline'), items: off },
+    ];
+  }, [visibleRows, onlineSet, socketConnected, t]);
+
+  const groupedByMembershipRole = useMemo(() => {
+    const roleLabel = {
+      owner: t('organizations.memberGroupManagement'),
+      admin: t('organizations.memberGroupAdmins'),
+      member: t('organizations.memberGroupMembers'),
+    };
+    const buckets = { owner: [], admin: [], member: [] };
+    for (const r of visibleRows) {
+      const k = MEMBERSHIP_ROLE_ORDER.includes(r.role) ? r.role : 'member';
+      buckets[k].push(r);
+    }
+    return MEMBERSHIP_ROLE_ORDER.filter((k) => buckets[k].length > 0).map((k) => ({
+      key: k,
+      title: roleLabel[k] || k,
+      items: buckets[k],
+    }));
+  }, [visibleRows, t]);
+
+  const roleLabelMap = useMemo(
+    () => ({
+      owner: t('organizations.roleOwner'),
+      admin: t('organizations.roleAdmin'),
+      member: t('organizations.roleMember'),
+    }),
+    [t]
+  );
+  const canManageRoleAssignments = ['owner', 'admin'].includes(String(myRole || '').toLowerCase());
+
+  const sections = groupMode === 'role' ? groupedByMembershipRole : groupedByPresence;
+
+  const closeMenu = useCallback(() => {
+    setMenu((prev) => ({ ...prev, open: false, member: null, menuMaxHeight: undefined }));
+    setRolesSubmenu((prev) => ({
+      ...prev,
+      open: false,
+      member: null,
+      loading: false,
+      busyRoleId: '',
+      selectedRoleIds: {},
+    }));
+  }, []);
+
+  const openAddMemberModal = useCallback(() => {
+    if (!showAddTeamMember) return;
+    setAddMemberIds([]);
+    setAddMemberOpen(true);
+  }, [showAddTeamMember]);
+
+  const toggleAddMemberId = useCallback((userId) => {
+    const id = String(userId || '').trim();
+    if (!id) return;
+    setAddMemberIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }, []);
+
+  const saveTeamMembers = useCallback(async () => {
+    if (!showAddTeamMember || !organizationId || !selectedTeamId || savingTeamMembers) return;
+    const nextIds = [
+      ...new Set([...teamMemberIdSet, ...addMemberIds.map((id) => String(id).trim()).filter(Boolean)]),
+    ];
+    setSavingTeamMembers(true);
+    try {
+      await organizationAPI.updateTeamByHierarchy(organizationId, selectedTeamId, {
+        members: nextIds,
+      });
+      toast.success(t('organizations.addTeamMemberSaved'));
+      setAddMemberOpen(false);
+      setAddMemberIds([]);
+      await onTeamMembersSaved?.();
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('organizations.addTeamMemberFail') }));
+    } finally {
+      setSavingTeamMembers(false);
+    }
+  }, [
+    showAddTeamMember,
+    organizationId,
+    selectedTeamId,
+    savingTeamMembers,
+    teamMemberIdSet,
+    addMemberIds,
+    onTeamMembersSaved,
+    t,
+  ]);
+
+  useEffect(() => {
+    closeMenu();
+  }, [location.pathname, location.search, closeMenu]);
+
+  const prevMenuOpenRef = useRef(false);
+
+  useLayoutEffect(() => {
+    onMemberMenuOpenChange?.(menu.open);
+  }, [menu.open, onMemberMenuOpenChange]);
+
+  useLayoutEffect(() => {
+    if (memberDockOpen === false) closeMenu();
+  }, [memberDockOpen, closeMenu]);
+
+  useEffect(() => {
+    if (prevMenuOpenRef.current && !menu.open) {
+      onMemberMenuClosed?.();
+    }
+    prevMenuOpenRef.current = menu.open;
+  }, [menu.open, onMemberMenuClosed]);
+
+  const openMemberMenu = useCallback((e, member) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const { left, top, menuW } = computeContextMenuPosition(e.clientX, e.clientY);
+    setMenu({ open: true, x: left, y: top, menuW, member, menuMaxHeight: undefined });
+    setRolesSubmenu((prev) => ({ ...prev, open: false, member: null, selectedRoleIds: {} }));
+  }, []);
+
+  const fetchSelectedRoleIdsForUser = useCallback(
+    async (userId) => {
+      if (!userId || organizationRoles.length === 0) return {};
+      if (!organizationId) return {};
+      try {
+        const payload = await roleAPI.getUserRoles(userId, organizationId);
+        const rows = normalizeApiList(payload);
+        const selectedSet = new Set(
+          rows
+            .map((item) =>
+              String(
+                item?.roleId ||
+                item?.role?._id ||
+                item?.role?.id ||
+                item?._id ||
+                item?.id ||
+                ''
+              )
+            )
+            .filter(Boolean)
+        );
+        return Object.fromEntries(organizationRoles.map((role) => [role.roleId, selectedSet.has(String(role.roleId))]));
+      } catch {
+        return {};
+      }
+    },
+    [organizationId, organizationRoles]
+  );
+
+  const openRolesSubmenu = useCallback(
+    async (member) => {
+      if (!member?.userId) return;
+      const rect = rolesMenuBtnRef.current?.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const panelW = Math.min(260, vw - 2 * CONTEXT_MENU_PAD);
+      const approxH = Math.min(340, vh - 2 * CONTEXT_MENU_PAD);
+      const fallbackLeft = (menu.x || 0) + (menu.menuW || 240) + 8;
+      const left = rect
+        ? rect.right + panelW + CONTEXT_MENU_PAD > vw
+          ? Math.max(CONTEXT_MENU_PAD, rect.left - panelW - 8)
+          : Math.min(vw - panelW - CONTEXT_MENU_PAD, rect.right + 8)
+        : Math.min(vw - panelW - CONTEXT_MENU_PAD, fallbackLeft);
+      const topBase = rect?.top ?? menu.y;
+      const top = Math.max(
+        CONTEXT_MENU_PAD,
+        Math.min(topBase - 4, vh - approxH - CONTEXT_MENU_PAD)
+      );
+
+      setRolesSubmenu({
+        open: true,
+        x: left,
+        y: top,
+        member,
+        loading: true,
+        busyRoleId: '',
+        selectedRoleIds: {},
+      });
+      const selectedRoleIds = await fetchSelectedRoleIdsForUser(member.userId);
+      setRolesSubmenu((prev) => {
+        if (!prev.open || String(prev.member?.userId || '') !== String(member.userId)) return prev;
+        return { ...prev, loading: false, selectedRoleIds };
+      });
+    },
+    [fetchSelectedRoleIdsForUser, menu.menuW, menu.x, menu.y]
+  );
+
+  /** Căn menu theo kích thước thật vào viewport — ưu tiên dịch lên góc dưới màn hình; chỉ cuộn trong menu khi nội dung cao hơn viewport */
+  useLayoutEffect(() => {
+    if (!menu.open || !menu.member || !menuPanelRef.current) return;
+
+    const el = menuPanelRef.current;
+    const pad = CONTEXT_MENU_PAD;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const maxAvailH = vh - 2 * pad;
+
+    const rect = el.getBoundingClientRect();
+    const naturalH = el.scrollHeight;
+    const w = rect.width;
+
+    let left = menu.x;
+    let top = menu.y;
+    let maxH = undefined;
+
+    if (naturalH <= maxAvailH) {
+      left = Math.max(pad, Math.min(menu.x, vw - pad - w));
+      top = Math.max(pad, Math.min(menu.y, vh - pad - naturalH));
+    } else {
+      maxH = maxAvailH;
+      left = Math.max(pad, Math.min(menu.x, vw - pad - w));
+      top = pad;
+    }
+
+    setMenu((m) => {
+      if (!m.open || !m.member) return m;
+      const samePos = Math.abs(left - m.x) < 0.5 && Math.abs(top - m.y) < 0.5;
+      const sameMax =
+        (maxH === undefined && m.menuMaxHeight === undefined) ||
+        (maxH !== undefined && Math.abs(maxH - (m.menuMaxHeight ?? 0)) < 0.5);
+      if (samePos && sameMax) return m;
+      return { ...m, x: left, y: top, menuMaxHeight: maxH };
+    });
+  }, [menu.open, menu.member, menu.x, menu.y, menu.menuW, menu.member?.membershipId]);
+
+  useLayoutEffect(() => {
+    if (!rolesSubmenu.open || !rolesSubmenuRef.current) return;
+    const rect = rolesSubmenuRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let nextX = rolesSubmenu.x;
+    let nextY = rolesSubmenu.y;
+    if (rect.right > vw - CONTEXT_MENU_PAD) {
+      nextX = Math.max(CONTEXT_MENU_PAD, vw - rect.width - CONTEXT_MENU_PAD);
+    }
+    if (rect.bottom > vh - CONTEXT_MENU_PAD) {
+      nextY = Math.max(CONTEXT_MENU_PAD, vh - rect.height - CONTEXT_MENU_PAD);
+    }
+    if (Math.abs(nextX - rolesSubmenu.x) > 0.5 || Math.abs(nextY - rolesSubmenu.y) > 0.5) {
+      setRolesSubmenu((prev) => ({ ...prev, x: nextX, y: nextY }));
+    }
+  }, [rolesSubmenu.open, rolesSubmenu.x, rolesSubmenu.y, rolesSubmenu.loading, organizationRoles.length]);
+
+  useLayoutEffect(() => {
+    if (!memberCard.open || !memberCardRef.current) return;
+    const rect = memberCardRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let nextX = memberCard.x;
+    let nextY = memberCard.y;
+    if (rect.right > vw - CONTEXT_MENU_PAD) {
+      nextX = Math.max(CONTEXT_MENU_PAD, vw - rect.width - CONTEXT_MENU_PAD);
+    }
+    if (rect.bottom > vh - CONTEXT_MENU_PAD) {
+      nextY = Math.max(CONTEXT_MENU_PAD, vh - rect.height - CONTEXT_MENU_PAD);
+    }
+    if (rect.left < CONTEXT_MENU_PAD) {
+      nextX = CONTEXT_MENU_PAD;
+    }
+    if (rect.top < CONTEXT_MENU_PAD) {
+      nextY = CONTEXT_MENU_PAD;
+    }
+    if (Math.abs(nextX - memberCard.x) > 0.5 || Math.abs(nextY - memberCard.y) > 0.5) {
+      setMemberCard((prev) => ({ ...prev, x: nextX, y: nextY }));
+    }
+  }, [memberCard.open, memberCard.x, memberCard.y, memberCard.loading, memberCard.member?.userId]);
+
+  useEffect(() => {
+    if (!memberCard.open) return;
+    const handlePointerDown = (event) => {
+      const target = event.target;
+      if (memberCardRef.current?.contains(target)) return;
+      if (menuPanelRef.current?.contains(target)) return;
+      if (rolesSubmenuRef.current?.contains(target)) return;
+      setMemberCard((prev) => ({ ...prev, open: false }));
+    };
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setMemberCard((prev) => ({ ...prev, open: false }));
+      }
+    };
+    window.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [memberCard.open]);
+
+  useEffect(() => {
+    if (!menu.open) return;
+    const onKey = (ev) => {
+      if (ev.key === 'Escape') closeMenu();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menu.open, closeMenu]);
+
+  useEffect(() => {
+    if (!menu.open) return undefined;
+    const frame = requestAnimationFrame(() => {
+      menuPanelRef.current?.querySelector('button:not([disabled])')?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [menu.open]);
+
+  useEffect(() => {
+    if (!rolesSubmenu.open || rolesSubmenu.loading) return undefined;
+    const frame = requestAnimationFrame(() => {
+      rolesSubmenuRef.current?.querySelector('button:not([disabled])')?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [rolesSubmenu.open, rolesSubmenu.loading]);
+
+  const handleContextMenuKeyDown = useCallback(
+    (event) => {
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        closeMenu();
+        return;
+      }
+      handlePickerListKeyDown(event);
+    },
+    [closeMenu]
+  );
+
+  const confirmMemberAction = useCallback(async () => {
+    if (!memberConfirm?.member) return;
+    const m = memberConfirm.member;
+    try {
+      if (memberConfirm.type === 'remove') {
+        if (!organizationId || !m?.userId) return;
+        await organizationAPI.removeMember(organizationId, m.userId);
+        toast.success(t('organizations.toastMemberRemoved'));
+        onMemberRemoved?.();
+      } else {
+        toast.error(t('organizations.toastBlockFail'));
+      }
+    } catch (err) {
+      const fallback =
+        memberConfirm.type === 'remove' ? t('organizations.toastRemoveFail') : t('organizations.toastBlockFail');
+      toast.error(resolveApiErrorMessage(err, { t, fallback }));
+    }
+  }, [memberConfirm, organizationId, onMemberRemoved, t]);
+
+  const mentionText = (m) => {
+    const display = String(m.displayName || m.name || '').trim();
+    if (display) return `@${display} `;
+    const tag = m.username || String(m.displayName || m.name || 'user').replace(/\s+/g, '_');
+    return `@${tag} `;
+  };
+
+  const ensureFriendIdsLoaded = useCallback(async () => {
+    if (friendIdsSet instanceof Set) return friendIdsSet;
+    try {
+      const payload = await friendService.getFriends();
+      const list = normalizeApiList(payload);
+      const next = new Set();
+      for (const item of list) {
+        const raw = item?.friendId || item;
+        const id = raw?._id || raw?.userId || raw?.id || item?.userId || item?.id;
+        if (id) next.add(String(id));
+      }
+      setFriendIdsSet(next);
+      return next;
+    } catch {
+      const empty = new Set();
+      setFriendIdsSet(empty);
+      return empty;
+    }
+  }, [friendIdsSet]);
+
+  const openMemberCard = useCallback(
+    async (member, anchorRect = null) => {
+      if (!member?.userId) return;
+      closeMenu();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const popupW = Math.min(340, vw - 2 * CONTEXT_MENU_PAD);
+      const popupH = 410;
+      const left = anchorRect
+        ? anchorRect.right + popupW + CONTEXT_MENU_PAD > vw
+          ? Math.max(CONTEXT_MENU_PAD, anchorRect.left - popupW - 8)
+          : Math.min(vw - popupW - CONTEXT_MENU_PAD, anchorRect.right + 8)
+        : Math.min(vw - popupW - CONTEXT_MENU_PAD, (menu.x || 0) + (menu.menuW || 240) + 8);
+      const top = anchorRect
+        ? Math.max(
+            CONTEXT_MENU_PAD,
+            Math.min(anchorRect.top - 6, vh - popupH - CONTEXT_MENU_PAD)
+          )
+        : Math.max(
+            CONTEXT_MENU_PAD,
+            Math.min(menu.y || CONTEXT_MENU_PAD, vh - popupH - CONTEXT_MENU_PAD)
+          );
+      setMemberCard({
+        open: true,
+        x: left,
+        y: top,
+        loading: true,
+        member,
+        profile: null,
+        assignedRoleNames: [],
+        quickMessage: '',
+      });
+      const [profilePayload, selectedRoleIds] = await Promise.all([
+        userService.getProfile(member.userId).catch(() => null),
+        fetchSelectedRoleIdsForUser(member.userId).catch(() => ({})),
+        ensureFriendIdsLoaded(),
+      ]);
+      const profileBody = profilePayload ? unwrapBody(profilePayload) : null;
+      const profile = profileBody?.data ?? profileBody ?? null;
+      const assignedRoleNames = organizationRoles
+        .filter((role) => selectedRoleIds[role.roleId])
+        .map((role) => role.displayName || role.name);
+      setMemberCard((prev) => {
+        if (!prev.open || String(prev.member?.userId || '') !== String(member.userId)) return prev;
+        return {
+          ...prev,
+          loading: false,
+          profile,
+          assignedRoleNames,
+        };
+      });
+    },
+    [closeMenu, ensureFriendIdsLoaded, fetchSelectedRoleIdsForUser, menu.menuW, menu.x, menu.y, organizationRoles]
+  );
+
+  const toggleMemberRole = useCallback(
+    async (role) => {
+      if (!canManageRoleAssignments) return;
+      if (!rolesSubmenu.member?.userId || !organizationId) return;
+      if (rolesSubmenu.busyRoleId) return;
+      const roleId = role.roleId;
+      const member = rolesSubmenu.member;
+      const isSelected = Boolean(rolesSubmenu.selectedRoleIds?.[roleId]);
+      setRolesSubmenu((prev) => ({ ...prev, busyRoleId: roleId }));
+      try {
+        let roleRes = null;
+        if (isSelected) {
+          roleRes = await roleAPI.removeRoleFromUser(roleId, member.userId, organizationId);
+        } else {
+          roleRes = await roleAPI.assignRoleToUser(roleId, member.userId, organizationId);
+        }
+        const rolePayload = unwrapBody(roleRes);
+        const roleData = rolePayload?.data ?? rolePayload ?? {};
+        const placementSync = roleData?.placementSync || null;
+        setRolesSubmenu((prev) => ({
+          ...prev,
+          busyRoleId: '',
+          selectedRoleIds: {
+            ...prev.selectedRoleIds,
+            [roleId]: !isSelected,
+          },
+        }));
+        setMemberCard((prev) => {
+          if (!prev.open || String(prev.member?.userId || '') !== String(member.userId)) return prev;
+          const before = Array.isArray(prev.assignedRoleNames) ? prev.assignedRoleNames : [];
+          const nameSet = new Set(before);
+          const displayName = role.displayName || role.name;
+          if (isSelected) nameSet.delete(displayName);
+          else nameSet.add(displayName);
+          return { ...prev, assignedRoleNames: Array.from(nameSet) };
+        });
+        if (placementSync?.attempted) {
+          if (placementSync?.success) {
+            toast.success(
+              isSelected
+                ? t('organizations.memberRoleSyncRemovedOk')
+                : t('organizations.memberRoleSyncAssignedOk')
+            );
+          } else {
+            toast.error(
+              isSelected
+                ? t('organizations.memberRoleSyncRemovedPartial')
+                : t('organizations.memberRoleSyncAssignedPartial')
+            );
+          }
+        } else {
+          toast.success(
+            isSelected
+              ? t('organizations.memberRoleRemovedOk')
+              : t('organizations.memberRoleAssignedOk')
+          );
+        }
+      } catch (err) {
+        setRolesSubmenu((prev) => ({ ...prev, busyRoleId: '' }));
+        toast.error(resolveApiErrorMessage(err, { t, fallback: t('organizations.memberRoleUpdateFail') }));
+      }
+    },
+    [canManageRoleAssignments, organizationId, rolesSubmenu]
+  );
+
+  const handleQuickMessageSubmit = useCallback(() => {
+    const target = memberCard.member;
+    if (!target?.userId) return;
+    const text = String(memberCard.quickMessage || '').trim();
+    setMemberCard((prev) => ({ ...prev, open: false }));
+    navigate('/app/communicate/chat/friends', {
+      state: {
+        openDmUserId: target.userId,
+        composeText: text,
+      },
+    });
+  }, [memberCard.member, memberCard.quickMessage, navigate]);
+
+  const menuPortal =
+    menu.open &&
+    menu.member &&
+    createPortal(
+      <>
+        <div
+          className={`${shellNavRailBackdrop} ${shellNavRailMenuBackdropZ}`}
+          aria-hidden
+          onClick={closeMenu}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            closeMenu();
+          }}
+        />
+        <div
+          ref={menuPanelRef}
+          className={`fixed z-[9998] rounded-xl border border-border bg-card py-1.5 text-sm text-foreground shadow-2xl motion-safe:animate-fade-in-fast ${
+            menu.menuMaxHeight != null ? 'overflow-y-auto scrollbar-overlay' : 'overflow-hidden'
+          }`}
+          style={{
+            left: menu.x,
+            top: menu.y,
+            width: menu.menuW ?? Math.min(260, typeof window !== 'undefined' ? window.innerWidth - 16 : 260),
+            maxWidth: 'min(260px, calc(100vw - 16px))',
+            ...(menu.menuMaxHeight != null ? { maxHeight: menu.menuMaxHeight } : {}),
+          }}
+          role="menu"
+          aria-label={t('organizations.memberMenuAria', { name: menu.member.displayName || '' })}
+          onKeyDown={handleContextMenuKeyDown}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className={contextMenuItemClass}
+            onClick={() => {
+              const m = menu.member;
+              const sourceRect = menuPanelRef.current?.getBoundingClientRect() || null;
+              closeMenu();
+              openMemberCard(m, sourceRect);
+            }}
+          >
+            {t('organizations.memberMenuProfile')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={contextMenuItemClass}
+            onClick={() => {
+              const m = menu.member;
+              const mention = mentionText(m);
+              onMentionUser?.(mention);
+              closeMenu();
+              toast.success(t('organizations.toastMentionOk'));
+            }}
+          >
+            {t('organizations.memberMenuMention')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={contextMenuItemClass}
+            onClick={() => {
+              const m = menu.member;
+              closeMenu();
+              navigate('/app/communicate/chat/friends', { state: { openDmUserId: m?.userId } });
+            }}
+          >
+            {t('organizations.memberMenuMessage')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={contextMenuItemClass}
+            onClick={() => {
+              closeMenu();
+              navigate('/voice');
+            }}
+          >
+            {t('organizations.memberMenuCall')}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={`${contextMenuItemClass} flex-col items-start`}
+            onClick={() => {
+              closeMenu();
+              toast(t('organizations.toastNoteSoon'), { icon: '📝' });
+            }}
+          >
+            <span>{t('organizations.memberMenuNoteTitle')}</span>
+            <span className="text-xs text-muted-foreground">{t('organizations.memberMenuNoteSub')}</span>
+          </button>
+          <div className="my-1 border-t border-border" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            className={`${contextMenuItemClass} justify-between`}
+            onClick={() => {
+              closeMenu();
+              toast(t('organizations.toastAppsSoon'), { icon: '🧩' });
+            }}
+          >
+            <span>{t('organizations.memberMenuApps')}</span>
+            <span className="text-muted-foreground" aria-hidden>›</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={`${contextMenuItemClass} justify-between`}
+            onClick={() => {
+              closeMenu();
+              toast(t('organizations.toastInviteServerSoon'), { icon: '🔗' });
+            }}
+          >
+            <span>{t('organizations.memberMenuInviteServer')}</span>
+            <span className="text-muted-foreground" aria-hidden>›</span>
+          </button>
+          <div className="my-1 border-t border-border" role="separator" />
+          {String(menu.member.userId) !== String(currentUserId) && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                className={contextMenuItemClass}
+                onClick={() => {
+                  closeMenu();
+                  toast(t('organizations.toastIgnoreSoon'), { icon: '👁' });
+                }}
+              >
+                {t('organizations.memberMenuIgnore')}
+              </button>
+            </>
+          )}
+          <div className="my-1 border-t border-border" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            aria-haspopup="menu"
+            aria-expanded={rolesSubmenu.open}
+            className={`${contextMenuItemClass} justify-between`}
+            onClick={() => {
+              if (!canManageRoleAssignments) {
+                closeMenu();
+                toast(t('organizations.memberRoleNoPermission'), { icon: '🔒' });
+                return;
+              }
+              openRolesSubmenu(menu.member);
+            }}
+            ref={rolesMenuBtnRef}
+          >
+            <span>{t('organizations.memberMenuRoles')}</span>
+            <span className="text-muted-foreground" aria-hidden>›</span>
+          </button>
+          {menu.member &&
+            canRemoveMember(myRole, menu.member.role, menu.member.userId, currentUserId) && (
+              <>
+                <div className="my-1 border-t border-border" role="separator" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={`${contextMenuItemClass} text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10`}
+                  onClick={() => {
+                    closeMenu();
+                    setMemberConfirm({ type: 'remove', member: menu.member });
+                  }}
+                >
+                  {t('organizations.memberMenuRemove')}
+                </button>
+              </>
+            )}
+        </div>
+        {rolesSubmenu.open && rolesSubmenu.member && (
+          <div
+            ref={rolesSubmenuRef}
+            role="menu"
+            aria-label={t('organizations.memberRoleOf', { name: rolesSubmenu.member.displayName })}
+            onKeyDown={handleContextMenuKeyDown}
+            className="fixed z-[9999] w-[250px] overflow-hidden rounded-xl border border-border bg-card py-1.5 text-sm text-foreground shadow-2xl motion-safe:animate-fade-in-fast"
+            style={{ left: rolesSubmenu.x, top: rolesSubmenu.y, maxHeight: 'min(70vh, 360px)' }}
+          >
+            <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('organizations.memberRoleOf', { name: rolesSubmenu.member.displayName })}
+            </div>
+            <div className="my-1 border-t border-border" role="separator" />
+            {!canManageRoleAssignments ? (
+              <p className="px-3 py-2 text-xs text-muted-foreground">{t('organizations.memberRoleNoPermissionFull')}</p>
+            ) : organizationRoles.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-muted-foreground">{t('organizations.memberRoleNoCustom')}</p>
+            ) : rolesSubmenu.loading ? (
+              <p className="px-3 py-2 text-xs text-muted-foreground">{t('organizations.memberRoleLoading')}</p>
+            ) : (
+              <div className="max-h-[290px] overflow-y-auto scrollbar-overlay">
+                {organizationRoles.map((role) => {
+                  const checked = Boolean(rolesSubmenu.selectedRoleIds?.[role.roleId]);
+                  const busy = rolesSubmenu.busyRoleId === role.roleId;
+                  return (
+                    <button
+                      key={role.roleId}
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={checked}
+                      aria-busy={busy || undefined}
+                      disabled={busy}
+                      className={`${contextMenuItemClass} gap-2 disabled:opacity-60`}
+                      onClick={() => toggleMemberRole(role)}
+                    >
+                      <span
+                        aria-hidden
+                        className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] transition-colors ${
+                          checked ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-transparent'
+                        }`}
+                      >
+                        ✓
+                      </span>
+                      <span className="truncate">{role.displayName || role.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </>,
+      document.body
+    );
+
+  const memberCardPortal =
+    memberCard.open &&
+    memberCard.member &&
+    createPortal(
+      <div
+        ref={memberCardRef}
+        role="dialog"
+        aria-label={memberCard.member.displayName}
+        className="fixed z-[9999] w-[min(340px,calc(100vw-16px))] overflow-hidden rounded-2xl border border-border bg-card text-foreground shadow-2xl motion-safe:animate-fade-in-fast"
+        style={{ left: memberCard.x, top: memberCard.y }}
+      >
+        <div className="h-16 bg-muted" />
+        <div className="px-3 pb-3">
+          <div className="-mt-8 flex items-end justify-between">
+            <UserAvatar
+              avatar={memberCard.member.avatar}
+              userId={memberCard.member.userId || memberCard.member.id}
+              name={memberCard.member.displayName}
+              size="profile"
+              ringClassName="border-4 border-card"
+            />
+            <button
+              type="button"
+              aria-label={t('organizations.modalClose')}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+              onClick={() => setMemberCard((prev) => ({ ...prev, open: false }))}
+            >
+              <X size={16} aria-hidden />
+            </button>
+          </div>
+          <div className="mt-2.5">
+            <h4 className="text-[24px] font-bold leading-none">{memberCard.member.displayName}</h4>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {memberCard.profile?.username || memberCard.member.username || ''}
+            </p>
+            <p className="mt-1 flex items-center gap-1.5 text-sm text-foreground" aria-live="polite">
+              <AdminBusySpinner busy={memberCard.loading} />
+              {memberCard.loading
+                ? t('organizations.memberProfileLoading')
+                : memberCard.profile?.pronouns ||
+                  memberCard.profile?.pronoun ||
+                  t('organizations.memberProfilePronounUnset')}
+            </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {t('organizations.memberMutualFriends', {
+                count: Number(memberCard.profile?.mutualFriendsCount) || 0,
+              })}{' '}
+              •{' '}
+              {t('organizations.memberMutualServers', {
+                count: Number(memberCard.profile?.mutualOrganizationsCount) || 1,
+              })}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold text-foreground">
+                {roleLabelMap[memberCard.member.role] || memberCard.member.role}
+              </span>
+              {memberCard.assignedRoleNames.map((name) => (
+                <span key={name} className="rounded-full bg-primary/10 px-2.5 py-1 text-xs text-primary">
+                  {name}
+                </span>
+              ))}
+              {!memberCard.loading && memberCard.assignedRoleNames.length === 0 && (
+                <span className="text-xs text-muted-foreground">
+                  {t('organizations.memberRoleCustomUnset')}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="mt-4">
+            {String(memberCard.member.userId) === String(currentUserId) ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setMemberCard((prev) => ({ ...prev, open: false }));
+                  navigate('/profile');
+                }}
+                className={`${adminPrimaryBtnClass} w-full`}
+              >
+                {t('organizations.memberEditProfile')}
+              </button>
+            ) : (
+              <form
+                className="space-y-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  handleQuickMessageSubmit();
+                }}
+              >
+                <input
+                  value={memberCard.quickMessage}
+                  maxLength={CHAT_MESSAGE_MAX_LENGTH}
+                  aria-label={t('organizations.memberQuickMessagePlaceholder', {
+                    name: memberCard.member.displayName,
+                  })}
+                  onChange={(e) => setMemberCard((prev) => ({ ...prev, quickMessage: e.target.value }))}
+                  placeholder={t('organizations.memberQuickMessagePlaceholder', {
+                    name: memberCard.member.displayName,
+                  })}
+                  className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                />
+                <button type="submit" className={`${adminPrimaryBtnClass} w-full`}>
+                  {t('organizations.memberQuickChat')}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+
+  const handleSidebarTabKeyDown = (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tabs = Array.from(event.currentTarget.querySelectorAll('[role="tab"]'));
+    if (!tabs.length) return;
+    const index = tabs.indexOf(document.activeElement);
+    let next = 0;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'End') next = tabs.length - 1;
+    event.preventDefault();
+    tabs[next].focus();
+    tabs[next].click();
+  };
+
+  const tabBtn = (id, label, badgeCount = 0) => (
+    <button
+      key={id}
+      type="button"
+      role="tab"
+      id={`org-member-tab-${id}`}
+      aria-selected={sidebarTab === id}
+      tabIndex={sidebarTab === id ? 0 : -1}
+      onClick={() => setSidebarTab(id)}
+      className={`min-w-0 flex-1 ${FIGMA_ORG_MEMBER_TAB_BTN} ${
+        sidebarTab === id ? FIGMA_ORG_MEMBER_TAB_BTN_ACTIVE : ''
+      }`}
+    >
+      <span className="inline-flex items-center gap-1">
+        <span>{label}</span>
+        {badgeCount > 0 && (
+          <span
+            aria-label={t('organizations.memberSidebarPendingAria', { count: badgeCount })}
+            className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-destructive/15 px-1.5 py-0.5 text-[9px] font-bold text-destructive"
+          >
+            {badgeCount > 99 ? '99+' : badgeCount}
+          </span>
+        )}
+      </span>
+    </button>
+  );
+
+  if (workspaceSearchOpen && organizationId) {
+    return (
+      <div
+        className={`flex h-full min-h-0 flex-col ${isDarkMode ? 'bg-[#11141C]' : 'bg-slate-50'}`}
+      >
+        <OrgWorkspaceSearchSidebar
+          organizationId={organizationId}
+          serverId={serverId}
+          channels={searchChannels}
+          isDarkMode={isDarkMode}
+          selectedTeamId={selectedTeamId}
+          teams={teams}
+          onClose={() => onWorkspaceSearchOpenChange?.(false)}
+          onJumpToResult={(payload) => {
+            onWorkspaceSearchJump?.(payload);
+            onWorkspaceSearchOpenChange?.(false);
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className={FIGMA_ORG_MEMBER_SIDEBAR_ROOT}>
+      <div className={FIGMA_ORG_MEMBER_SIDEBAR_HEAD}>
+        <div className={FIGMA_ORG_MEMBER_SIDEBAR_TITLE} title={organizationName}>
+          {organizationName || t('organizations.memberSidebarOrgFallback')}
+        </div>
+        <p className={FIGMA_ORG_MEMBER_SIDEBAR_SUB}>
+          {t('organizations.memberSidebarSubtitle')}
+        </p>
+      </div>
+
+      {showSidebarTabs ? (
+        <div
+          className={FIGMA_ORG_MEMBER_TAB_STRIP}
+          role="tablist"
+          aria-label={t('organizations.memberSidebarTabsAria')}
+          onKeyDown={handleSidebarTabKeyDown}
+        >
+          {tabBtn('people', t('organizations.memberSidebarTabPeople'))}
+          {tabBtn('activity', t('organizations.memberSidebarTabActivity'))}
+          {canShowTasksTab && tabBtn('tasks', t('organizations.memberSidebarTabTasks'))}
+          {canShowFilesTab && tabBtn('files', t('organizations.memberSidebarTabFiles'))}
+        </div>
+      ) : null}
+
+      <div className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto rounded-b-xl px-2 py-2 pb-4">
+        {sidebarTab === 'activity' && (
+          <ul className="space-y-2 px-1">
+            {activityFeedItems.map((item) => (
+              <li
+                key={item.id}
+                className={`rounded-lg border px-2.5 py-2 text-xs ${
+                  isDarkMode
+                    ? 'border-white/[0.06] bg-[#171B24] text-[#A1A8B3]'
+                    : 'border-slate-200 bg-white text-slate-600'
+                }`}
+              >
+                {item.label}
+              </li>
+            ))}
+          </ul>
+        )}
+        {sidebarTab === 'tasks' && canShowTasksTab && (
+          <div className="space-y-3 px-1">
+            {loadingSidebarTasks ? (
+              <div className="space-y-2 pt-1">
+                <div className={`h-8 animate-pulse rounded-lg ${isDarkMode ? 'bg-white/10' : 'bg-slate-200'}`} />
+                <div className={`h-16 animate-pulse rounded-lg ${isDarkMode ? 'bg-white/5' : 'bg-slate-100'}`} />
+                <div className={`h-16 animate-pulse rounded-lg ${isDarkMode ? 'bg-white/5' : 'bg-slate-100'}`} />
+              </div>
+            ) : sidebarTasksError ? (
+              <p className="py-2 text-xs text-rose-300">{sidebarTasksError}</p>
+            ) : teamTaskSections.length === 0 ? (
+              <p
+                className={`py-6 text-center text-xs ${isDarkMode ? 'text-[#6d7380]' : 'text-slate-500'}`}
+              >
+                {t('organizations.memberSidebarTasksNoMatch')}
+              </p>
+            ) : (
+              teamTaskSections.map((section) => (
+                <div key={section.teamId}>
+                  <div
+                    className={`mb-1.5 text-[11px] font-bold uppercase tracking-wide ${
+                      isDarkMode ? 'text-[#8e9297]' : 'text-slate-600'
+                    }`}
+                  >
+                    {section.teamName} ({section.tasks.length})
+                  </div>
+                  <ul className="space-y-1.5">
+                    {section.tasks.map((task) => {
+                      const isMine = String(task.assigneeId || '') === currentUserIdStr;
+                      return (
+                        <li
+                          key={task._id}
+                          className={`rounded-lg border px-2 py-2 ${
+                            isDarkMode
+                              ? 'border-white/[0.08] bg-[#171B24]'
+                              : 'border-slate-200 bg-white'
+                          }`}
+                        >
+                          <p
+                            className={`line-clamp-2 text-xs font-semibold ${
+                              isDarkMode ? 'text-white' : 'text-slate-900'
+                            }`}
+                          >
+                            {task.title}
+                          </p>
+                          <div
+                            className={`mt-1 flex items-center justify-between gap-2 text-[10px] ${
+                              isDarkMode ? 'text-[#8e9297]' : 'text-slate-500'
+                            }`}
+                          >
+                            <span className="truncate">
+                              {task.boardTitle || t('organizations.memberSidebarTaskBoardFallback')}
+                            </span>
+                            <span className={isMine ? 'text-emerald-400' : ''}>
+                              {isMine
+                                ? t('organizations.memberSidebarTaskAssignedToYou')
+                                : t('organizations.memberSidebarTaskPublicTeam')}
+                            </span>
+                          </div>
+                          <div
+                            className={`mt-0.5 flex items-center justify-between gap-2 text-[10px] ${
+                              isDarkMode ? 'text-[#6d7380]' : 'text-slate-500'
+                            }`}
+                          >
+                            <span className="truncate">
+                              {task.listTitle || t('organizations.memberSidebarTaskListNone')}
+                            </span>
+                            <span>
+                              {formatTaskDueDate(task.dueDate) || t('organizations.memberSidebarTaskNoDeadline')}
+                            </span>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+        {sidebarTab === 'files' && canShowFilesTab && organizationId && (
+          <OrgMemberSidebarAttachments
+            organizationId={organizationId}
+            channels={searchChannels}
+            selectedChannelId={selectedChannelId}
+            channelPermissionMatrix={channelPermissionMatrix}
+            isDarkMode={isDarkMode}
+            onJumpToChannel={({ organizationId: orgId, roomId }) => {
+              if (orgId && roomId) {
+                onWorkspaceSearchJump?.({ organizationId: orgId, roomId });
+              }
+            }}
+          />
+        )}
+        {sidebarTab === 'people' && showAddTeamMember && !loading ? (
+          <button
+            type="button"
+            onClick={openAddMemberModal}
+            className="mb-3 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-sm font-semibold text-foreground transition hover:bg-muted"
+          >
+            <Plus size={16} />
+            {t('organizations.addTeamMember')}
+          </button>
+        ) : null}
+        {sidebarTab === 'people' && loading && (
+          <div className="space-y-2">
+            <div
+              className={`h-9 animate-pulse rounded-lg ${isDarkMode ? 'bg-white/10' : 'bg-slate-200/90'}`}
+            />
+            <div
+              className={`h-9 animate-pulse rounded-lg ${isDarkMode ? 'bg-white/5' : 'bg-slate-100'}`}
+            />
+            <div
+              className={`h-9 animate-pulse rounded-lg ${isDarkMode ? 'bg-white/5' : 'bg-slate-100'}`}
+            />
+          </div>
+        )}
+        {sidebarTab === 'people' && !loading && error && (
+          <p className="px-1 text-xs text-rose-300">{error}</p>
+        )}
+        {sidebarTab === 'people' && !loading && !error && visibleRows.length === 0 && (
+          <div className="px-1 py-4 text-center">
+            <p className="text-xs text-gray-500">
+              {selectedTeamId ? t('organizations.teamMembersEmpty') : t('organizations.membersEmpty')}
+            </p>
+          </div>
+        )}
+        {!loading &&
+          !error &&
+          sidebarTab === 'people' &&
+          visibleRows.length > 0 &&
+          sections.map((section) => (
+            <div key={section.key} className="mb-4">
+              <div
+                className={`sticky top-0 z-[1] px-1 pb-1 pt-1 text-[11px] font-bold uppercase tracking-wide backdrop-blur-sm ${
+                  isDarkMode
+                    ? 'bg-[#11141C]/95 text-[#6B7280]'
+                    : 'bg-slate-50/95 text-slate-500'
+                }`}
+              >
+                {section.key === 'on'
+                  ? t('organizations.memberSidebarOnlineCount', { count: section.items.length })
+                  : section.key === 'off'
+                    ? t('organizations.memberSidebarOfflineCount', { count: section.items.length })
+                    : t('organizations.memberSidebarMemberLine', {
+                        title: section.title,
+                        count: section.items.length,
+                      })}
+              </div>
+              <ul className="space-y-0.5">
+                {section.items.map((m) => {
+                  const online = checkOnline(m.userId);
+                  const dim = groupMode === 'presence' && !online;
+                  const statusLabel = online ? t('organizations.presenceOnline') : t('organizations.presenceOffline');
+                  return (
+                    <li
+                      key={m.membershipId}
+                      className={`flex cursor-pointer items-center gap-2 rounded-xl px-1.5 py-2 transition ${
+                        isDarkMode ? 'hover:bg-white/[0.04]' : 'hover:bg-slate-100/90'
+                      } ${dim ? 'opacity-55' : ''}`}
+                      onContextMenu={(e) => openMemberMenu(e, m)}
+                      onClick={(e) => openMemberCard(m, e.currentTarget.getBoundingClientRect())}
+                    >
+                      <UserAvatar
+                        avatar={m.avatar}
+                        userId={m.userId}
+                        name={m.displayName}
+                        size="sm"
+                        showOnline
+                        status={online ? 'online' : 'offline'}
+                        ringClassName={isDarkMode ? 'border-[#11141C]' : 'border-white'}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div
+                          className={`truncate text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}
+                        >
+                          {m.displayName}
+                        </div>
+                        {groupMode === 'role' && (
+                          <div
+                            className={`truncate text-[10px] ${isDarkMode ? 'text-[#6d7380]' : 'text-slate-500'}`}
+                          >
+                            {roleLabelMap[m.role] || m.role}
+                          </div>
+                        )}
+                      </div>
+                      <span
+                        className={`shrink-0 text-[10px] font-medium ${isDarkMode ? 'text-[#8e9297]' : 'text-slate-500'}`}
+                      >
+                        {statusLabel}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+      </div>
+      {menuPortal}
+      {memberCardPortal}
+      <Modal
+        isOpen={addMemberOpen}
+        onClose={() => {
+          if (savingTeamMembers) return;
+          setAddMemberOpen(false);
+        }}
+        title={t('organizations.addTeamMemberTitle')}
+        size="md"
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">{t('organizations.addTeamMemberHint')}</p>
+          {addMemberCandidates.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+              {t('organizations.addTeamMemberNoCandidates')}
+            </p>
+          ) : (
+            <ul className="max-h-72 space-y-1 overflow-y-auto rounded-xl border border-border/70">
+              {addMemberCandidates.map((row) => {
+                const uid = String(row.userId || '');
+                const checked = addMemberIds.includes(uid);
+                return (
+                  <li key={uid || row.membershipId}>
+                    <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5 hover:bg-muted/30">
+                      <input
+                        type="checkbox"
+                        className="rounded border-border"
+                        checked={checked}
+                        onChange={() => toggleAddMemberId(uid)}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-foreground">
+                          {row.displayName || t('organizations.memberFallbackShort')}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {row.email || row.username || ''}
+                        </span>
+                      </span>
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <div className="flex justify-end gap-2 border-t border-border pt-3">
+            <button
+              type="button"
+              disabled={savingTeamMembers}
+              onClick={() => setAddMemberOpen(false)}
+              className="rounded-xl border border-border bg-surface px-4 py-2 text-sm font-semibold text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              {t('nav.cancel')}
+            </button>
+            <button
+              type="button"
+              disabled={savingTeamMembers || addMemberIds.length === 0}
+              onClick={saveTeamMembers}
+              className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {savingTeamMembers ? t('common.saving') : t('common.save')}
+            </button>
+          </div>
+        </div>
+      </Modal>
+      <ConfirmDialog
+        isOpen={memberConfirm != null}
+        onClose={() => setMemberConfirm(null)}
+        onConfirm={confirmMemberAction}
+        title={
+          memberConfirm?.type === 'remove'
+            ? t('organizations.confirmRemoveMemberTitle')
+            : t('organizations.confirmBlockUserTitle')
+        }
+        message={
+          memberConfirm?.type === 'remove'
+            ? t('organizations.confirmRemoveMemberMsg', {
+                name: memberConfirm?.member?.displayName || t('organizations.memberFallbackRemove'),
+              })
+            : t('organizations.confirmBlockUserMsg', {
+                name: memberConfirm?.member?.displayName || t('organizations.memberFallbackBlock'),
+              })
+        }
+        confirmText={
+          memberConfirm?.type === 'remove' ? t('common.delete') : t('organizations.confirmBlockBtn')
+        }
+        cancelText={t('nav.cancel')}
+      />
+    </div>
+  );
+}
+
+export default OrganizationMemberSidebar;

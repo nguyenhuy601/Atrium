@@ -1,0 +1,58 @@
+const express = require('express');
+const { protect, authorizeOrGrant } = require('../middleware/auth');
+const hierarchyController = require('../controllers/hierarchyController');
+const organizationController = require('../controllers/organizationController');
+const { requireOrgReadAccess } = require('../middleware/requireOrgReadAccess');
+const { registerObjectIdParams, requireMountedObjectIds } = require('../middleware/objectIdParam');
+
+const router = express.Router({ mergeParams: true });
+const STRUCTURE_ADMIN = ['owner', 'admin'];
+
+router.use(protect);
+router.use(requireMountedObjectIds(['orgId']));
+registerObjectIdParams(router, ['branchId', 'divisionId', 'deptId', 'teamId', 'channelId']);
+
+/**
+ * Huy P5: Legacy Branch→Division→Department→Team routes — DEPRECATED for new admin UI.
+ * Prefer GET/PUT /:orgId/structure/levels|units|apply-template. Kept for dual-read clients
+ * and workspace until cutover; new writes should go through structureController + OU.
+ */
+router.get('/branches', requireOrgReadAccess, hierarchyController.listBranches);
+router.post('/branches', authorizeOrGrant(['owner', 'admin'], 'organization.branch.create'), hierarchyController.createBranch);
+// Huy: PUT chi nhánh — sửa / vô hiệu hóa (domain Cơ cấu tổ chức)
+router.put('/branches/:branchId', authorizeOrGrant(['owner', 'admin'], 'organization.branch.update'), hierarchyController.updateBranch);
+
+router.get('/branches/:branchId/divisions', requireOrgReadAccess, hierarchyController.listDivisions);
+router.post('/branches/:branchId/divisions', authorizeOrGrant(['owner', 'admin'], 'organization.division.create'), hierarchyController.createDivision);
+router.get('/divisions', requireOrgReadAccess, hierarchyController.listDivisions);
+router.post('/divisions', authorizeOrGrant(['owner', 'admin'], 'organization.division.create'), hierarchyController.createDivision);
+router.put('/divisions/:divisionId', authorizeOrGrant(['owner', 'admin'], 'organization.division.update'), hierarchyController.updateDivision);
+
+router.get('/divisions/:divisionId/departments', requireOrgReadAccess, hierarchyController.listDepartmentsByDivision);
+router.post('/divisions/:divisionId/departments', authorizeOrGrant(STRUCTURE_ADMIN, 'organization.department.create'), hierarchyController.createDepartmentByDivision);
+router.post('/departments', authorizeOrGrant(STRUCTURE_ADMIN, 'organization.department.create'), hierarchyController.createDepartmentRoot);
+
+router.get('/departments/:deptId/teams', requireOrgReadAccess, hierarchyController.listTeamsByDepartment);
+router.post('/departments/:deptId/teams', authorizeOrGrant(STRUCTURE_ADMIN, 'organization.team.create'), hierarchyController.createTeamByDepartment);
+router.post('/divisions/:divisionId/teams', authorizeOrGrant(STRUCTURE_ADMIN, 'organization.team.create'), hierarchyController.createTeamByDivision);
+router.post('/teams', authorizeOrGrant(STRUCTURE_ADMIN, 'organization.team.create'), hierarchyController.createTeamRoot);
+router.put('/teams/:teamId', authorizeOrGrant(STRUCTURE_ADMIN, 'organization.team.update'), hierarchyController.updateTeamByHierarchy);
+router.get(
+  '/teams/:teamId/role-access',
+  authorizeOrGrant(STRUCTURE_ADMIN, 'organization.team.view'),
+  organizationController.listTeamRoleAccess
+);
+router.put(
+  '/teams/:teamId/role-access',
+  authorizeOrGrant(STRUCTURE_ADMIN, 'organization.team.update'),
+  organizationController.saveTeamRoleAccess
+);
+
+router.get('/teams/:teamId/channels', requireOrgReadAccess, hierarchyController.listChannelsByTeam);
+router.post('/teams/:teamId/channels', authorizeOrGrant(STRUCTURE_ADMIN, 'communication.channel.create'), hierarchyController.createChannelByTeam);
+router.put('/teams/:teamId/channels/:channelId', authorizeOrGrant(STRUCTURE_ADMIN, 'communication.channel.update'), hierarchyController.updateChannelByTeam);
+router.post('/channels', authorizeOrGrant(STRUCTURE_ADMIN, 'communication.channel.create'), hierarchyController.createChannelByScope);
+router.put('/channels/:channelId', authorizeOrGrant(STRUCTURE_ADMIN, 'communication.channel.update'), hierarchyController.updateChannelByScope);
+router.delete('/channels/:channelId', authorizeOrGrant(STRUCTURE_ADMIN, 'communication.channel.delete'), hierarchyController.deleteChannelByScope);
+
+module.exports = router;

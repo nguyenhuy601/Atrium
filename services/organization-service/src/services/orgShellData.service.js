@@ -1,0 +1,724 @@
+const axios = require('axios');
+const Organization = require('../models/Organization');
+const Branch = require('../models/Branch');
+const Division = require('../models/Division');
+const Department = require('../models/Department');
+const Team = require('../models/Team');
+const Channel = require('../models/Channel');
+const ChannelAccess = require('../models/ChannelAccess');
+const ChannelRoleAccess = require('../models/ChannelRoleAccess');
+const ScopeRoleAccess = require('../models/ScopeRoleAccess');
+const Membership = require('../models/Membership');
+const { syncHierarchyRoles } = require('./hierarchyRoleSync');
+const { fetchUserRolesInOrg } = require('../utils/orgRoles');
+const { toObjectId } = require('../utils/orgAccess');
+const {
+  resolveStructureVisibilityFromRoles,
+  channelInStructureVisibility,
+  resolveUserHierarchyScopes,
+  buildTeamDepartmentMap,
+  isDeptOnlyChannel,
+} = require('../utils/memberPlacementScope');
+const { shouldGrantDefaultMemberOrgChannelAccess } = require('../utils/defaultMemberOrgChannelAccess');
+const {
+  isMultiPlacementReadEnabled,
+  resolveEffectiveScopesFromAssignments,
+  pickPrimaryScope,
+  resolveStructuralScopes,
+} = require('./memberScopePolicy.service');
+const { mergeStructuralIntoVisibility } = require('./collabStructureAdmin');
+const {
+  findPlacementByStructureMembers,
+  isStructureMembersInShellScopeEnabled,
+  mergeStructureMembersIntoVisibility,
+} = require('./structurePlacement.service');
+const {
+  buildChannelRoleAclMap,
+  buildScopeRoleAclMap,
+  resolveEffectiveRolePerm,
+  normalizeRoleChannelPermissions,
+  mergeRoleChannelPermissions,
+  hasAnyRoleChannelPermission,
+  hasExecutiveRbacRole,
+} = require('../utils/orgChannelAclHelpers');
+const { listProjectIdsForUser } = require('./projectMembershipReadModel');
+const {
+  isProjectScopedChannel,
+  resolveProjectChannelPermissions,
+  serializeProjectChannel,
+} = require('../utils/projectChannelAcl');
+
+const STRUCTURE_PROVISION = {
+  PENDING: 'pending',
+  RUNNING: 'running',
+  READY: 'ready',
+  FAILED: 'failed',
+};
+
+/** Giữ department/team theo `_id` lần đầu gặp — bỏ synthetic + bản trùng trong cây. */
+function dedupeDepartmentsInBranchTree(branches = []) {
+  const seenDept = new Set();
+  const seenTeam = new Set();
+  return (Array.isArray(branches) ? branches : []).map((branch) => ({
+    ...branch,
+    divisions: (branch?.divisions || []).map((division) => ({
+      ...division,
+      departments: (division?.departments || []).filter((department) => {
+        if (department?.isSynthetic) return false;
+        const deptId = String(department?._id || department?.id || '').trim();
+        if (!deptId || seenDept.has(deptId)) return false;
+        seenDept.add(deptId);
+        if (Array.isArray(department.teams)) {
+          department.teams = department.teams.filter((team) => {
+            if (team?.isSynthetic) return false;
+            const teamId = String(team?._id || team?.id || '').trim();
+            if (!teamId || seenTeam.has(teamId)) return false;
+            seenTeam.add(teamId);
+            return true;
+          });
+        }
+        return true;
+      }),
+    })),
+  }));
+}
+
+/** Gắn head/leader từ collection legacy lên cây OU đã project — nguồn tin cậy khi OU attributes lệch. */
+/**
+ * OU projection không có members[] — gắn lại head/leader/members từ legacy
+ * để admin Transfer/Members không gửi list rỗng (gỡ nhầm trưởng phòng → 409).
+ */
+function overlayLegacyLeadershipOnBranches(branches, { departments = [], teams = [] } = {}) {
+  const headByDept = new Map();
+  const membersByDept = new Map();
+  for (const dep of departments) {
+    const id = String(dep?._id || '').trim();
+    if (!id) continue;
+    headByDept.set(id, dep.head ? String(dep.head) : null);
+    membersByDept.set(
+      id,
+      (dep.members || []).map((m) => String(m?._id || m || '').trim()).filter(Boolean)
+    );
+  }
+  const leaderByTeam = new Map();
+  const membersByTeam = new Map();
+  for (const team of teams) {
+    const id = String(team?._id || '').trim();
+    if (!id) continue;
+    leaderByTeam.set(id, team.leader ? String(team.leader) : null);
+    membersByTeam.set(
+      id,
+      (team.members || []).map((m) => String(m?._id || m || '').trim()).filter(Boolean)
+    );
+  }
+  for (const branch of branches || []) {
+    for (const division of branch.divisions || []) {
+      for (const department of division.departments || []) {
+        const depId = String(department._id || department.id || '').trim();
+        if (depId && headByDept.has(depId)) {
+          department.head = headByDept.get(depId);
+        }
+        if (depId && membersByDept.has(depId)) {
+          department.members = membersByDept.get(depId);
+        }
+        for (const team of department.teams || []) {
+          const teamId = String(team._id || team.id || '').trim();
+          if (teamId && leaderByTeam.has(teamId)) {
+            team.leader = leaderByTeam.get(teamId);
+          }
+          if (teamId && membersByTeam.has(teamId)) {
+            team.members = membersByTeam.get(teamId);
+          }
+        }
+      }
+    }
+  }
+  return branches;
+}
+
+const NOTIFICATION_SERVICE_URL = String(process.env.NOTIFICATION_SERVICE_URL || '').trim().replace(/\/+$/, '');
+if (!NOTIFICATION_SERVICE_URL) throw new Error('Thiếu biến môi trường: NOTIFICATION_SERVICE_URL');
+const NOTIFICATION_INTERNAL_TOKEN = String(process.env.NOTIFICATION_INTERNAL_TOKEN || '').trim();
+
+async function buildOrganizationStructureData(orgId, { includeInactive = false } = {}) {
+  // Huy: Dual-read — ưu tiên OU tree nếu có; vẫn build legacy + gắn levels/unitsTree
+  const {
+    isDynamicStructureEnabled,
+    listUnitsTree,
+    projectOuTreeToLegacyBranches,
+    findLevelSchema,
+  } = require('./orgUnitTree.service');
+
+  let levels = null;
+  let unitsTree = null;
+  let usedOu = false;
+
+  if (isDynamicStructureEnabled()) {
+    try {
+      const schema = await findLevelSchema(orgId);
+      if (schema?.levels?.length) {
+        levels = schema.levels;
+        unitsTree = await listUnitsTree(orgId, { includeInactive });
+        const ouCount = await require('../models/OrganizationalUnit').countDocuments({
+          organization: orgId,
+        });
+        if (ouCount === 0) {
+          // Huy: lazy backfill từ legacy khi chưa có OU (schema đã setup)
+          const { backfillOrganizationToOu } = require('./orgStructureMigrate.service');
+          await backfillOrganizationToOu(orgId);
+          unitsTree = await listUnitsTree(orgId, { includeInactive });
+        }
+        if (unitsTree?.length) {
+          usedOu = true;
+        }
+      }
+    } catch (e) {
+      console.warn('[orgShellData] OU dual-read fallback:', e.message);
+    }
+  }
+
+  const branchFilter = { organization: orgId };
+  const divisionFilter = { organization: orgId };
+  const departmentFilter = { organization: orgId };
+  const teamFilter = { organization: orgId };
+  if (!includeInactive) {
+    branchFilter.isActive = true;
+    divisionFilter.isActive = true;
+    departmentFilter.isActive = { $ne: false };
+    teamFilter.isActive = true;
+  }
+
+  const [branches, divisions, departments, teams, channelsRaw, organization] = await Promise.all([
+    Branch.find(branchFilter).sort({ createdAt: 1 }).lean(),
+    Division.find(divisionFilter).sort({ createdAt: 1 }).lean(),
+    Department.find(departmentFilter).sort({ createdAt: 1 }).lean(),
+    Team.find(teamFilter).sort({ createdAt: 1 }).lean(),
+    Channel.find({ organization: orgId, isActive: true }).sort({ createdAt: 1 }).lean(),
+    Organization.findById(orgId).select('provisioning.structure').lean(),
+  ]);
+
+  // Soft-deactivate announce trùng (seed race / re-provision) — fail-soft.
+  let channels = channelsRaw;
+  try {
+    const { deactivateDuplicateDepartmentAnnounceChannels } = require('./departmentChannelProvision.service');
+    const { deactivatedIds } = await deactivateDuplicateDepartmentAnnounceChannels(orgId, channelsRaw);
+    if (deactivatedIds?.length) {
+      const drop = new Set(deactivatedIds.map(String));
+      channels = channelsRaw.filter((ch) => !drop.has(String(ch._id)));
+    }
+  } catch (e) {
+    console.warn('[orgShellData] deactivateDuplicateDepartmentAnnounceChannels:', e.message);
+  }
+
+  // Huy: đơn vị tạo qua hierarchy trước khi có reverse DW — sync sang OU rồi đọc lại tree
+  if (isDynamicStructureEnabled() && levels?.length) {
+    try {
+      const {
+        syncMissingLegacyToOu,
+        dualWriteSyncOuActive,
+        dualWriteSyncOuLeadership,
+      } = require('./orgOuDualWrite.service');
+      await syncMissingLegacyToOu(orgId, {
+        branches,
+        divisions,
+        departments,
+        teams,
+      });
+      // Huy: đồng bộ isActive + head/leader legacy → OU (repair dữ liệu cũ / write path thiếu sync)
+      await Promise.all([
+        ...branches.map((b) => dualWriteSyncOuActive(orgId, 'Branch', b._id, b.isActive !== false)),
+        ...divisions.map((d) => dualWriteSyncOuActive(orgId, 'Division', d._id, d.isActive !== false)),
+        ...departments.map((dep) =>
+          dualWriteSyncOuActive(orgId, 'Department', dep._id, dep.isActive !== false)
+        ),
+        ...teams.map((t) => dualWriteSyncOuActive(orgId, 'Team', t._id, t.isActive !== false)),
+        ...departments.map((dep) =>
+          dualWriteSyncOuLeadership(orgId, 'Department', dep._id, { headUserId: dep.head || null })
+        ),
+        ...teams.map((t) =>
+          dualWriteSyncOuLeadership(orgId, 'Team', t._id, { leaderUserId: t.leader || null })
+        ),
+      ]);
+      unitsTree = await listUnitsTree(orgId, { includeInactive });
+      if (unitsTree?.length) usedOu = true;
+    } catch (e) {
+      console.warn('[orgShellData] syncMissingLegacyToOu:', e.message);
+    }
+  }
+
+  const channelsByTeam = new Map();
+  const channelsByDepartment = new Map();
+  const channelsByDivision = new Map();
+  for (const channel of channels) {
+    if (channel.projectId) continue;
+    const teamKey = String(channel.team || '');
+    const departmentKey = String(channel.department || '');
+    const divisionKey = String(channel.division || '');
+    if (teamKey) {
+      if (!channelsByTeam.has(teamKey)) channelsByTeam.set(teamKey, []);
+      channelsByTeam.get(teamKey).push(channel);
+      continue;
+    }
+    if (departmentKey) {
+      if (!channelsByDepartment.has(departmentKey)) channelsByDepartment.set(departmentKey, []);
+      channelsByDepartment.get(departmentKey).push(channel);
+      continue;
+    }
+    if (divisionKey) {
+      if (!channelsByDivision.has(divisionKey)) channelsByDivision.set(divisionKey, []);
+      channelsByDivision.get(divisionKey).push(channel);
+    }
+  }
+
+  const { nestLegacyOrgStructure } = require('./nestLegacyOrgStructure');
+  let { branches: tree, divisionsFlat } = nestLegacyOrgStructure({
+    orgId,
+    branches,
+    divisions,
+    departments,
+    teams,
+    channelsByTeam,
+    channelsByDepartment,
+    channelsByDivision,
+  });
+
+  // Huy: nếu OU tree có dữ liệu và legacy trống (hoặc prefer OU), project sang branches
+  if (usedOu && unitsTree?.length && (!tree.length || String(process.env.ORG_STRUCTURE_PREFER_OU || '1') === '1')) {
+    const projected = projectOuTreeToLegacyBranches(unitsTree);
+    if (projected.length) {
+      tree = overlayLegacyLeadershipOnBranches(projected, { departments, teams });
+    }
+  }
+
+  // Tránh hub FE hiện card trùng khi OU/legacy seed lặp cùng department `_id`.
+  tree = dedupeDepartmentsInBranchTree(tree);
+
+  syncHierarchyRoles(orgId, { divisions, departments, teams }).catch(() => null);
+
+  return {
+    branches: tree,
+    divisionsFlat,
+    // Huy: dynamic structure payload
+    levels: levels || null,
+    unitsTree: unitsTree || null,
+    structureSource: usedOu ? 'ou' : 'legacy',
+    provisioning: organization?.provisioning?.structure || {
+      status: STRUCTURE_PROVISION.READY,
+      startedAt: null,
+      completedAt: null,
+      error: '',
+    },
+  };
+}
+
+async function buildAccessibleChannelData(userId, orgId, access) {
+  const membership =
+    access.membership ||
+    ({
+      role: 'member',
+    });
+  const [channelsRaw, divisions, departments, teams, userProjectIds] = await Promise.all([
+    Channel.find({ organization: orgId, isActive: true })
+      .select(
+        '_id members team division department type leader projectId projectChannelKind projectName projectTeamName name createdAt isActive'
+      )
+      .lean(),
+    Division.find({ organization: orgId, isActive: true }).select('_id name branch').lean(),
+    Department.find({ organization: orgId }).select('_id name branch division head').lean(),
+    Team.find({ organization: orgId, isActive: true })
+      .select('_id name branch division department')
+      .lean(),
+    listProjectIdsForUser(userId, orgId),
+  ]);
+
+  let channels = channelsRaw;
+  try {
+    const { deactivateDuplicateDepartmentAnnounceChannels } = require('./departmentChannelProvision.service');
+    const { deactivatedIds } = await deactivateDuplicateDepartmentAnnounceChannels(orgId, channelsRaw);
+    if (deactivatedIds?.length) {
+      const drop = new Set(deactivatedIds.map(String));
+      channels = channelsRaw.filter((ch) => !drop.has(String(ch._id)));
+    }
+  } catch (e) {
+    console.warn('[orgShellData] accessible deactivateDuplicateAnnounce:', e.message);
+  }
+  const userProjectIdSet = new Set(userProjectIds.map(String));
+  const aclRows = await ChannelAccess.find({
+    organization: orgId,
+    user: toObjectId(userId) || userId,
+  })
+    .select('channel permissions')
+    .lean();
+  const aclByChannelId = new Map(
+    aclRows.map((row) => [
+      String(row.channel),
+      {
+        canRead: Boolean(row.permissions?.canRead),
+        canWrite: Boolean(row.permissions?.canWrite),
+        canVoice: Boolean(row.permissions?.canVoice),
+      },
+    ])
+  );
+  const userRoles = await fetchUserRolesInOrg(userId, orgId);
+  const userRoleIds = new Set(userRoles.map((r) => r.id));
+  const roleNames = userRoles.map((r) => r.name);
+  const effectiveScopes =
+    isMultiPlacementReadEnabled() && userId
+      ? await resolveEffectiveScopesFromAssignments(orgId, userId)
+      : resolveUserHierarchyScopes(roleNames, { divisions, departments, teams });
+  const [channelRoleAclRows, scopeRoleAclRows] = await Promise.all([
+    ChannelRoleAccess.find({ organization: orgId }).select('channel roleId permissions').lean(),
+    ScopeRoleAccess.find({ organization: orgId }).select('scopeType scopeId roleId permissions').lean(),
+  ]);
+  const channelRoleByChannelId = buildChannelRoleAclMap(channelRoleAclRows, userRoleIds);
+  const divisionRoleById = buildScopeRoleAclMap(
+    scopeRoleAclRows.filter((r) => r.scopeType === 'division'),
+    userRoleIds
+  );
+  const departmentRoleById = buildScopeRoleAclMap(
+    scopeRoleAclRows.filter((r) => r.scopeType === 'department'),
+    userRoleIds
+  );
+  const teamRoleById = buildScopeRoleAclMap(
+    scopeRoleAclRows.filter((r) => r.scopeType === 'team'),
+    userRoleIds
+  );
+  const membershipRole = Membership.normalizeRole(membership.role);
+  const isOrgAdminScope =
+    membershipRole === 'owner' || membershipRole === 'admin' || membershipRole === 'hr';
+  const isStructureAdmin = isOrgAdminScope || hasExecutiveRbacRole(roleNames);
+
+  const uid = String(userId);
+  const permissionsByChannelId = {};
+  const channelIds = [];
+  const projectChannels = [];
+  const scopedFromVisibleChannels = {
+    divisionIds: new Set(),
+    departmentIds: new Set(),
+    teamIds: new Set(),
+  };
+
+  let structureVisibility = !isStructureAdmin
+    ? isMultiPlacementReadEnabled()
+      ? {
+          mode:
+            effectiveScopes.teamIds.size || effectiveScopes.departmentIds.size || effectiveScopes.divisionIds.size
+              ? 'multi'
+              : 'none',
+          divisionIds: new Set(effectiveScopes.divisionIds),
+          departmentIds: new Set(effectiveScopes.departmentIds),
+          teamIds: new Set(effectiveScopes.teamIds),
+        }
+      : resolveStructureVisibilityFromRoles(roleNames, { divisions, departments, teams })
+    : { mode: 'all', divisionIds: new Set(), departmentIds: new Set(), teamIds: new Set() };
+
+  // People Graph SSOT: members[] mở structureVisibility + memberReady (không cần role dep_).
+  let membersPlacement = null;
+  if (!isStructureAdmin && isStructureMembersInShellScopeEnabled()) {
+    membersPlacement = await findPlacementByStructureMembers(orgId, userId);
+    mergeStructureMembersIntoVisibility(structureVisibility, membersPlacement);
+  }
+
+  // Trưởng phòng / placement structural — mở scope phòng trên Collaborate/Task.
+  let expandDepartmentTeams = false;
+  let placementLevel = 'none';
+  if (!isStructureAdmin) {
+    const structural = await resolveStructuralScopes(orgId, userId);
+    structureVisibility = mergeStructuralIntoVisibility(structureVisibility, structural);
+    const headedDeptCount = await Department.countDocuments({ organization: orgId, head: uid });
+    if (headedDeptCount > 0) {
+      expandDepartmentTeams = true;
+      placementLevel = 'department';
+    } else if (String(structureVisibility.mode || '') === 'team') {
+      placementLevel = 'team';
+    } else if (structureVisibility.mode && structureVisibility.mode !== 'none') {
+      placementLevel = structureVisibility.mode;
+    }
+  }
+
+  const teamDepartmentByTeamId = buildTeamDepartmentMap(teams);
+  const departmentHeadById = new Map(
+    (departments || []).map((d) => [String(d._id), String(d.head?._id || d.head || '').trim()])
+  );
+
+  for (const ch of channels) {
+    const channelId = String(ch._id);
+
+    if (isProjectScopedChannel(ch)) {
+      const projectId = String(ch.projectId || '');
+      const teamId = ch.team ? String(ch.team) : '';
+      const projectPerms = resolveProjectChannelPermissions({
+        channel: ch,
+        userId: uid,
+        isProjectMember: userProjectIdSet.has(projectId),
+        isInOrgTeam: teamId ? structureVisibility.teamIds?.has(teamId) : true,
+      });
+      permissionsByChannelId[channelId] = projectPerms;
+      if (projectPerms.canRead) {
+        channelIds.push(channelId);
+        const serialized = serializeProjectChannel(ch);
+        if (serialized) projectChannels.push(serialized);
+      }
+      continue;
+    }
+
+    const channelType = String(ch.type || 'chat').toLowerCase();
+    const isDeptGeneralChat =
+      isDeptOnlyChannel(ch) &&
+      channelType === 'chat' &&
+      /^general$/i.test(String(ch.name || ''));
+    const isAnnouncementChannel = channelType === 'announcement' || isDeptGeneralChat;
+    const acl = aclByChannelId.get(channelId) || null;
+    let roleAcl = null;
+    for (const role of userRoles) {
+      const roleId = String(role.id || '');
+      if (!roleId) continue;
+      const effective = resolveEffectiveRolePerm(
+        channelRoleByChannelId,
+        divisionRoleById,
+        departmentRoleById,
+        teamRoleById,
+        ch,
+        roleId
+      );
+      if (effective && hasAnyRoleChannelPermission(effective)) {
+        roleAcl = mergeRoleChannelPermissions(
+          roleAcl || normalizeRoleChannelPermissions({}),
+          effective
+        );
+      }
+    }
+
+    let canSee = false;
+    let canRead = false;
+    let canWrite = false;
+    let canDelete = false;
+    let canVoice = false;
+
+    if (isStructureAdmin) {
+      canSee = true;
+      canRead = true;
+      canWrite = true;
+      canDelete = true;
+      canVoice = true;
+    } else if (roleAcl) {
+      canSee = roleAcl.canSee;
+      canRead = roleAcl.canRead;
+      canWrite = roleAcl.canWrite;
+      canDelete = roleAcl.canDelete;
+      canVoice = roleAcl.canVoice;
+    } else if (acl) {
+      canSee = Boolean(acl.canRead);
+      canRead = Boolean(acl.canRead);
+      canWrite = Boolean(acl.canWrite);
+      canVoice = Boolean(acl.canVoice);
+    }
+
+    if (ch.members && ch.members.length > 0) {
+      const inLegacyMemberList = ch.members.some((m) => String(m) === uid || String(m?._id || m) === uid);
+      if (inLegacyMemberList) {
+        if (!roleAcl) {
+          canSee = true;
+          canRead = true;
+          // Announcement Only: member list legacy không được auto-write
+          canWrite = isAnnouncementChannel ? false : true;
+          canDelete = !isAnnouncementChannel;
+          canVoice = !isAnnouncementChannel;
+        } else {
+          canSee = canSee || true;
+          canRead = canRead || true;
+        }
+      }
+    }
+
+    const inStructure =
+      isStructureAdmin ||
+      channelInStructureVisibility(ch, structureVisibility, teamDepartmentByTeamId);
+    if (!inStructure && !isStructureAdmin) {
+      canSee = false;
+      canRead = false;
+      canWrite = false;
+      canDelete = false;
+      canVoice = false;
+    }
+    if (
+      !isStructureAdmin &&
+      !roleAcl &&
+      !acl &&
+      !canRead &&
+      shouldGrantDefaultMemberOrgChannelAccess(ch, structureVisibility, teamDepartmentByTeamId)
+    ) {
+      canSee = true;
+      canRead = true;
+      canWrite = isAnnouncementChannel ? false : true;
+      canVoice = isAnnouncementChannel ? false : true;
+    }
+
+    // Trưởng phòng được đăng announcement phòng mình
+    if (isAnnouncementChannel && !isStructureAdmin) {
+      const depId = String(ch.department || '');
+      const headId = departmentHeadById.get(depId) || '';
+      if (headId && headId === uid) {
+        canSee = true;
+        canRead = true;
+        canWrite = true;
+      } else if (!roleAcl?.canWrite) {
+        canWrite = false;
+      }
+    }
+
+    const visible = canSee || canRead;
+    permissionsByChannelId[channelId] = {
+      canSee: visible,
+      canRead,
+      canWrite,
+      canDelete,
+      canVoice,
+    };
+    if (canRead) {
+      channelIds.push(channelId);
+    }
+    if (!isStructureAdmin && canRead) {
+      if (ch.division) scopedFromVisibleChannels.divisionIds.add(String(ch.division));
+      if (ch.department) scopedFromVisibleChannels.departmentIds.add(String(ch.department));
+      if (ch.team) scopedFromVisibleChannels.teamIds.add(String(ch.team));
+    }
+  }
+
+  let rolePlacement = {
+    branchId: null,
+    divisionId: null,
+    departmentId: null,
+    teamId: null,
+  };
+
+  let structureMode = 'none';
+  if (!isStructureAdmin) {
+    if (structureVisibility.mode !== 'none') {
+      structureMode = structureVisibility.mode;
+      for (const id of structureVisibility.divisionIds) {
+        scopedFromVisibleChannels.divisionIds.add(String(id));
+      }
+      for (const id of structureVisibility.departmentIds) {
+        scopedFromVisibleChannels.departmentIds.add(String(id));
+      }
+      for (const id of structureVisibility.teamIds) {
+        scopedFromVisibleChannels.teamIds.add(String(id));
+      }
+    } else {
+      structureMode = 'channel';
+      const deptIds = [...scopedFromVisibleChannels.departmentIds];
+      const teamIds = [...scopedFromVisibleChannels.teamIds];
+      if (deptIds.length) {
+        const deptRows = await Department.find({
+          _id: { $in: deptIds },
+          organization: orgId,
+        })
+          .select('division branch')
+          .lean();
+        for (const row of deptRows) {
+          if (row.division) scopedFromVisibleChannels.divisionIds.add(String(row.division));
+        }
+      }
+      if (teamIds.length) {
+        for (const row of teams.filter((t) => teamIds.includes(String(t._id)))) {
+          if (row.department) scopedFromVisibleChannels.departmentIds.add(String(row.department));
+          if (row.division) scopedFromVisibleChannels.divisionIds.add(String(row.division));
+        }
+      }
+    }
+
+    rolePlacement = pickPrimaryScope(structureVisibility, {
+      teams,
+      departments,
+      preferDepartmentLand: expandDepartmentTeams,
+    });
+    if (membersPlacement) {
+      if (!rolePlacement.departmentId && membersPlacement.primaryDepartmentId) {
+        rolePlacement.departmentId = membersPlacement.primaryDepartmentId;
+      }
+      if (!rolePlacement.teamId && membersPlacement.primaryTeamId) {
+        rolePlacement.teamId = membersPlacement.primaryTeamId;
+      }
+      if (!rolePlacement.divisionId && membersPlacement.divisionIds?.[0]) {
+        rolePlacement.divisionId = membersPlacement.divisionIds[0];
+      }
+      for (const id of membersPlacement.departmentIds || []) {
+        scopedFromVisibleChannels.departmentIds.add(String(id));
+      }
+      for (const id of membersPlacement.teamIds || []) {
+        scopedFromVisibleChannels.teamIds.add(String(id));
+      }
+      for (const id of membersPlacement.divisionIds || []) {
+        scopedFromVisibleChannels.divisionIds.add(String(id));
+      }
+    }
+  } else {
+    structureMode = 'all';
+  }
+
+  const scopeBranchId = rolePlacement.branchId || null;
+  const scopeDivisionId = rolePlacement.divisionId || null;
+  const scopeDepartmentId = rolePlacement.departmentId || null;
+  const scopeTeamId = rolePlacement.teamId || null;
+
+  projectChannels.sort((a, b) => {
+    const pa = String(a.projectName || a.projectId || '');
+    const pb = String(b.projectName || b.projectId || '');
+    if (pa !== pb) return pa.localeCompare(pb);
+    const ka = String(a.projectChannelKind || '');
+    const kb = String(b.projectChannelKind || '');
+    if (ka !== kb) return ka.localeCompare(kb);
+    return String(a.name || '').localeCompare(String(b.name || ''));
+  });
+
+  return {
+    channelIds,
+    permissionsByChannelId,
+    projectChannels,
+    scope: {
+      branchId: scopeBranchId,
+      divisionId: scopeDivisionId,
+      departmentId: scopeDepartmentId,
+      teamId: scopeTeamId,
+      canSeeAllStructure: isStructureAdmin,
+      structureMode,
+      placementLevel,
+      expandDepartmentTeams,
+      scopedDivisionIds: [...scopedFromVisibleChannels.divisionIds],
+      scopedDepartmentIds: [...scopedFromVisibleChannels.departmentIds],
+      scopedTeamIds: [...scopedFromVisibleChannels.teamIds],
+    },
+  };
+}
+
+async function fetchOrgNotificationUnread(userId, orgId) {
+  if (!userId || !orgId) return 0;
+  try {
+    const headers = { 'x-user-id': String(userId) };
+    if (NOTIFICATION_INTERNAL_TOKEN) {
+      headers['x-internal-notification-token'] = NOTIFICATION_INTERNAL_TOKEN;
+    }
+    const url = `${NOTIFICATION_SERVICE_URL}/api/notifications`;
+    const res = await axios.get(url, {
+      params: {
+        scope: 'organization',
+        organizationId: String(orgId),
+        limit: 1,
+      },
+      headers,
+      timeout: 5000,
+      validateStatus: () => true,
+    });
+    const payload = res.data?.data ?? res.data;
+    return Number(payload?.unreadCount) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+module.exports = {
+  buildOrganizationStructureData,
+  buildAccessibleChannelData,
+  fetchOrgNotificationUnread,
+};

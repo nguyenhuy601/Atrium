@@ -1,169 +1,281 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { GlassCard, GradientButton } from '../../components/Shared';
+import { useEffect, useRef, useState } from 'react';
+import toast from 'react-hot-toast';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { ArrowRight, Eye, EyeOff, X } from 'lucide-react';
+import AuthPageLayout from '../../components/Auth/AuthPageLayout';
+import AuthMarketingAside from '../../components/Auth/AuthMarketingAside';
+import { AuthFigmaLoginMobileLogo } from '../../components/Auth/AuthFigmaLoginLayout';
+import OneTimeCredentialsModal from '../../components/Auth/OneTimeCredentialsModal';
+import BrandPageLoader from '../../components/Shared/BrandPageLoader';
+import { authInputError, authInputSurface, authPrimaryButtonClass } from '../../components/Auth/authFieldClasses';
+import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
+import { useAppStrings } from '../../locales/appStrings';
+import { consumeOneTimeLoginCredentials } from '../../utils/oneTimeLoginCredentials';
 
-function LoginPage() {
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function LoginPage({ landingDemo = false } = {}) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { login, isAuthenticated, loading: authLoading } = useAuth();
+  const { isDarkMode } = useTheme();
+  const { t } = useAppStrings();
   const [formData, setFormData] = useState({ email: '', password: '' });
-  const [rememberMe, setRememberMe] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [oneTimeCreds, setOneTimeCreds] = useState(null);
+  const [inviteForgotHint, setInviteForgotHint] = useState(null);
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    navigate('/dashboard');
+  const emailInputRef = useRef(null);
+  const passwordInputRef = useRef(null);
+
+  const visualNight = Boolean(isDarkMode);
+  const inputBase = authInputSurface(visualNight);
+  const inputInvalid = authInputError(visualNight);
+  const linkCyan = visualNight ? 'text-cyan-300 hover:text-cyan-200' : 'text-cyan-700 hover:text-cyan-800';
+  const showPwdBtn = visualNight
+    ? 'text-slate-200 hover:bg-slate-800/80 hover:text-white'
+    : 'text-slate-600 hover:bg-slate-200/80 hover:text-slate-900';
+  const btnPrimary = authPrimaryButtonClass(visualNight);
+  const closeColor = visualNight ? 'text-slate-100' : 'text-slate-700';
+  const titleColor = visualNight ? 'text-white' : 'text-slate-900';
+  const labelColor = visualNight ? 'text-slate-100' : 'text-slate-800';
+  const hintColor = visualNight ? 'text-slate-300' : 'text-slate-600';
+  const errorColor = visualNight ? 'text-red-300' : 'text-red-700';
+
+  useEffect(() => {
+    const creds = consumeOneTimeLoginCredentials();
+    const fromInvite = Boolean(location.state?.fromCompanyInvite);
+    const prefillEmail = String(location.state?.prefillEmail || '').trim().toLowerCase();
+    const hasTempPassword = Boolean(location.state?.hasTempPassword);
+    const alreadyHadAccount = Boolean(location.state?.alreadyHadAccount);
+
+    if (creds) {
+      setOneTimeCreds(creds);
+      setFormData((prev) => ({
+        ...prev,
+        email: creds.email || prev.email,
+        password: creds.password || prev.password,
+      }));
+      setInviteForgotHint(null);
+    } else if (prefillEmail) {
+      setFormData((prev) => ({ ...prev, email: prefillEmail }));
+    }
+
+    if (fromInvite && !creds && (alreadyHadAccount || !hasTempPassword)) {
+      setInviteForgotHint({ email: prefillEmail });
+    }
+
+    if (location.state?.message) {
+      toast.success(location.state.message, { id: 'company-invite-flash' });
+    }
+    if (location.state?.message || location.state?.prefillEmail || fromInvite) {
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
+
+  useEffect(() => {
+    if (landingDemo || authLoading) return;
+    if (oneTimeCreds || inviteForgotHint) return;
+    if (isAuthenticated) {
+      navigate('/app', { replace: true });
+    }
+  }, [landingDemo, authLoading, isAuthenticated, navigate, oneTimeCreds, inviteForgotHint]);
+
+  const clearFieldError = (field) => {
+    setFieldErrors((prev) => (prev[field] ? { ...prev, [field]: '' } : prev));
   };
 
+  const validateFields = () => {
+    const email = formData.email.trim();
+    const next = { email: '', password: '' };
+    if (!email) next.email = t('login.errEmailRequired');
+    else if (!EMAIL_SHAPE.test(email)) next.email = t('login.errEmailInvalid');
+    if (!formData.password) next.password = t('login.errPasswordRequired');
+    setFieldErrors(next);
+    if (next.email) emailInputRef.current?.focus();
+    else if (next.password) passwordInputRef.current?.focus();
+    return !next.email && !next.password;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (landingDemo) {
+      toast(t('login.demoToast'), { icon: '🔒' });
+      return;
+    }
+
+    if (!validateFields()) return;
+
+    setLoading(true);
+    try {
+      const result = await login(formData.email.trim(), formData.password);
+      if (result?.ok) {
+        navigate('/app');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const forgotHref = inviteForgotHint?.email
+    ? `/forgot-password?email=${encodeURIComponent(inviteForgotHint.email)}`
+    : formData.email
+      ? `/forgot-password?email=${encodeURIComponent(formData.email.trim())}`
+      : '/forgot-password';
+
+  if (!landingDemo && !authLoading && isAuthenticated && !oneTimeCreds && !inviteForgotHint) {
+    return <BrandPageLoader />;
+  }
+
+  const emailDescribedBy = fieldErrors.email ? 'login-email-error' : undefined;
+  const passwordDescribedBy = fieldErrors.password ? 'login-password-error' : undefined;
+
   return (
-    <div className="min-h-screen flex items-center justify-center p-8 lg:p-12 relative overflow-hidden">
-      {/* Animated Background */}
-      <div className="absolute top-20 left-20 w-[500px] h-[500px] bg-purple-600/20 rounded-full blur-3xl animate-float"></div>
-      <div className="absolute bottom-20 right-20 w-[500px] h-[500px] bg-pink-600/20 rounded-full blur-3xl animate-float" style={{animationDelay: '1s'}}></div>
-      <div className="absolute top-1/2 left-1/3 w-[400px] h-[400px] bg-blue-600/10 rounded-full blur-3xl animate-float" style={{animationDelay: '2s'}}></div>
-      
-      <div className="relative z-10 w-full max-w-7xl animate-scaleIn">
-        <div className="grid lg:grid-cols-2 gap-12 items-center min-h-[600px]">
-        {/* Left Side - Info */}
-        <div className="hidden lg:block">
-          <GlassCard className="glass-strong p-10">
-            <div className="text-7xl mb-8 animate-float">🚀</div>
-            <h2 className="text-5xl font-black text-gradient mb-6 leading-tight">Hệ Thống Giao Tiếp Doanh Nghiệp</h2>
-            <p className="text-gray-300 mb-8 text-xl leading-relaxed">Kết nối toàn bộ tổ chức và nhân viên trong một không gian làm việc thống nhất</p>
-            <div className="space-y-6">
-              {[
-                { icon: "💬", title: "Nhắn tin tức thời", desc: "Giao tiếp nhanh chóng với đồng nghiệp" },
-                { icon: "🎤", title: "Cuộc Họp Trực Tuyến", desc: "Voice và Video chất lượng cao 4K" },
-                { icon: "✅", title: "Quản lý công việc", desc: "Theo dõi task hiệu quả" },
-                { icon: "🔒", title: "Bảo mật tuyệt đối", desc: "Mã hóa end-to-end" }
-              ].map((item, idx) => (
-                <div key={idx} className="flex items-start gap-4 p-4 glass rounded-xl hover:bg-white/5 transition-all">
-                  <div className="text-4xl">{item.icon}</div>
-                  <div>
-                    <h3 className="text-white font-bold text-lg mb-1">{item.title}</h3>
-                    <p className="text-gray-400 text-base">{item.desc}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </GlassCard>
-        </div>
-        
-        {/* Right Side - Login Form */}
-        <div>
-        <GlassCard className="glass-strong p-10">
-          {/* Logo and Title */}
-          <div className="text-center mb-10">
-            <div className="relative inline-block mb-6">
-              <div className="text-7xl">🔐</div>
-              <div className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 rounded-full animate-pulse"></div>
-            </div>
-            <h1 className="text-5xl font-black text-gradient mb-3">Chào Mừng Trở Lại</h1>
-            <p className="text-gray-400 text-lg">Đăng nhập để tiếp tục hành trình</p>
-          </div>
+    <AuthPageLayout
+      aside={<AuthMarketingAside nightOwl={visualNight} compact={!landingDemo} />}
+      landingDemo={landingDemo}
+      nightOwl={visualNight}
+      glassCard={!landingDemo}
+      showcaseAside={!landingDemo}
+    >
+      <div className={`relative z-20 w-full max-w-[22rem] pointer-events-auto ${closeColor}`}>
+        {!landingDemo ? (
+          <Link
+            to="/"
+            className="absolute -right-1 -top-1 z-[5] flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-inherit transition-[opacity,background] duration-150 ease-in-out hover:bg-[color-mix(in_srgb,currentColor_10%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600"
+            aria-label={t('authLayout.home')}
+            title={t('authLayout.home')}
+          >
+            <X className="h-5 w-5" strokeWidth={2} aria-hidden />
+          </Link>
+        ) : null}
 
-          {/* Quick Login Options */}
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            <button className="glass p-3 rounded-xl hover:bg-white/10 transition-all flex items-center justify-center gap-2">
-              <span className="text-xl">🔵</span>
-              <span className="text-sm font-semibold">Google</span>
-            </button>
-            <button className="glass p-3 rounded-xl hover:bg-white/10 transition-all flex items-center justify-center gap-2">
-              <span className="text-xl">⚫</span>
-              <span className="text-sm font-semibold">GitHub</span>
-            </button>
-          </div>
+        {!landingDemo ? <AuthFigmaLoginMobileLogo /> : null}
 
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-white/20"></div>
-            </div>
-            <div className="relative flex justify-center text-sm">
-              <span className="px-4 glass-strong text-gray-400">hoặc tiếp tục với email</span>
-            </div>
-          </div>
+        <h2
+          className={`text-center text-[1.65rem] font-bold tracking-tight sm:text-[1.85rem] ${titleColor}`}
+        >
+          {t('login.title')}
+        </h2>
+        <p className={`mt-2 text-center text-sm leading-relaxed ${hintColor}`}>{t('login.subtitle')}</p>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Email Input */}
-            <div>
-              <label className="block text-base font-semibold mb-3 text-gray-300 flex items-center gap-2">
-                <span className="text-xl">📧</span> Địa Chỉ Email
-              </label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({...formData, email: e.target.value})}
-                className="w-full px-5 py-4 text-base rounded-xl glass border border-white/20 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 transition-all outline-none text-white placeholder-gray-500"
-                placeholder="yourname@voicehub.com"
-              />
-            </div>
-
-            {/* Password Input */}
-            <div>
-              <label className="block text-base font-semibold mb-3 text-gray-300 flex items-center gap-2">
-                <span className="text-xl">🔒</span> Mật Khẩu
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  value={formData.password}
-                  onChange={(e) => setFormData({...formData, password: e.target.value})}
-                  className="w-full px-5 py-4 text-base rounded-xl glass border border-white/20 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/50 transition-all outline-none text-white placeholder-gray-500"
-                  placeholder="••••••••"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xl hover:scale-110 transition-transform"
-                >
-                  {showPassword ? '👁️' : '👁️‍🗨️'}
-                </button>
-              </div>
-            </div>
-
-            {/* Remember Me & Forgot Password */}
-            <div className="flex items-center justify-between text-sm">
-              <label className="flex items-center text-gray-400 cursor-pointer group">
-                <input 
-                  type="checkbox" 
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                  className="mr-2 rounded w-4 h-4 border-white/20" 
-                />
-                <span className="group-hover:text-white transition-colors">Ghi nhớ đăng nhập</span>
-              </label>
-              <a href="#" className="text-purple-400 hover:text-pink-400 transition-colors font-semibold">
-                Quên mật khẩu?
-              </a>
-            </div>
-
-            {/* Login Button */}
-            <GradientButton variant="primary" className="w-full" icon="🚀">
-              Đăng Nhập
-            </GradientButton>
-
-            {/* Security Badge */}
-            <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
-              <span>🔒</span>
-              <span>Bảo mật bởi JWT + 2FA</span>
-            </div>
-          </form>
-
-          {/* Register Link */}
-          <div className="mt-6 text-center text-gray-400">
-            Chưa có tài khoản?{' '}
-            <Link to="/register" className="text-purple-400 hover:text-pink-400 font-semibold transition-colors">
-              Tạo ngay
+        {inviteForgotHint ? (
+          <div
+            role="status"
+            className={`mt-4 rounded-xl border px-4 py-3 text-sm leading-relaxed ${
+              visualNight ? 'border-cyan-500/40 bg-cyan-950/30 text-cyan-100' : 'border-cyan-300 bg-cyan-50 text-cyan-950'
+            }`}
+          >
+            <p className="font-semibold">{t('acceptCompanyInvite.loginNoTempTitle')}</p>
+            <p className="mt-1 opacity-95">{t('acceptCompanyInvite.loginNoTempBody')}</p>
+            <Link to={forgotHref} className={`mt-2 inline-block font-semibold underline-offset-2 hover:underline ${linkCyan}`}>
+              {t('acceptCompanyInvite.loginNoTempCta')}
             </Link>
           </div>
+        ) : null}
 
-          {/* Back Link */}
-          <Link to="/" className="block mt-6 text-center text-gray-500 hover:text-gray-300 transition-colors flex items-center justify-center gap-2">
-            <span>←</span> Về Trang Chủ
-          </Link>
-        </GlassCard>
-        </div>
-        </div>
+        <form noValidate onSubmit={handleSubmit} className="relative mt-6 space-y-5">
+          <div>
+            <label htmlFor="email" className={`mb-2 block text-sm font-semibold ${labelColor}`}>
+              {t('login.email')}
+            </label>
+            <input
+              ref={emailInputRef}
+              id="email"
+              type="email"
+              inputMode="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={formData.email}
+              onChange={(e) => {
+                setFormData({ ...formData, email: e.target.value });
+                clearFieldError('email');
+              }}
+              className={fieldErrors.email ? inputInvalid : inputBase}
+              placeholder={t('login.placeholderEmail')}
+              autoComplete="email"
+              aria-invalid={fieldErrors.email ? 'true' : 'false'}
+              aria-describedby={emailDescribedBy}
+              disabled={loading}
+            />
+            {fieldErrors.email ? (
+              <p id="login-email-error" role="alert" className={`mt-1.5 text-sm leading-snug ${errorColor}`}>
+                {fieldErrors.email}
+              </p>
+            ) : null}
+          </div>
+
+          <div>
+            <label htmlFor="password" className={`mb-2 block text-sm font-semibold ${labelColor}`}>
+              {t('login.password')}
+            </label>
+            <div className="relative">
+              <input
+                ref={passwordInputRef}
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                value={formData.password}
+                onChange={(e) => {
+                  setFormData({ ...formData, password: e.target.value });
+                  clearFieldError('password');
+                }}
+                className={`${fieldErrors.password ? inputInvalid : inputBase} pr-14`}
+                placeholder={t('login.placeholderPwd')}
+                autoComplete="current-password"
+                aria-invalid={fieldErrors.password ? 'true' : 'false'}
+                aria-describedby={passwordDescribedBy}
+                disabled={loading}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                className={`absolute right-1.5 top-1/2 z-[3] flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600 ${showPwdBtn}`}
+                aria-label={showPassword ? t('login.hide') : t('login.show')}
+                aria-pressed={showPassword}
+                aria-controls="password"
+              >
+                {showPassword ? (
+                  <EyeOff className="h-5 w-5" strokeWidth={2} aria-hidden />
+                ) : (
+                  <Eye className="h-5 w-5" strokeWidth={2} aria-hidden />
+                )}
+              </button>
+            </div>
+            {fieldErrors.password ? (
+              <p id="login-password-error" role="alert" className={`mt-1.5 text-sm leading-snug ${errorColor}`}>
+                {fieldErrors.password}
+              </p>
+            ) : null}
+            <div className="mt-2 flex justify-end">
+              <Link to={forgotHref} className={`text-sm font-semibold underline-offset-2 hover:underline ${linkCyan}`}>
+                {t('login.forgot')}
+              </Link>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className={`flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-base font-bold !text-white shadow-lg vh-transition disabled:cursor-not-allowed disabled:opacity-60 ${btnPrimary}`}
+          >
+            {loading ? t('login.submitting') : t('login.submit')}
+            {!loading && <ArrowRight className="h-5 w-5 text-white" strokeWidth={2} aria-hidden />}
+          </button>
+        </form>
       </div>
-    </div>
+
+      <OneTimeCredentialsModal
+        open={Boolean(oneTimeCreds)}
+        email={oneTimeCreds?.email}
+        password={oneTimeCreds?.password}
+        onClose={() => setOneTimeCreds(null)}
+      />
+    </AuthPageLayout>
   );
 }
 

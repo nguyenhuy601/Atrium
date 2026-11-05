@@ -1,140 +1,1048 @@
-import { useEffect, useState } from 'react';
+import {
+  BarChart3,
+  Building2,
+  Calendar,
+  Home,
+  Eye,
+  FileText,
+  ListTodo,
+  LogOut,
+  MessageSquare,
+  Mic,
+  Moon,
+  Pencil,
+  Rocket,
+  Sun,
+} from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { createPortal } from 'react-dom';
+import toast from 'react-hot-toast';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useLocale } from '../../context/LocaleContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useWorkspace } from '../../context/WorkspaceContext';
+import { useAppStrings } from '../../locales/appStrings';
+import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
+import { readSingleOrgModeFlag } from '../../utils/singleCompanyMode';
+import api from '../../services/api';
+import {
+  buildCollaborateDocumentsPath,
+  buildCollaborateOrgNotificationsPath,
+  buildCollaborateTasksPath,
+  buildCommunicateChannelsPath,
+  getDefaultPathForSuite,
+  orgQueryFromSearch,
+  SUITE,
+} from '../../utils/suitePathUtils';
+import {
+  useFriendPending,
+  useNotificationBadge,
+  useOrganizationsMy,
+} from '../../hooks/queries';
+import { queryKeys } from '../../lib/queryKeys';
+import {
+    navDivider,
+    navItemActive,
+    navItemInactiveHover,
+    navLogoTile,
+    navOuterStrip,
+    navSidebarRail,
+    navTimeText,
+    shellNavRailBackdrop,
+    shellNavRailMenuBackdropZ,
+    shellNavRailZ,
+    profileDropdownBody,
+    profileDropdownCard,
+    profileDropdownHeader,
+    profileMenuRow,
+    tooltipBubble,
+} from '../../theme/shellTheme';
+import { getUserDisplayName } from '../../utils/helpers';
+import {
+  findOrgBySlug,
+  orgRecordId,
+  organizationsIdsKey,
+  workspacePayloadFromOrg,
+} from '../../utils/orgListUtils';
+import { removeToken } from '../../utils/tokenStorage';
+import ProfileModal from '../Profile/ProfileModal';
+import { ConfirmDialog } from '../Shared';
+import NotificationBellBadge from '../Shared/NotificationBellBadge';
+import Avatar from '../ui/Avatar';
 
-const NavigationSidebar = () => {
+const iconBtn =
+  'w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 flex items-center justify-center shrink-0 rounded-xl transition-all duration-200';
+const orgAvatarBtn =
+  'relative flex h-10 w-10 sm:h-11 sm:w-11 md:h-12 md:w-12 shrink-0 items-center justify-center rounded-xl border text-[11px] font-bold uppercase tracking-wide transition-all duration-200';
+
+/** Trang thông báo trong menu tổ chức — giữ sidebar org khi mở */
+const ORG_NOTIFICATIONS_PATH = '/notifications/organization';
+
+const DEMO_ORGANIZATIONS = [
+  { _id: 'demo-org-1', name: 'Alpha Corp', slug: 'alpha-corp' },
+  { _id: 'demo-org-2', name: 'BetaLabs', slug: 'betalabs' },
+];
+
+const PUBLIC_NAV_DEF = [
+  { key: 'dashboard', Icon: Home, path: '/dashboard' },
+  { key: 'friends', Icon: MessageSquare, path: '/chat/friends' },
+  { key: 'voice', Icon: Mic, path: '/voice' },
+  { key: 'notifications', path: '/notifications', bellBadge: true },
+  { key: 'calendar', Icon: Calendar, path: '/calendar' },
+];
+
+const ORG_NAV_DEF = [
+  { key: 'dashboard', Icon: Home, path: '/dashboard' },
+  { key: 'org', Icon: Building2, path: '/workspaces', isWorkspaceEntry: true },
+  { key: 'tasks', Icon: ListTodo, path: '/tasks' },
+  { key: 'documents', Icon: FileText, path: '/documents' },
+  { key: 'notifications', path: ORG_NOTIFICATIONS_PATH, bellBadge: true },
+];
+
+const COMMUNICATE_NAV_DEF = [
+  { key: 'friends', Icon: MessageSquare, path: '/app/communicate/chat/friends' },
+  { key: 'voice', Icon: Mic, path: '/app/communicate/voice' },
+  { key: 'notifications', path: '/app/communicate/notifications', bellBadge: true },
+];
+
+const COLLABORATE_NAV_DEF = [
+  { key: 'org', Icon: Building2, path: '/app/collaborate/workspaces', isWorkspaceEntry: true },
+  { key: 'tasks', Icon: ListTodo, path: '/app/collaborate/projects' },
+  { key: 'documents', Icon: FileText, path: '/app/collaborate/documents' },
+  { key: 'notifications', path: '/app/collaborate/notifications', bellBadge: true },
+];
+
+const ME_NAV_DEF = [
+  { key: 'dashboard', Icon: Home, path: '/app/me/dashboard' },
+  { key: 'calendar', Icon: Calendar, path: '/app/me/calendar' },
+  { key: 'settings', Icon: BarChart3, path: '/app/me/settings' },
+];
+
+function navDefForSuite(suite) {
+  if (suite === 'communicate') return COMMUNICATE_NAV_DEF;
+  if (suite === 'collaborate') return COLLABORATE_NAV_DEF;
+  if (suite === 'me') return ME_NAV_DEF;
+  return null;
+}
+
+const canUseHoverExpand = () =>
+  typeof window !== 'undefined' &&
+  window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+
+/** Giữ chỗ cột nav trong flex layout; rail tương tác render qua portal fixed. */
+const RAIL_LAYOUT_SPACER_CLASS = 'w-14 shrink-0 sm:w-16 md:w-[68px]';
+
+function navRailBackdropClassName(extra = '') {
+  return `${shellNavRailBackdrop} ${shellNavRailMenuBackdropZ}${extra ? ` ${extra}` : ''}`;
+}
+
+const NavigationSidebar = ({ landingDemo = false, suite: suiteProp = null } = {}) => {
   const [time, setTime] = useState(new Date());
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
+  const {
+    activeWorkspace,
+    setActiveWorkspace,
+    getLastWorkspacePath,
+    getLastCommunicatePath,
+    getLastCollaboratePath,
+    lastWorkspaceSlug,
+  } = useWorkspace();
+  const activeOrgId = String(
+    activeWorkspace?._id || activeWorkspace?.id || activeWorkspace?.organizationId || ''
+  ).trim();
+  const { locale } = useLocale();
+  const { t, dict } = useAppStrings();
+  const singleOrgMode = readSingleOrgModeFlag();
   const { isDarkMode, toggleTheme } = useTheme();
-  
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [togglingInvisible, setTogglingInvisible] = useState(false);
+  /** Máy touch / LAN client không hover → giữ rail mở để icon menu luôn bấm được. */
+  const [sidebarExpanded, setSidebarExpanded] = useState(() => !canUseHoverExpand());
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
+  const queryClient = useQueryClient();
+  const [createOrgMenuOpen, setCreateOrgMenuOpen] = useState(false);
+  const [joinByLinkOpen, setJoinByLinkOpen] = useState(false);
+  const [joinLinkInput, setJoinLinkInput] = useState('');
+  const railMeasureRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const el = railMeasureRef.current;
+    if (!el || typeof window === 'undefined') return undefined;
+
+    const syncRailWidth = () => {
+      const w = Math.ceil(el.getBoundingClientRect().width);
+      if (w > 0) {
+        document.documentElement.style.setProperty('--vh-nav-rail-width', `${w}px`);
+      }
+    };
+
+    syncRailWidth();
+    const ro = new ResizeObserver(syncRailWidth);
+    ro.observe(el);
+    window.addEventListener('resize', syncRailWidth);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', syncRailWidth);
+    };
+  }, []);
+
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const currentTime = time.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  useEffect(() => {
+    setProfileOpen(false);
+    setCreateOrgMenuOpen(false);
+    setJoinByLinkOpen(false);
+  }, []);
 
-  const getGreeting = () => {
-    const hour = time.getHours();
-    const userName = user?.name || "Bạn";
-    
-    if (hour >= 5 && hour < 11) return `Chào buổi Sáng, ${userName}!`;
-    if (hour >= 11 && hour < 13) return `Chào buổi Trưa, ${userName}!`;
-    if (hour >= 13 && hour < 17) return `Chào buổi Chiều, ${userName}!`;
-    if (hour >= 17 && hour < 22) return `Chào buổi Tối, ${userName}!`;
-    return `Khuya rồi, ${userName}!`;
-  };
+  const onOrgRail = useMemo(() => {
+    if (suiteProp === 'communicate') {
+      return (
+        location.pathname.startsWith('/app/communicate/channels') ||
+        location.pathname.startsWith('/app/collaborate/notifications')
+      );
+    }
+    if (suiteProp === 'collaborate') {
+      return (
+        location.pathname.startsWith('/app/collaborate/projects') ||
+        location.pathname.startsWith('/app/collaborate/tasks') ||
+        location.pathname.startsWith('/app/collaborate/documents') ||
+        location.pathname.startsWith('/app/collaborate/notifications')
+      );
+    }
+    if (suiteProp) return false;
+    return (
+      location.pathname.startsWith('/w/') ||
+      location.pathname.startsWith(ORG_NOTIFICATIONS_PATH)
+    );
+  }, [location.pathname, suiteProp]);
 
-  const handleLogout = async () => {
-    if (window.confirm('Bạn có chắc muốn đăng xuất?')) {
-      await logout();
-      navigate('/login');
+  const orgIdForBadge = useMemo(() => {
+    let orgIdFromUrl = orgQueryFromSearch(location.search);
+    if (
+      !orgIdFromUrl &&
+      (location.pathname.startsWith(ORG_NOTIFICATIONS_PATH) ||
+        location.pathname.startsWith('/app/collaborate/notifications'))
+    ) {
+      orgIdFromUrl = orgQueryFromSearch(location.search);
+    }
+    return (
+      orgIdFromUrl ||
+      activeWorkspace?._id ||
+      activeWorkspace?.id ||
+      activeWorkspace?.organizationId ||
+      ''
+    );
+  }, [
+    location.pathname,
+    location.search,
+    activeWorkspace?._id,
+    activeWorkspace?.id,
+    activeWorkspace?.organizationId,
+  ]);
+
+  const notificationScope =
+    (suiteProp === 'collaborate' &&
+      (location.pathname.startsWith('/app/collaborate/notifications') || (onOrgRail && orgIdForBadge))) ||
+    (!suiteProp && onOrgRail && orgIdForBadge)
+      ? 'organization'
+      : 'personal';
+
+  const { unreadCount } = useNotificationBadge({
+    scope: notificationScope,
+    organizationId: orgIdForBadge,
+    enabled: !landingDemo,
+  });
+
+  const { pendingCount } = useFriendPending({
+    enabled: !landingDemo && !onOrgRail,
+  });
+
+  const bellBadgeCount = landingDemo
+    ? 0
+    : onOrgRail
+      ? unreadCount
+      : unreadCount + pendingCount;
+
+  const { data: organizationsFromQuery = [] } = useOrganizationsMy({
+    enabled: !landingDemo,
+  });
+
+  const myOrganizations = landingDemo ? DEMO_ORGANIZATIONS : organizationsFromQuery;
+  const orgListIdsKey = useMemo(
+    () =>
+      landingDemo ? organizationsIdsKey(DEMO_ORGANIZATIONS) : organizationsIdsKey(organizationsFromQuery),
+    [landingDemo, organizationsFromQuery]
+  );
+  const workspaceUrlSyncRef = useRef('');
+
+  const refreshOrganizations = useCallback(() => {
+    if (landingDemo) return;
+    queryClient.invalidateQueries({ queryKey: queryKeys.organizations.my() });
+  }, [landingDemo, queryClient]);
+
+  useEffect(() => {
+    if (profileOpen || createOrgMenuOpen || joinByLinkOpen) setSidebarExpanded(true);
+  }, [profileOpen, createOrgMenuOpen, joinByLinkOpen]);
+
+  useEffect(() => {
+    if (sidebarExpanded) return;
+    if (profileOpen) setProfileOpen(false);
+    if (createOrgMenuOpen) setCreateOrgMenuOpen(false);
+    if (joinByLinkOpen) setJoinByLinkOpen(false);
+  }, [sidebarExpanded, profileOpen, createOrgMenuOpen, joinByLinkOpen]);
+
+  useEffect(() => {
+    if (!landingDemo && location.pathname.startsWith('/workspaces')) {
+      refreshOrganizations();
+    }
+  }, [location.pathname, landingDemo, refreshOrganizations]);
+
+  /** Tránh overlay menu backdrop kẹt sau điều hướng — chặn click/hover toàn màn hình. */
+  useEffect(() => {
+    setProfileOpen(false);
+    setCreateOrgMenuOpen(false);
+    setJoinByLinkOpen(false);
+    setLogoutConfirmOpen(false);
+    setSidebarExpanded(!canUseHoverExpand());
+    setTooltip((p) => (p.show ? { ...p, show: false } : p));
+    workspaceUrlSyncRef.current = '';
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key !== 'Escape') return;
+      setProfileOpen(false);
+      setCreateOrgMenuOpen(false);
+      setJoinByLinkOpen(false);
+      setLogoutConfirmOpen(false);
+      setTooltip((p) => (p.show ? { ...p, show: false } : p));
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  const orgIdFromUrl = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return String(params.get('organizationId') || params.get('orgId') || '').trim();
+  }, [location.search]);
+
+  const slugFromPath = useMemo(() => {
+    const match = location.pathname.match(/^\/w\/([^/]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+  }, [location.pathname]);
+
+  /** Đồng bộ workspace đang chọn (legacy /w/:slug; org từ context, không ghi URL). */
+  useEffect(() => {
+    if (landingDemo || !orgListIdsKey) return;
+
+    let target = null;
+    if (!suiteProp && slugFromPath) {
+      target = findOrgBySlug(myOrganizations, slugFromPath);
+    } else if (orgIdFromUrl) {
+      target = myOrganizations.find((o) => orgRecordId(o) === orgIdFromUrl) || null;
+    }
+    if (!target) return;
+
+    const id = orgRecordId(target);
+    const slug = String(target.slug || '').trim();
+    const syncKey = `${slugFromPath}|${orgIdFromUrl}|${id}`;
+    const currentId = orgRecordId(activeWorkspace);
+    const currentSlug = String(activeWorkspace?.slug || '').trim();
+    if (workspaceUrlSyncRef.current === syncKey && currentId === id && currentSlug === slug) {
+      return;
+    }
+    if (currentId === id && currentSlug === slug) {
+      workspaceUrlSyncRef.current = syncKey;
+      return;
+    }
+
+    workspaceUrlSyncRef.current = syncKey;
+    setActiveWorkspace(workspacePayloadFromOrg(target));
+  }, [slugFromPath, orgIdFromUrl, orgListIdsKey, landingDemo, setActiveWorkspace, suiteProp, activeWorkspace]);
+
+  const LOCALE_TAG_EN = 'en-US';
+  const LOCALE_TAG_VI = 'vi-VN';
+  const timeLocale = locale === 'en' ? LOCALE_TAG_EN : LOCALE_TAG_VI;
+  const currentTime = time.toLocaleTimeString(timeLocale, { hour: '2-digit', minute: '2-digit' });
+
+  const hasWorkspaceContext = Boolean(activeWorkspace?.slug || String(lastWorkspaceSlug || '').trim());
+  const activeWorkspaceId = activeWorkspace?._id || activeWorkspace?.id || activeWorkspace?.organizationId || '';
+  const inOrganizationContext = suiteProp
+    ? suiteProp === 'communicate' || suiteProp === 'collaborate'
+    : location.pathname.startsWith('/w/') ||
+      location.pathname.startsWith(ORG_NOTIFICATIONS_PATH) ||
+      (hasWorkspaceContext && location.pathname.startsWith('/documents'));
+  const navItems = useMemo(() => {
+    const suiteNav = navDefForSuite(suiteProp);
+    const base = suiteNav || (inOrganizationContext ? ORG_NAV_DEF : PUBLIC_NAV_DEF);
+    return base.map((def) => {
+      const copy = dict?.nav?.[def.key] || {};
+      const fallbackLabel = def.key === 'org' ? t('nav.workspaces') : def.key;
+      const label = copy.label || fallbackLabel;
+      const tooltip = copy.tooltip || label;
+      if (def.bellBadge) {
+        return { key: def.key, path: def.path, tooltip, bellBadge: true, label, isWorkspaceEntry: false };
+      }
+      return {
+        key: def.key,
+        Icon: def.Icon,
+        path: def.path,
+        label,
+        tooltip,
+        isWorkspaceEntry: Boolean(def.isWorkspaceEntry),
+      };
+    });
+  }, [dict, inOrganizationContext, locale, suiteProp, t]);
+  const displayName = getUserDisplayName(user);
+  const isInvisible = Boolean(user?.isInvisible);
+  const isOnline = !isInvisible && String(user?.status || '').toLowerCase() === 'online';
+
+  const handleToggleInvisible = async () => {
+    if (landingDemo) {
+      toast(t('nav.toastDemoInvisible'), { icon: '🔒' });
+      return;
+    }
+    if (togglingInvisible) return;
+    const nextInvisible = !isInvisible;
+
+    try {
+      setTogglingInvisible(true);
+      await api.patch('/users/me', { isInvisible: nextInvisible });
+      updateUser({ isInvisible: nextInvisible });
+      setProfileOpen(false);
+    } catch (error) {
+      console.error('Toggle invisible mode failed:', error);
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('nav.toastInvisibleErr') }));
+    } finally {
+      setTogglingInvisible(false);
     }
   };
 
-  const navItems = [
-    { icon: "🏠", label: "Trang Chủ", path: "/", badge: null },
-    { icon: "📊", label: "Bảng Điều Khiển", path: "/dashboard", badge: "5" },
-    { icon: "💬", label: "Tin Nhắn", path: "/chat", badge: "12" },
-    { icon: "🎤", label: "Không Gian", path: "/voice/room1", badge: null },
-    { icon: "✅", label: "Công Việc", path: "/tasks", badge: "3" },
-    { icon: "🏢", label: "Tổ Chức", path: "/organizations", badge: null },
-    { icon: "👥", label: "Liên Hệ", path: "/friends", badge: "2" },
-    { icon: "📁", label: "Tài Liệu", path: "/documents", badge: null },
-    { icon: "🔔", label: "Thông Báo", path: "/notifications", badge: "8" },
-    { icon: "📅", label: "Lịch", path: "/calendar", badge: null },
-    { icon: "📈", label: "Phân Tích", path: "/analytics", badge: null },
-    { icon: "⚙️", label: "Cài Đặt", path: "/settings", badge: null },
-  ];
+  const performLogout = async () => {
+    if (landingDemo) {
+      toast(t('nav.toastDemoLogout'), { icon: '🔒' });
+      setProfileOpen(false);
+      setLogoutConfirmOpen(false);
+      return;
+    }
 
-  const isActivePath = (path) => {
-    if (path === '/') return location.pathname === '/';
-    return location.pathname.startsWith(path);
+    try {
+      await Promise.race([logout(), new Promise((resolve) => setTimeout(resolve, 1500))]);
+    } catch (e) {
+      console.error('Logout background error:', e);
+    } finally {
+      try {
+        removeToken();
+      } catch (e) {
+        // ignore
+      }
+      navigate('/login');
+      setLogoutConfirmOpen(false);
+    }
   };
 
-  return (
-    <div className="w-20 hover:w-64 glass-strong flex flex-col items-center hover:items-start py-6 space-y-3 border-r border-white/10 overflow-visible transition-all duration-300 group/sidebar px-3">
-      {/* Logo */}
-      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-2xl animate-glow mb-2 relative cursor-pointer group-hover/sidebar:w-full group-hover/sidebar:justify-start group-hover/sidebar:gap-3 group-hover/sidebar:px-3 transition-all duration-300">
-        🚀
-        <span className="hidden group-hover/sidebar:inline-block text-base font-bold text-white whitespace-nowrap">VoiceHub</span>
-      </div>
-      
-      {/* Time Display */}
-      <div className="text-center mb-2">
-        <div className="text-xs text-gray-400 font-bold">
-          {time.getHours().toString().padStart(2, '0')}:{time.getMinutes().toString().padStart(2, '0')}
-        </div>
-      </div>
+  const handleLogoutClick = () => {
+    if (landingDemo) {
+      performLogout();
+      return;
+    }
+    setLogoutConfirmOpen(true);
+    setProfileOpen(false);
+  };
 
-      <div className="h-px w-10 bg-white/10 my-2"></div>
+  const extractInvitePayloadFromInput = (raw) => {
+    if (!raw) return { orgId: '', token: '' };
+    const input = raw.trim();
+    if (!input) return { orgId: '', token: '' };
 
-      {/* Navigation Items with Expandable Labels */}
-      <div className="flex flex-col space-y-3 flex-1 w-full items-center group-hover/sidebar:items-start overflow-y-auto overflow-x-visible scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
-        {navItems.map((item, idx) => (
-          <Link 
-            key={idx}
-            to={item.path}
-            className={`relative w-12 h-12 rounded-xl flex items-center justify-center text-2xl transition-all duration-300 group/item ${
-              isActivePath(item.path)
-                ? 'bg-gradient-to-br from-purple-600 to-pink-600 shadow-lg scale-110' 
-                : 'hover:bg-white/10 hover:scale-110'
-            } group-hover/sidebar:w-full group-hover/sidebar:justify-start group-hover/sidebar:gap-3 group-hover/sidebar:px-3`}
-          >
-            {item.icon}
-            <span className="hidden group-hover/sidebar:inline-block text-sm font-semibold text-white whitespace-nowrap">{item.label}</span>
-            {item.badge && (
-              <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-xs font-bold text-white group-hover/sidebar:relative group-hover/sidebar:top-0 group-hover/sidebar:right-0 group-hover/sidebar:ml-auto">
-                {item.badge}
+    try {
+      const url = new URL(input);
+      return {
+        orgId: url.searchParams.get('orgId') || url.searchParams.get('inviteOrgId') || '',
+        token: url.searchParams.get('inviteToken') || '',
+      };
+    } catch {
+      const tokenRaw = (input.includes('inviteToken=') && input.split('inviteToken=')[1]?.split('&')[0]) || '';
+      const token = tokenRaw ? decodeURIComponent(tokenRaw) : '';
+      const orgIdRaw = (input.includes('orgId=') && input.split('orgId=')[1]?.split('&')[0]) ||
+        (input.includes('inviteOrgId=') && input.split('inviteOrgId=')[1]?.split('&')[0]) || '';
+      const orgId = orgIdRaw ? decodeURIComponent(orgIdRaw) : '';
+      return { orgId, token };
+    }
+  };
+
+  const handleOpenCreateWorkspace = () => {
+    setCreateOrgMenuOpen(false);
+    setJoinByLinkOpen(false);
+    navigate(
+      suiteProp === 'collaborate' ? '/app/collaborate/workspaces' : '/workspaces',
+      { state: { openCreateWorkspace: true } }
+    );
+  };
+
+  const handleOpenJoinByLink = () => {
+    setCreateOrgMenuOpen(false);
+    setJoinByLinkOpen(true);
+  };
+
+  const handleJoinByLinkSubmit = () => {
+    const { orgId, token } = extractInvitePayloadFromInput(joinLinkInput);
+    if (!orgId || !token) {
+      toast.error(t('organizations.inviteLinkInvalid'));
+      return;
+    }
+    const params = new URLSearchParams({
+      inviteOrgId: orgId,
+      inviteToken: token,
+    });
+    setJoinByLinkOpen(false);
+    setJoinLinkInput('');
+    navigate(
+      suiteProp === 'collaborate'
+        ? `/app/collaborate/workspaces?${params.toString()}`
+        : `/workspaces?${params.toString()}`
+    );
+    refreshOrganizations();
+  };
+
+  const handleSelectOrganization = (org) => {
+    if (!org) return;
+    const id = orgRecordId(org);
+    const slug = String(org.slug || '').trim();
+    workspaceUrlSyncRef.current = `|${slug}|${id}`;
+    setActiveWorkspace(workspacePayloadFromOrg(org));
+    setCreateOrgMenuOpen(false);
+    setJoinByLinkOpen(false);
+
+    const path = location.pathname;
+    if (suiteProp === 'communicate') {
+      navigate(buildCommunicateChannelsPath());
+      return;
+    }
+    if (suiteProp === 'collaborate') {
+      if (path.startsWith('/app/collaborate/documents')) {
+        navigate(buildCollaborateDocumentsPath(id));
+        return;
+      }
+      if (path.startsWith('/app/collaborate/notifications')) {
+        navigate(buildCollaborateOrgNotificationsPath(id));
+        return;
+      }
+      navigate(buildCollaborateTasksPath(id));
+      return;
+    }
+    if (path.startsWith(ORG_NOTIFICATIONS_PATH) || path.startsWith('/documents')) {
+      navigate(`/workspaces?orgId=${encodeURIComponent(id)}`);
+      return;
+    }
+    navigate('/workspaces');
+  };
+
+  const isOrganizationActive = (org) => {
+    const id = String(org?._id || org?.id || '');
+    const slug = String(org?.slug || '').trim();
+    const activeId = String(activeWorkspaceId || '');
+    if (activeId && id && activeId === id) return true;
+    if (slug && slugFromPath && slug === slugFromPath) return true;
+    if (orgIdFromUrl && id && orgIdFromUrl === id) return true;
+    return false;
+  };
+
+  const isActivePath = (path) => {
+    if (path === '/workspaces' || path === '/app/collaborate/workspaces') {
+      return (
+        location.pathname.startsWith('/workspaces') ||
+        location.pathname.startsWith('/w/') ||
+        location.pathname === '/app/collaborate/workspaces'
+      );
+    }
+    if (path === '/notifications' || path === '/app/communicate/notifications') {
+      return (
+        location.pathname === '/notifications' ||
+        location.pathname === '/notifications/' ||
+        location.pathname === '/app/communicate/notifications'
+      );
+    }
+    if (path === ORG_NOTIFICATIONS_PATH || path === '/app/collaborate/notifications') {
+      return (
+        location.pathname.startsWith(ORG_NOTIFICATIONS_PATH) ||
+        location.pathname.startsWith('/app/collaborate/notifications')
+      );
+    }
+    if (path === '/') return location.pathname === '/';
+    return location.pathname === path || location.pathname.startsWith(`${path}/`);
+  };
+
+  const getOrgNavTargetPath = (item) => {
+    if (suiteProp === 'communicate') {
+      if (item.key === 'channels' || item.key === 'org') return getLastCommunicatePath();
+      if (item.key === 'notifications') return '/app/communicate/notifications';
+      return item.path;
+    }
+    if (suiteProp === 'collaborate') {
+      if (item.key === 'org') return '/app/collaborate/workspaces';
+      if (item.key === 'tasks') return getLastCollaboratePath();
+      if (item.key === 'documents') return buildCollaborateDocumentsPath(activeOrgId);
+      if (item.key === 'notifications') return buildCollaborateOrgNotificationsPath(activeOrgId);
+      return item.path;
+    }
+    if (item.key === 'notifications') {
+      if (!inOrganizationContext) return '/notifications';
+      return getLastWorkspacePath();
+    }
+    if (!inOrganizationContext) return item.path;
+    if (item.key === 'org') return getLastWorkspacePath();
+    return item.path;
+  };
+
+  const isNavItemActive = (item) => {
+    if (suiteProp === 'communicate' && item.key === 'channels') {
+      return location.pathname.startsWith('/app/communicate/channels');
+    }
+    if (suiteProp === 'collaborate' && item.key === 'tasks') {
+      const path = location.pathname;
+      return (
+        path.startsWith('/app/collaborate/projects') ||
+        path.startsWith('/app/collaborate/tasks')
+      );
+    }
+    if (suiteProp === 'collaborate' && item.key === 'documents') {
+      return location.pathname.startsWith('/app/collaborate/documents');
+    }
+    if (suiteProp === 'collaborate' && item.key === 'notifications') {
+      return location.pathname.startsWith('/app/collaborate/notifications');
+    }
+    return isActivePath(item.path);
+  };
+
+  const [tooltip, setTooltip] = useState({ show: false, label: '', x: 0, y: 0 });
+
+  const Tooltip = ({ label, children, className = '' }) => {
+    const handleEnter = (e) => {
+      if (createOrgMenuOpen || joinByLinkOpen) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      setTooltip({
+        show: true,
+        label,
+        x: rect.right + 12,
+        y: rect.top + rect.height / 2,
+      });
+    };
+
+    const handleLeave = () => {
+      setTooltip((p) => ({ ...p, show: false }));
+    };
+
+    return (
+      <div className={className} onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
+        {children}
+      </div>
+    );
+  };
+
+  useEffect(() => {
+    if (!createOrgMenuOpen && !joinByLinkOpen) return;
+    setTooltip((prev) => (prev.show ? { ...prev, show: false } : prev));
+  }, [createOrgMenuOpen, joinByLinkOpen]);
+
+  const tooltipArrowClass = isDarkMode
+    ? 'border-transparent border-r-[8px] border-r-slate-800 border-y-[6px] border-y-transparent border-l-0'
+    : 'border-transparent border-r-[8px] border-r-white border-y-[6px] border-y-transparent border-l-0';
+
+  const tooltipPortal =
+    tooltip.show &&
+    createPortal(
+      <div
+        className={`fixed z-[9999] pointer-events-none whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium ${tooltipBubble(isDarkMode)}`}
+        style={{
+          left: tooltip.x,
+          top: tooltip.y,
+          transform: 'translateY(-50%)',
+        }}
+        role="tooltip"
+      >
+        <span className="relative z-10">{tooltip.label}</span>
+        <span className={`absolute right-full top-1/2 -translate-y-1/2 h-0 w-0 ${tooltipArrowClass}`} aria-hidden />
+      </div>,
+      document.body
+    );
+
+  const borderR = navOuterStrip(isDarkMode);
+  const rail = navSidebarRail(isDarkMode);
+  const inactive = navItemInactiveHover(isDarkMode);
+  const activeCls = navItemActive();
+  const timeCls = navTimeText(isDarkMode);
+  const divCls = navDivider(isDarkMode);
+  const createOrgShortLabelRaw = t('organizations.createOrgShort');
+  const createOrgShortLabel = String(createOrgShortLabelRaw || '').includes('.')
+    ? t('organizations.createOrg')
+    : createOrgShortLabelRaw;
+
+  const railNode = (
+      <div
+        ref={railMeasureRef}
+        className={`fixed inset-y-0 left-0 ${shellNavRailZ} isolate flex h-screen shrink-0 flex-col border-r transition-[width] duration-300 ease-out ${borderR} w-14 overflow-visible pointer-events-auto touch-manipulation sm:w-16 md:w-[68px]`}
+        onMouseEnter={() => {
+          if (canUseHoverExpand()) setSidebarExpanded(true);
+        }}
+        onMouseLeave={() => {
+          if (!canUseHoverExpand()) return;
+          if (!profileOpen && !createOrgMenuOpen && !joinByLinkOpen) setSidebarExpanded(false);
+        }}
+        onPointerDown={() => {
+          if (!canUseHoverExpand()) setSidebarExpanded(true);
+        }}
+        title={sidebarExpanded ? undefined : t('nav.railHint')}
+      >
+        <div className={`flex h-full min-w-[56px] shrink-0 flex-col overflow-y-hidden overflow-x-visible sm:w-16 md:w-[68px] w-14 ${rail}`}>
+          <div className="scrollbar-overlay flex flex-1 min-h-0 flex-col items-center gap-1 overflow-x-visible overflow-y-auto py-3">
+            <Link
+              to={
+                suiteProp === 'communicate'
+                  ? getDefaultPathForSuite(SUITE.COMMUNICATE)
+                  : suiteProp === 'collaborate'
+                    ? getDefaultPathForSuite(SUITE.COLLABORATE)
+                    : suiteProp === 'me'
+                      ? getDefaultPathForSuite(SUITE.ME)
+                      : '/dashboard'
+              }
+              className={`${iconBtn} ${navLogoTile()} shrink-0`}
+              aria-label={t('nav.brandHome')}
+            >
+              <Rocket className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={1.75} aria-hidden />
+            </Link>
+
+            <div className={`py-1 font-mono text-[10px] ${timeCls}`}>{currentTime}</div>
+            <div className={`my-1 h-px w-8 ${divCls}`} />
+
+            <nav className="flex w-full flex-col items-center gap-1 py-1">
+              {navItems.map((item, idx) => {
+                if (item.bellBadge) {
+                  const active = isNavItemActive(item);
+                  return (
+                    <Tooltip key={idx} label={item.tooltip}>
+                      <Link
+                        to={getOrgNavTargetPath(item)}
+                        className={`relative ${iconBtn} ${active ? activeCls : inactive}`}
+                        aria-label={item.label}
+                        aria-current={active ? 'page' : undefined}
+                      >
+                        <NotificationBellBadge
+                          count={bellBadgeCount}
+                          isDark={isDarkMode}
+                          variant="nav"
+                          active={active}
+                        />
+                      </Link>
+                    </Tooltip>
+                  );
+                }
+                const Icon = item.Icon;
+                const active = isNavItemActive(item);
+                const targetPath = item.isWorkspaceEntry
+                  ? suiteProp === 'communicate'
+                    ? getLastCommunicatePath()
+                    : suiteProp === 'collaborate'
+                      ? '/app/collaborate/workspaces'
+                      : getLastWorkspacePath()
+                  : getOrgNavTargetPath(item);
+                return (
+                  <Tooltip key={idx} label={item.tooltip ?? item.label}>
+                    <Link
+                      to={targetPath}
+                      className={`relative ${iconBtn} ${
+                        active ? activeCls : inactive
+                      }`}
+                      aria-label={item.label}
+                    >
+                      <Icon className="h-5 w-5 sm:h-5 sm:w-5 md:h-6 md:w-6" strokeWidth={1.75} aria-hidden />
+                    </Link>
+                  </Tooltip>
+                );
+              })}
+            </nav>
+
+            {(suiteProp === 'communicate' || suiteProp === 'collaborate' || (!suiteProp && inOrganizationContext)) && (
+            <>
+              <div className={`my-1 h-px w-8 ${divCls}`} />
+              <div className="flex w-full flex-col items-center gap-1.5">
+                {myOrganizations.map((org) => {
+                  const active = isOrganizationActive(org);
+                  return (
+                    <Tooltip key={String(org?._id || org?.slug || org?.name)} label={org?.name || t('nav.workspaces')}>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectOrganization(org)}
+                        className={`${orgAvatarBtn} ${
+                          active
+                            ? isDarkMode
+                              ? 'border-cyan-400/80 bg-cyan-500/20 text-white shadow-[0_0_16px_rgba(34,211,238,0.28)]'
+                              : 'border-cyan-400 bg-cyan-100 text-slate-900 shadow-sm'
+                            : isDarkMode
+                              ? 'border-white/15 bg-white/5 text-slate-200 hover:border-white/30 hover:bg-white/10'
+                              : 'border-slate-300 bg-white text-slate-800 hover:border-cyan-300 hover:bg-slate-50'
+                        }`}
+                        aria-label={org?.name || t('nav.workspaces')}
+                        aria-current={active ? 'true' : undefined}
+                      >
+                        {active && (
+                          <span className="absolute -left-2 h-5 w-1 rounded-r-full bg-cyan-400" aria-hidden />
+                        )}
+                        <span>{(org?.name || t('nav.workspaces')).slice(0, 2).toUpperCase()}</span>
+                        {Number(org?.onlineMembers || 0) > 0 && (
+                          <span
+                            className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 ${
+                              isDarkMode ? 'border-[#10131b] bg-emerald-400' : 'border-white bg-emerald-500'
+                            }`}
+                            aria-hidden
+                          />
+                        )}
+                      </button>
+                    </Tooltip>
+                  );
+                })}
+                {!landingDemo && !singleOrgMode && (
+                  <Tooltip label={createOrgShortLabel}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setJoinByLinkOpen(false);
+                        setCreateOrgMenuOpen(true);
+                      }}
+                      className={`${orgAvatarBtn} ${
+                        isDarkMode
+                          ? 'border-dashed border-emerald-400/50 bg-emerald-500/10 text-emerald-200 hover:border-emerald-400 hover:bg-emerald-500/20'
+                          : 'border-dashed border-emerald-400 bg-emerald-50/80 text-emerald-700 hover:bg-emerald-100'
+                      }`}
+                      aria-label={createOrgShortLabel}
+                    >
+                      <span className="text-xl font-light leading-none">+</span>
+                    </button>
+                  </Tooltip>
+                )}
               </div>
+            </>
             )}
-          </Link>
-        ))}
-      </div>
 
-      {/* Greeting Area - Always visible */}
-      <div className="w-full flex justify-center mb-2">
-        <div className="glass-strong rounded-xl p-2 border border-purple-500/30 transition-all group-hover/sidebar:w-full group-hover/sidebar:p-3">
-          <div className="text-center">
-            <div className="text-2xl group-hover/sidebar:mb-1">👋</div>
-            <div className={`text-xs font-semibold leading-tight hidden group-hover/sidebar:block ${isDarkMode ? 'text-white/90' : 'text-gray-900'}`}>{getGreeting()}</div>
+            <Tooltip label={isDarkMode ? t('nav.themeLight') : t('nav.themeDark')}>
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className={`${iconBtn} ${inactive}`}
+                aria-label={isDarkMode ? t('nav.ariaThemeLight') : t('nav.ariaThemeDark')}
+              >
+                {isDarkMode ? (
+                  <Sun className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={1.75} aria-hidden />
+                ) : (
+                  <Moon className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={1.75} aria-hidden />
+                )}
+              </button>
+            </Tooltip>
+
+            <div className="relative mt-auto flex w-full justify-center pt-2">
+              <button
+                type="button"
+                onClick={() => setProfileOpen((p) => !p)}
+                className={`${iconBtn} ${inactive}`}
+                title={displayName || user?.email || t('nav.profileAccount')}
+              >
+                <Avatar user={user} size="sm" online={isOnline} className="shrink-0" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
-      
-      <div className="h-px w-10 bg-white/10 my-2"></div>
-      
-      {/* Theme Toggle with Expandable Label */}
-      <button 
-        onClick={toggleTheme}
-        className="w-12 h-12 rounded-xl hover:bg-white/10 flex items-center justify-center text-xl transition-all duration-300 relative group-hover/sidebar:w-full group-hover/sidebar:justify-start group-hover/sidebar:gap-3 group-hover/sidebar:px-3"
-      >
-        {isDarkMode ? '🌙' : '☀️'}
-        <span className="hidden group-hover/sidebar:inline-block text-sm font-semibold text-white whitespace-nowrap">
-          {isDarkMode ? "Chế độ Sáng" : "Chế độ Tối"}
-        </span>
-      </button>
+  );
 
-      {/* Logout Button */}
-      <button 
-        onClick={handleLogout}
-        className="w-12 h-12 rounded-xl hover:bg-red-500/20 flex items-center justify-center text-xl transition-all duration-300 relative group-hover/sidebar:w-full group-hover/sidebar:justify-start group-hover/sidebar:gap-3 group-hover/sidebar:px-3 text-red-400 hover:text-red-300"
-        title="Đăng xuất"
-      >
-        🚪
-        <span className="hidden group-hover/sidebar:inline-block text-sm font-semibold whitespace-nowrap">
-          Đăng Xuất
-        </span>
-      </button>
-      
-      {/* Time Display */}
-      <div className="text-xs text-white/50 font-mono hidden group-hover/sidebar:block">
-        {currentTime}
-      </div>
-    </div>
+  return (
+    <>
+      <div className={`${RAIL_LAYOUT_SPACER_CLASS} h-screen shrink-0 pointer-events-none`} aria-hidden />
+      {typeof document !== 'undefined' ? createPortal(railNode, document.body) : railNode}
+
+      <ProfileModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} />
+      {tooltipPortal}
+      {createOrgMenuOpen && !singleOrgMode &&
+        createPortal(
+          <>
+            <div
+              className={navRailBackdropClassName()}
+              onClick={() => setCreateOrgMenuOpen(false)}
+              aria-hidden
+            />
+            <div
+              className={`fixed left-20 top-1/2 z-[1190] w-[280px] -translate-y-1/2 rounded-2xl border p-4 shadow-xl ${
+                isDarkMode
+                  ? 'border-white/10 bg-[#111622] text-slate-100'
+                  : 'border-slate-200 bg-white text-slate-900'
+              }`}
+            >
+              <div className="mb-3 text-sm font-bold">{t('nav.addOrganization')}</div>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={handleOpenCreateWorkspace}
+                  className={`w-full rounded-lg px-3 py-2 text-left text-sm font-semibold transition ${
+                    isDarkMode
+                      ? 'bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30'
+                      : 'bg-cyan-100 text-cyan-900 hover:bg-cyan-200'
+                  }`}
+                >
+                  {t('workspace.createOrg')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenJoinByLink}
+                  className={`w-full rounded-lg px-3 py-2 text-left text-sm transition ${
+                    isDarkMode
+                      ? 'bg-white/5 text-slate-200 hover:bg-white/10'
+                      : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
+                  }`}
+                >
+                  {t('nav.joinByInviteLink')}
+                </button>
+              </div>
+            </div>
+          </>,
+          document.body
+        )}
+      {joinByLinkOpen &&
+        createPortal(
+          <>
+            <div
+              className={navRailBackdropClassName()}
+              onClick={() => setJoinByLinkOpen(false)}
+              aria-hidden
+            />
+            <div
+              className={`fixed left-1/2 top-1/2 z-[1190] w-[420px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 rounded-2xl border p-4 shadow-xl ${
+                isDarkMode
+                  ? 'border-white/10 bg-[#111622] text-slate-100'
+                  : 'border-slate-200 bg-white text-slate-900'
+              }`}
+            >
+              <div className="mb-1 text-base font-bold">{t('nav.joinOrganization')}</div>
+              <div className={`mb-3 text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                {t('nav.pasteInviteLinkHint')}
+              </div>
+              <input
+                value={joinLinkInput}
+                onChange={(event) => setJoinLinkInput(event.target.value)}
+                placeholder={t('nav.pasteInviteLinkPlaceholder')}
+                className={`w-full rounded-lg border px-3 py-2 text-sm outline-none ${
+                  isDarkMode
+                    ? 'border-white/10 bg-white/5 text-white placeholder:text-slate-400 focus:border-cyan-400/60'
+                    : 'border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:border-cyan-500'
+                }`}
+              />
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setJoinByLinkOpen(false)}
+                  className={`rounded-lg px-3 py-2 text-sm transition ${
+                    isDarkMode ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
+                  }`}
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={handleJoinByLinkSubmit}
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold transition motion-reduce:transition-none ${
+                    isDarkMode
+                      ? 'bg-cyan-500/25 text-cyan-100 hover:bg-cyan-500/35'
+                      : 'bg-cyan-100 text-cyan-900 hover:bg-cyan-200'
+                  }`}
+                >
+                  {t('workspace.join')}
+                </button>
+              </div>
+            </div>
+          </>,
+          document.body
+        )}
+
+      {profileOpen &&
+        createPortal(
+          <>
+            <div
+              className={navRailBackdropClassName()}
+              onClick={() => setProfileOpen(false)}
+              aria-hidden
+            />
+            <div
+              className={`fixed bottom-6 left-20 z-[1190] w-[320px] animate-slideUp overflow-hidden rounded-2xl ${profileDropdownCard(isDarkMode)}`}
+            >
+              <div className={`relative px-4 pb-4 pt-6 ${profileDropdownHeader()}`}>
+                <div className="flex items-center gap-3">
+                  <Avatar user={user} size="lg" online={isOnline} />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-bold text-white">{displayName}</div>
+                    <div className="truncate text-xs text-white/80">{user?.username || user?.email || ''}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className={`space-y-2 ${profileDropdownBody(isDarkMode)}`}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsProfileModalOpen(true);
+                    setProfileOpen(false);
+                  }}
+                  className={`flex w-full items-center justify-between px-3 py-2 transition-colors ${profileMenuRow(isDarkMode)}`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Pencil className="h-4 w-4 shrink-0 text-cyan-500" strokeWidth={1.75} aria-hidden />
+                    {t('nav.editProfile')}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleToggleInvisible}
+                  disabled={togglingInvisible}
+                  className={`flex w-full items-center justify-between px-3 py-2 transition-colors disabled:opacity-60 ${profileMenuRow(isDarkMode)}`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Eye className="h-4 w-4 shrink-0 text-cyan-500" strokeWidth={1.75} aria-hidden />
+                    {t('nav.invisible')}
+                  </span>
+                  <span className={`text-xs ${isDarkMode ? 'text-amber-300' : 'text-amber-600'}`}>
+                    {togglingInvisible ? t('nav.saving') : isInvisible ? t('nav.on') : t('nav.off')}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLogoutClick}
+                  className={`flex w-full items-center justify-between px-3 py-2 text-red-500 transition-colors hover:bg-red-500/10 dark:text-red-400 ${profileMenuRow(isDarkMode)}`}
+                >
+                  <span className="flex items-center gap-2">
+                    <LogOut className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                    {t('nav.logout')}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </>,
+          document.body
+        )}
+      <ConfirmDialog
+        isOpen={logoutConfirmOpen}
+        onClose={() => setLogoutConfirmOpen(false)}
+        onConfirm={performLogout}
+        title={t('nav.logoutTitle')}
+        message={t('nav.logoutMsg')}
+        confirmText={t('nav.logout')}
+        cancelText={t('nav.cancel')}
+      />
+    </>
   );
 };
 

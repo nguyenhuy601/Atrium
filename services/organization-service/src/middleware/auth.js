@@ -1,41 +1,122 @@
+const { orgUnauthorized, orgAccessDenied, sendServiceError } = require('../utils/orgApiError');
 const axios = require('axios');
+const { isTrustedGatewayForward } = require('@enterprise/shared/middleware/gatewayTrust');
+const { checkMasterGrant } = require('../clients/rbacPermission.client');
+const { readStoredSystemAdminState } = require('../clients/storedSystemRole.client');
+const { resolveAuthorizeOrGrant, isVendorViewGrant } = require('../utils/authorizeOrGrantDecision');
+const { resolveOrgAccess } = require('../utils/orgAccess');
 
-const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:3001';
+const AUTH_SERVICE_URL = String(process.env.AUTH_SERVICE_URL || '').trim().replace(/\/+$/, '');
+if (!AUTH_SERVICE_URL) throw new Error('Thiếu biến môi trường: AUTH_SERVICE_URL');
+
+const getHeader = (headers, key) => headers[key] || headers[key.toLowerCase()];
 
 exports.protect = async (req, res, next) => {
   try {
+    const forwardedUserId = getHeader(req.headers, 'x-user-id');
+    // Chỉ tin x-user-id khi request đi qua API Gateway (x-gateway-internal-token hợp lệ)
+    if (forwardedUserId && isTrustedGatewayForward(req)) {
+      req.user = {
+        id: forwardedUserId,
+        userId: forwardedUserId,
+        email: getHeader(req.headers, 'x-user-email') || null,
+        systemRole: String(getHeader(req.headers, 'x-user-system-role') || '')
+          .trim()
+          .toLowerCase(),
+      };
+      return next();
+    }
+    // Có x-user-id nhưng không tin cậy (thiếu/sai GATEWAY_INTERNAL_TOKEN ở service) — không chặn 401;
+    // tiếp tục xác thực bằng JWT để khớp với api-gateway đã verify token.
+
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
-      return res.status(401).json({ status: 'fail', message: 'Not authenticated' });
+      return orgUnauthorized(res);
     }
 
-    // Verify token with auth service
+    // Verify token with auth service (timeout tránh treo cả chuỗi search → chat-service 503)
     const response = await axios.get(`${AUTH_SERVICE_URL}/api/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
+      timeout: Number(process.env.AUTH_HTTP_TIMEOUT_MS || 8000),
     });
 
-    req.user = response.data.data.user;
+    const user = response.data?.data?.user || response.data?.user || {};
+    req.user = {
+      ...user,
+      id: user.id || user.userId || user._id,
+    };
     next();
   } catch (error) {
-    res.status(401).json({ status: 'fail', message: 'Invalid token' });
+    return sendServiceError(res, 401, {
+      errorCode: 'AUTH_TOKEN_INVALID',
+      messageUser: 'Phiên đăng nhập không hợp lệ.',
+      message: 'Invalid token',
+    });
   }
 };
 
+async function loadActiveMembership(req) {
+  const Membership = require('../models/Membership');
+  const orgId = req.params.orgId || req.params.id;
+  const userId = req.user?.id || req.user?._id || req.user?.userId;
+  const access = await resolveOrgAccess(userId, orgId);
+  const membership = access.membership || null;
+  const normalizedRole = membership ? Membership.normalizeRole(membership.role) : null;
+  return { membership, normalizedRole, orgId, userId, orgAccessOk: access.ok };
+}
+
+function membershipPlain(membership) {
+  if (!membership) return null;
+  return typeof membership.toObject === 'function' ? membership.toObject() : { ...membership };
+}
+
 exports.authorize = (roles) => {
   return async (req, res, next) => {
-    const Membership = require('../models/Membership');
-    const orgId = req.params.orgId || req.params.id;
-
-    const membership = await Membership.findOne({
-      user: req.user.id || req.user._id,
-      organization: orgId,
-    });
-
-    if (!membership || !roles.includes(membership.role)) {
-      return res.status(403).json({ status: 'fail', message: 'Access denied' });
+    const { membership, normalizedRole } = await loadActiveMembership(req);
+    if (!membership || !roles.includes(normalizedRole)) {
+      return orgAccessDenied(res);
     }
 
-    req.membership = membership;
+    req.membership = { ...membershipPlain(membership), normalizedRole };
     next();
   };
 };
+
+/**
+ * Đã vào org + đúng master grant.
+ * System admin chỉ tự đối chiếu DB trên mã xem. Route ghi có thể đặt sẵn cờ (bàn giao / catalog).
+ * Membership owner/admin không phải quyền.
+ */
+exports.authorizeOrGrant = (_roles, masterKey) => {
+  return async (req, res, next) => {
+    const { membership, normalizedRole, orgId, userId, orgAccessOk } = await loadActiveMembership(req);
+    const grantAllowed =
+      orgAccessOk && masterKey ? await checkMasterGrant(userId, orgId, masterKey) : false;
+    let storedAdminVerified = req.storedSystemAdminVerified === true;
+    if (
+      !grantAllowed &&
+      !storedAdminVerified &&
+      orgAccessOk &&
+      isVendorViewGrant(masterKey)
+    ) {
+      const stored = await readStoredSystemAdminState(userId);
+      storedAdminVerified = stored.state === 'admin';
+    }
+    const decision = resolveAuthorizeOrGrant({
+      membership,
+      grantAllowed,
+      orgAccessOk,
+      storedAdminVerified,
+    });
+    if (!decision.allow) {
+      return orgAccessDenied(res);
+    }
+    req.membership = membership
+      ? { ...membershipPlain(membership), normalizedRole }
+      : { role: 'member', normalizedRole: 'member' };
+    next();
+  };
+};
+
+/** Chỉ master grant V2 — không bypass org membership role. */
+exports.authorizeGrant = (masterKey) => exports.authorizeOrGrant([], masterKey);

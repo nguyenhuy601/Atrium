@@ -1,0 +1,197 @@
+const { mongo } = require('@enterprise/shared');
+const { mongoose } = mongo;
+
+const messageSchema = new mongoose.Schema(
+  {
+    senderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+    },
+    receiverId: {
+      type: mongoose.Schema.Types.ObjectId,
+    },
+    roomId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Room',
+    },
+    conversationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Conversation',
+    },
+    content: {
+      type: String,
+      required: true,
+    },
+    messageType: {
+      type: String,
+      enum: ['text', 'image', 'file', 'system', 'business_card', 'call_log', 'poll'],
+      default: 'text',
+    },
+    isRead: {
+      type: Boolean,
+      default: false,
+    },
+    readAt: {
+      type: Date,
+    },
+    organizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+    },
+    /**
+     * Org Context Call — gắn dự án vào tin.
+     * mode=project_intersection + projectId. Tin hiện cả kênh khi ORG_CONTEXT_VISIBLE_TO_ROOM
+     * (mặc định on). Chi tiết context gated ở work-preview, không filter list/socket.
+     */
+    visibility: {
+      mode: { type: String, trim: true },
+      projectId: { type: String, trim: true },
+      projectName: { type: String, trim: true, maxlength: 180 },
+    },
+    /** Context Reference — chip Work/CR. Không dùng để ẩn tin. */
+    refs: {
+      type: [
+        {
+          kind: { type: String, trim: true, enum: ['task', 'change_request'] },
+          id: { type: String, trim: true },
+          projectId: { type: String, trim: true },
+          label: { type: String, trim: true, maxlength: 120 },
+        },
+      ],
+      default: undefined,
+    },
+    /** Idempotency for project.v1.work.activity → announcement (sparse unique). */
+    activityEventId: {
+      type: String,
+      trim: true,
+      maxlength: 120,
+    },
+    /** Tin nhắn kênh trả lời một tin khác (cùng roomId). */
+    replyToMessageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Message',
+    },
+    // Soft delete - giữ message nhưng đánh dấu đã xóa
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+    deletedAt: {
+      type: Date,
+    },
+    // Recall (thu hồi) - ẩn message nhưng giữ nó cho histories
+    isRecalled: {
+      type: Boolean,
+      default: false,
+    },
+    recalledAt: {
+      type: Date,
+    },
+    // Edit tracking - lưu lịch sử edit
+    editedAt: {
+      type: Date,
+    },
+    originalContent: {
+      type: String,
+    },
+    encV: {
+      type: Number,
+      default: 0,
+    },
+    /** Khảo sát kênh (votes nội bộ — DTO chỉ trả counts + viewerVote). */
+    poll: {
+      question: { type: String, maxlength: 300 },
+      options: [
+        {
+          id: { type: String, required: true },
+          text: { type: String, maxlength: 120 },
+        },
+      ],
+      allowMulti: { type: Boolean, default: false },
+      closesAt: { type: Date },
+      closed: { type: Boolean, default: false },
+      votes: [
+        {
+          userId: { type: mongoose.Schema.Types.ObjectId, required: true },
+          optionIds: [{ type: String }],
+          at: { type: Date, default: Date.now },
+        },
+      ],
+    },
+    /** Phản hồi emoji (DM / kênh) */
+    reactions: [
+      {
+        emoji: { type: String, required: true },
+        userId: { type: mongoose.Schema.Types.ObjectId, required: true },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    /** Metadata file/hình (Firebase Storage); TTL & cleanup */
+    fileMeta: {
+      storagePath: { type: String },
+      storageBucket: { type: String },
+      originalName: { type: String },
+      mimeType: { type: String },
+      byteSize: { type: Number },
+      /** dm | org_room | meeting */
+      retentionContext: {
+        type: String,
+        enum: ['dm', 'org_room', 'meeting'],
+      },
+      storageTier: {
+        type: String,
+        enum: ['temp', 'chat', 'task'],
+        default: 'temp',
+      },
+      /** Thời điểm GC xóa object Storage + metadata */
+      expiresAt: { type: Date },
+      /** Đã copy sang vùng task — không GC temp path này theo chat TTL */
+      promotedToTask: { type: Boolean, default: false },
+      taskId: { type: mongoose.Schema.Types.ObjectId },
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Indexes
+messageSchema.index({ senderId: 1, createdAt: -1 });
+messageSchema.index({ receiverId: 1, createdAt: -1 });
+messageSchema.index({ roomId: 1, createdAt: -1 });
+messageSchema.index({ roomId: 1, createdAt: -1, _id: -1 });
+messageSchema.index({ conversationId: 1, createdAt: -1 });
+messageSchema.index({ organizationId: 1, createdAt: -1 });
+messageSchema.index({ roomId: 1, 'visibility.projectId': 1, createdAt: -1 });
+messageSchema.index({ organizationId: 1, createdAt: -1, _id: -1 });
+/** Org message search filter: org + room + soft flags + createdAt cursor */
+messageSchema.index(
+  { organizationId: 1, roomId: 1, isDeleted: 1, isRecalled: 1, createdAt: -1, _id: -1 },
+  { name: 'org_room_search_createdAt' }
+);
+messageSchema.index(
+  { activityEventId: 1 },
+  {
+    unique: true,
+    sparse: true,
+    name: 'activityEventId_unique_sparse',
+  }
+);
+messageSchema.index(
+  { organizationId: 1, createdAt: -1 },
+  {
+    partialFilterExpression: {
+      'fileMeta.storagePath': { $exists: true, $type: 'string', $ne: '' },
+    },
+    name: 'org_attachments_by_createdAt',
+  }
+);
+messageSchema.index({ 'fileMeta.expiresAt': 1 });
+messageSchema.index({ 'fileMeta.storagePath': 1 });
+
+const Message = mongoose.model('Message', messageSchema);
+
+module.exports = Message;
+
+
+
+

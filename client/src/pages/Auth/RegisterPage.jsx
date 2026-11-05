@@ -1,12 +1,89 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import toast from 'react-hot-toast';
 import { Link, useNavigate } from 'react-router-dom';
-import { GlassCard, GradientButton } from '../../components/Shared';
+import AuthFigmaCenteredLayout from '../../components/Auth/AuthFigmaCenteredLayout';
+import AuthFigmaLoginLayout, { AuthFigmaLoginMobileLogo } from '../../components/Auth/AuthFigmaLoginLayout';
+import AuthMarketingAside from '../../components/Auth/AuthMarketingAside';
+import {
+  FIGMA_BTN,
+  FIGMA_BTN_SPINNER,
+  FIGMA_CENTERED_CARD,
+  FIGMA_REGISTER_SPLIT_INNER,
+  FIGMA_LINK_SM,
+  FIGMA_LOGIN_HEADER,
+  FIGMA_REGISTER_FOOTER,
+  FIGMA_REGISTER_HEADER,
+  FIGMA_REGISTER_SUBTITLE,
+} from '../../components/Auth/figmaAuthClasses';
+import { authPrimaryButtonClass, authInputError, authInputSurface } from '../../components/Auth/authFieldClasses';
+import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
+import { useAppStrings } from '../../locales/appStrings';
+import authService from '../../services/authService';
+import {
+  birthYearOptions,
+  isBirthDateComplete,
+  validateBirthDateParts,
+} from '../../utils/birthDateUtils';
 
-function RegisterPage() {
+const RESEND_COOLDOWN_MS = 60_000;
+
+function RegisterPage({ suiteLayout = false } = {}) {
   const navigate = useNavigate();
-  const [formData, setFormData] = useState({ name: '', email: '', password: '', confirmPassword: '' });
+  const { register } = useAuth();
+  const { isDarkMode } = useTheme();
+  const { t } = useAppStrings();
+
+  const inputOk = authInputSurface(isDarkMode, { dense: true });
+  const inputErr = authInputError(isDarkMode, { dense: true });
+  const labelCls = isDarkMode ? 'text-slate-200' : 'text-slate-700';
+  const mutedCls = isDarkMode ? 'text-slate-400' : 'text-slate-600';
+  const titleCls = isDarkMode ? 'text-white' : 'text-[#0f172a]';
+  const linkCyan = isDarkMode ? 'font-semibold text-cyan-400 hover:underline' : 'font-semibold text-cyan-700 hover:underline';
+  const chk = isDarkMode
+    ? 'mt-0.5 h-[1.125rem] w-[1.125rem] shrink-0 rounded border-slate-600 bg-[#0c1018] text-cyan-500'
+    : 'mt-0.5 h-[1.125rem] w-[1.125rem] shrink-0 rounded border-slate-300 text-cyan-600';
+  const barEmpty = isDarkMode ? 'bg-slate-700' : 'bg-slate-200';
+  const btnPrimary = authPrimaryButtonClass(isDarkMode);
+  const successPanelCls = isDarkMode
+    ? 'rounded-xl border border-cyan-500/40 bg-cyan-950/30 px-4 py-4 text-cyan-100'
+    : 'rounded-xl border border-cyan-300 bg-cyan-50 px-4 py-4 text-cyan-950';
+
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    birthDay: '',
+    birthMonth: '',
+    birthYear: '',
+    password: '',
+    confirmPassword: '',
+  });
+  const yearOptions = useMemo(() => birthYearOptions(), []);
   const [passwordStrength, setPasswordStrength] = useState(0);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [registeredEmail, setRegisteredEmail] = useState('');
+  const [resendLoading, setResendLoading] = useState(false);
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
+  const submitDisabled = loading || !agreedToTerms;
+
+  useEffect(() => {
+    if (!cooldownUntil) {
+      setCooldownSeconds(0);
+      return undefined;
+    }
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
+      setCooldownSeconds(left);
+      if (left <= 0) setCooldownUntil(0);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [cooldownUntil]);
 
   const calculatePasswordStrength = (password) => {
     let strength = 0;
@@ -19,210 +96,450 @@ function RegisterPage() {
 
   const handlePasswordChange = (e) => {
     const newPassword = e.target.value;
-    setFormData({...formData, password: newPassword});
+    setFormData({ ...formData, password: newPassword });
     setPasswordStrength(calculatePasswordStrength(newPassword));
   };
 
   const getStrengthColor = () => {
-    if (passwordStrength === 0) return "from-gray-500 to-gray-600";
-    if (passwordStrength === 1) return "from-red-500 to-orange-500";
-    if (passwordStrength === 2) return "from-yellow-500 to-orange-500";
-    if (passwordStrength === 3) return "from-green-500 to-emerald-500";
-    return "from-green-600 to-teal-600";
+    if (passwordStrength === 0) return 'from-slate-400 to-slate-500';
+    if (passwordStrength === 1) return 'from-red-500 to-orange-500';
+    if (passwordStrength === 2) return 'from-amber-500 to-orange-500';
+    if (passwordStrength === 3) return 'from-emerald-500 to-teal-500';
+    return 'from-emerald-600 to-teal-600';
   };
 
-  const getStrengthText = () => {
-    if (passwordStrength === 0) return "Rất yếu";
-    if (passwordStrength === 1) return "Yếu";
-    if (passwordStrength === 2) return "Trung bình";
-    if (passwordStrength === 3) return "Mạnh";
-    return "Rất mạnh";
+  const strengthKeys = [
+    'register.strength0',
+    'register.strength1',
+    'register.strength2',
+    'register.strength3',
+    'register.strength4',
+  ];
+  const getStrengthText = () => t(strengthKeys[passwordStrength] ?? strengthKeys[0]);
+
+  const validateForm = () => {
+    const newErrors = {};
+
+    if (!formData.lastName || formData.lastName.trim().length < 1) {
+      newErrors.lastName = t('register.errLastNameRequired');
+    } else if (formData.lastName.trim().length < 2) {
+      newErrors.lastName = t('register.errLastNameMin');
+    }
+
+    if (!formData.firstName || formData.firstName.trim().length < 1) {
+      newErrors.firstName = t('register.errFirstNameRequired');
+    } else if (formData.firstName.trim().length < 2) {
+      newErrors.firstName = t('register.errFirstNameMin');
+    }
+
+    if (!formData.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      newErrors.email = t('register.errEmail');
+    }
+
+    if (!isBirthDateComplete(formData)) {
+      newErrors.birthDate = t('register.errBirthRequired');
+    } else {
+      const dob = validateBirthDateParts(formData);
+      if (!dob.ok) {
+        const codeMap = {
+          required: 'register.errBirthRequired',
+          invalid: 'register.errBirthInvalid',
+          future: 'register.errBirthFuture',
+          tooYoung: 'register.errBirthTooYoung',
+        };
+        newErrors.birthDate = t(codeMap[dob.code] || 'register.errBirthInvalid');
+      }
+    }
+
+    if (!formData.password || formData.password.length < 8) {
+      newErrors.password = t('register.errPasswordMin');
+    } else if (passwordStrength < 3) {
+      newErrors.password = t('register.errPasswordComplex');
+    }
+
+    if (!formData.confirmPassword) {
+      newErrors.confirmPassword = t('register.errConfirmRequired');
+    } else if (formData.password !== formData.confirmPassword) {
+      newErrors.confirmPassword = t('register.errConfirmMismatch');
+    }
+
+    if (!agreedToTerms) {
+      newErrors.terms = t('register.errTerms');
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
-  return (
-    <div className="min-h-screen flex items-center justify-center p-8 lg:p-12 relative overflow-hidden">
-      {/* Animated Background */}
-      <div className="absolute top-20 right-20 w-[500px] h-[500px] bg-blue-600/20 rounded-full blur-3xl animate-float"></div>
-      <div className="absolute bottom-20 left-20 w-[500px] h-[500px] bg-cyan-600/20 rounded-full blur-3xl animate-float" style={{animationDelay: '1s'}}></div>
-      <div className="absolute top-1/3 right-1/3 w-[400px] h-[400px] bg-purple-600/10 rounded-full blur-3xl animate-float" style={{animationDelay: '2s'}}></div>
-      
-      <div className="relative z-10 w-full max-w-7xl animate-scaleIn">
-        <div className="grid lg:grid-cols-2 gap-12 items-center min-h-[650px]">
-        {/* Left Side - Register Form */}
-        <div>
-        <GlassCard className="glass-strong p-10">
-          {/* Logo and Title */}
-          <div className="text-center mb-10">
-            <div className="relative inline-block mb-6">
-              <div className="text-7xl">✨</div>
-              <div className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full animate-pulse"></div>
-            </div>
-            <h1 className="text-5xl font-black text-gradient-cool mb-3">Tham Gia VoiceHub</h1>
-            <p className="text-gray-400 text-lg">Tạo tài khoản trong vài giây</p>
-          </div>
+  const handleResendVerification = async () => {
+    const email = String(registeredEmail || '').trim();
+    if (!email) return;
+    if (cooldownSeconds > 0) {
+      toast.error(t('authSession.resendVerificationCooldown', { seconds: cooldownSeconds }));
+      return;
+    }
 
-          {/* Benefits */}
-          <div className="grid grid-cols-3 gap-3 mb-8">
-            {[
-              { icon: "⚡", label: "Nhanh chóng" },
-              { icon: "🔒", label: "Bảo mật" },
-              { icon: "🎁", label: "Miễn phí" }
-            ].map((benefit, idx) => (
-              <div key={idx} className="glass p-4 rounded-xl text-center hover:bg-white/10 transition-all">
-                <div className="text-3xl mb-2">{benefit.icon}</div>
-                <div className="text-sm font-semibold text-gray-300">{benefit.label}</div>
-              </div>
-            ))}
-          </div>
+    setResendLoading(true);
+    try {
+      const response = await authService.resendVerification(email);
+      const payload = response?.data || response || {};
+      if (payload.alreadyVerified) {
+        toast.success(t('authSession.resendVerificationAlreadyVerified'));
+      } else {
+        toast.success(t('authSession.resendVerificationSuccess'));
+      }
+      setCooldownUntil(Date.now() + RESEND_COOLDOWN_MS);
+    } catch (error) {
+      console.error('[RegisterPage] Resend verification error:', error);
+      toast.error(t('authSession.resendVerificationFail'));
+    } finally {
+      setResendLoading(false);
+    }
+  };
 
-          <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); navigate('/dashboard'); }}>
-            {/* Name Input */}
-            <div>
-              <label className="block text-sm font-semibold mb-2 text-gray-300 flex items-center gap-2">
-                <span>👤</span> Họ Và Tên
-              </label>
-              <input
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({...formData, name: e.target.value})}
-                className="w-full px-4 py-3 rounded-xl glass border border-white/20 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 transition-all outline-none text-white placeholder-gray-500"
-                placeholder="Nguyễn Văn A"
-              />
-            </div>
+  const handleRegister = async (e) => {
+    e.preventDefault();
 
-            {/* Email Input */}
-            <div>
-              <label className="block text-sm font-semibold mb-2 text-gray-300 flex items-center gap-2">
-                <span>📧</span> Địa Chỉ Email
-              </label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({...formData, email: e.target.value})}
-                className="w-full px-4 py-3 rounded-xl glass border border-white/20 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 transition-all outline-none text-white placeholder-gray-500"
-                placeholder="yourname@email.com"
-              />
-            </div>
+    if (!validateForm()) {
+      return;
+    }
 
-            {/* Password Input with Strength Meter */}
-            <div>
-              <label className="block text-sm font-semibold mb-2 text-gray-300 flex items-center gap-2">
-                <span>🔒</span> Mật Khẩu
-              </label>
-              <input
-                type="password"
-                value={formData.password}
-                onChange={handlePasswordChange}
-                className="w-full px-4 py-3 rounded-xl glass border border-white/20 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 transition-all outline-none text-white placeholder-gray-500"
-                placeholder="••••••••"
-              />
-              {formData.password && (
-                <div className="mt-2">
-                  <div className="flex gap-1 mb-1">
-                    {[...Array(4)].map((_, idx) => (
-                      <div 
-                        key={idx} 
-                        className={`h-1 flex-1 rounded-full transition-all duration-300 ${
-                          idx < passwordStrength 
-                            ? `bg-gradient-to-r ${getStrengthColor()}` 
-                            : 'bg-white/10'
-                        }`}
-                      ></div>
-                    ))}
-                  </div>
-                  <p className={`text-xs font-semibold bg-gradient-to-r ${getStrengthColor()} bg-clip-text text-transparent`}>
-                    {getStrengthText()}
-                  </p>
+    setLoading(true);
+
+    try {
+      const firstName = formData.firstName.trim();
+      const lastName = formData.lastName.trim();
+      const dob = validateBirthDateParts(formData);
+      if (!dob.ok) {
+        setErrors({ birthDate: t('register.errBirthInvalid') });
+        return;
+      }
+
+      const email = formData.email.trim();
+      const success = await register({
+        firstName,
+        lastName,
+        email,
+        password: formData.password,
+        dateOfBirth: dob.iso,
+      });
+
+      if (success) {
+        setRegisteredEmail(email);
+      }
+    } catch (error) {
+      console.error('[RegisterPage] Registration error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const registerSuccessPanel = (
+    <div className={successPanelCls} role="status">
+      <h1 className={`mb-2 text-xl font-semibold ${titleCls}`}>{t('register.successTitle')}</h1>
+      <p className={`text-sm leading-relaxed ${mutedCls}`}>{t('register.successBody')}</p>
+      <p className={`mt-2 text-sm font-medium ${mutedCls}`}>{registeredEmail}</p>
+      <button
+        type="button"
+        onClick={handleResendVerification}
+        disabled={resendLoading || cooldownSeconds > 0}
+        className={`mt-4 flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-base font-bold text-white shadow-lg transition disabled:cursor-not-allowed disabled:opacity-60 ${btnPrimary}`}
+      >
+        {resendLoading
+          ? t('register.resendSending')
+          : cooldownSeconds > 0
+            ? t('register.resendCooldown', { seconds: cooldownSeconds })
+            : t('register.resendCta')}
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          navigate('/login', {
+            state: {
+              message: t('register.successMessage'),
+              needsEmailVerification: true,
+              prefillEmail: registeredEmail,
+            },
+          })
+        }
+        className={`mt-3 w-full text-center text-sm font-semibold ${linkCyan}`}
+      >
+        {t('register.goToLogin')}
+      </button>
+    </div>
+  );
+
+  const registerForm = (
+    <>
+      <div className={suiteLayout ? FIGMA_REGISTER_HEADER : FIGMA_LOGIN_HEADER}>
+        <h1 className="font-display text-foreground mb-1.5">{t('register.title')}</h1>
+        <p className={FIGMA_REGISTER_SUBTITLE}>{t('register.subtitle')}</p>
+      </div>
+
+      <div className={FIGMA_CENTERED_CARD}>
+        {registeredEmail ? (
+          registerSuccessPanel
+        ) : (
+          <>
+            <form className="mt-8 space-y-5" onSubmit={handleRegister}>
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div>
+                  <label className={`mb-2.5 block text-base font-semibold ${labelCls}`}>
+                    {t('register.lastName')}
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.lastName}
+                    onChange={(e) => {
+                      setFormData({ ...formData, lastName: e.target.value });
+                      if (errors.lastName) setErrors({ ...errors, lastName: '' });
+                    }}
+                    className={errors.lastName ? inputErr : inputOk}
+                    placeholder={t('register.placeholderLastName')}
+                  />
+                  {errors.lastName && (
+                    <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">{errors.lastName}</p>
+                  )}
                 </div>
-              )}
-            </div>
 
-            {/* Confirm Password */}
-            <div>
-              <label className="block text-sm font-semibold mb-2 text-gray-300 flex items-center gap-2">
-                <span>🔐</span> Xác Nhận Mật Khẩu
-              </label>
-              <input
-                type="password"
-                value={formData.confirmPassword}
-                onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
-                className="w-full px-4 py-3 rounded-xl glass border border-white/20 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50 transition-all outline-none text-white placeholder-gray-500"
-                placeholder="••••••••"
-              />
-            </div>
+                <div>
+                  <label className={`mb-2.5 block text-base font-semibold ${labelCls}`}>
+                    {t('register.firstName')}
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.firstName}
+                    onChange={(e) => {
+                      setFormData({ ...formData, firstName: e.target.value });
+                      if (errors.firstName) setErrors({ ...errors, firstName: '' });
+                    }}
+                    className={errors.firstName ? inputErr : inputOk}
+                    placeholder={t('register.placeholderFirstName')}
+                  />
+                  {errors.firstName && (
+                    <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">{errors.firstName}</p>
+                  )}
+                </div>
+              </div>
 
-            {/* Terms Checkbox */}
-            <label className="flex items-start gap-3 cursor-pointer group">
-              <input 
-                type="checkbox" 
-                checked={agreedToTerms}
-                onChange={(e) => setAgreedToTerms(e.target.checked)}
-                className="mt-1 rounded w-4 h-4 border-white/20" 
-              />
-              <span className="text-sm text-gray-400 group-hover:text-gray-300 transition-colors">
-                Tôi đồng ý với{' '}
-                <a href="#" className="text-blue-400 hover:text-cyan-400">Điều khoản dịch vụ</a>
-                {' '}và{' '}
-                <a href="#" className="text-blue-400 hover:text-cyan-400">Chính sách bảo mật</a>
-              </span>
-            </label>
+              <div>
+                <label className={`mb-2.5 block text-base font-semibold ${labelCls}`}>
+                  {t('register.email')}
+                </label>
+                <input
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => {
+                    setFormData({ ...formData, email: e.target.value });
+                    if (errors.email) setErrors({ ...errors, email: '' });
+                  }}
+                  className={errors.email ? inputErr : inputOk}
+                  placeholder={t('register.placeholderEmail')}
+                />
+                {errors.email && (
+                  <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">{errors.email}</p>
+                )}
+              </div>
 
-            {/* Register Button */}
-            <GradientButton variant="secondary" className="w-full" icon="🎉">
-              Tạo Tài Khoản
-            </GradientButton>
-
-            {/* Security Info */}
-            <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
-              <span>🛡️</span>
-              <span>Mã hóa end-to-end • GDPR compliant</span>
-            </div>
-          </form>
-
-          {/* Login Link */}
-          <div className="mt-6 text-center text-gray-400">
-            Đã có tài khoản?{' '}
-            <Link to="/login" className="text-blue-400 hover:text-cyan-400 font-semibold transition-colors">
-              Đăng nhập ngay
-            </Link>
-          </div>
-
-          {/* Back Link */}
-          <Link to="/" className="block mt-6 text-center text-gray-500 hover:text-gray-300 transition-colors flex items-center justify-center gap-2">
-            <span>←</span> Về Trang Chủ
-          </Link>
-        </GlassCard>
-        </div>
-        
-        {/* Right Side - Benefits */}
-        <div className="hidden lg:block">
-          <GlassCard className="glass-strong p-10">
-            <div className="text-7xl mb-8 animate-float">✨</div>
-            <h2 className="text-5xl font-black text-gradient-cool mb-6 leading-tight">Tại sao chọn VoiceHub?</h2>
-            <p className="text-gray-300 mb-8 text-xl leading-relaxed">Giải pháp toàn diện cho doanh nghiệp và nhân viên</p>
-            <div className="space-y-8">
-              {[
-                { icon: "🚀", title: "Miễn phí mãi mãi", desc: "Không giới hạn người dùng, không phí ẩn", color: "from-purple-600 to-pink-600" },
-                { icon: "⚡", title: "Siêu nhanh", desc: "Tin nhắn gửi tức thời < 50ms", color: "from-blue-500 to-cyan-500" },
-                { icon: "🔒", title: "An toàn tuyệt đối", desc: "Mã hóa E2E, tuân thủ GDPR", color: "from-green-500 to-emerald-500" },
-                { icon: "🌍", title: "Đa nền tảng", desc: "Web, Desktop, Mobile seamless", color: "from-orange-500 to-red-500" }
-              ].map((item, idx) => (
-                <div key={idx} className="flex items-start gap-5 p-4 glass rounded-xl hover:bg-white/5 transition-all">
-                  <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${item.color} flex items-center justify-center text-3xl shadow-lg`}>
-                    {item.icon}
+              <div>
+                <label className={`mb-2.5 block text-base font-semibold ${labelCls}`}>
+                  {t('register.birthDate')}
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <span className={`mb-1 block text-xs font-medium ${mutedCls}`}>
+                      {t('register.birthDay')}
+                    </span>
+                    <select
+                      value={formData.birthDay}
+                      onChange={(e) => {
+                        setFormData({ ...formData, birthDay: e.target.value });
+                        if (errors.birthDate) setErrors({ ...errors, birthDate: '' });
+                      }}
+                      className={errors.birthDate ? inputErr : inputOk}
+                      aria-label={t('register.birthDay')}
+                    >
+                      <option value="">{t('register.birthDayPlaceholder')}</option>
+                      {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                        <option key={d} value={String(d)}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
-                    <h3 className="text-white font-bold text-xl mb-1">{item.title}</h3>
-                    <p className="text-gray-400 text-base">{item.desc}</p>
+                    <span className={`mb-1 block text-xs font-medium ${mutedCls}`}>
+                      {t('register.birthMonth')}
+                    </span>
+                    <select
+                      value={formData.birthMonth}
+                      onChange={(e) => {
+                        setFormData({ ...formData, birthMonth: e.target.value });
+                        if (errors.birthDate) setErrors({ ...errors, birthDate: '' });
+                      }}
+                      className={errors.birthDate ? inputErr : inputOk}
+                      aria-label={t('register.birthMonth')}
+                    >
+                      <option value="">{t('register.birthMonthPlaceholder')}</option>
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                        <option key={m} value={String(m)}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <span className={`mb-1 block text-xs font-medium ${mutedCls}`}>
+                      {t('register.birthYear')}
+                    </span>
+                    <select
+                      value={formData.birthYear}
+                      onChange={(e) => {
+                        setFormData({ ...formData, birthYear: e.target.value });
+                        if (errors.birthDate) setErrors({ ...errors, birthDate: '' });
+                      }}
+                      className={errors.birthDate ? inputErr : inputOk}
+                      aria-label={t('register.birthYear')}
+                    >
+                      <option value="">{t('register.birthYearPlaceholder')}</option>
+                      {yearOptions.map((y) => (
+                        <option key={y} value={String(y)}>
+                          {y}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
-              ))}
+                {errors.birthDate && (
+                  <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">{errors.birthDate}</p>
+                )}
+              </div>
+
+              <div>
+                <label className={`mb-2.5 block text-base font-semibold ${labelCls}`}>
+                  {t('register.password')}
+                </label>
+                <input
+                  type="password"
+                  value={formData.password}
+                  onChange={handlePasswordChange}
+                  className={inputOk}
+                  placeholder={t('common.passwordPlaceholder')}
+                />
+                {formData.password && (
+                  <div className="mt-2">
+                    <div className="mb-1 flex gap-1">
+                      {[...Array(4)].map((_, idx) => (
+                        <div
+                          key={idx}
+                          className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${
+                            idx < passwordStrength
+                              ? `bg-gradient-to-r ${getStrengthColor()}`
+                              : barEmpty
+                          }`}
+                        />
+                      ))}
+                    </div>
+                    <p
+                      className={`text-sm font-semibold bg-gradient-to-r ${getStrengthColor()} bg-clip-text text-transparent`}
+                    >
+                      {getStrengthText()}
+                    </p>
+                  </div>
+                )}
+                {errors.password && (
+                  <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">{errors.password}</p>
+                )}
+              </div>
+
+              <div>
+                <label className={`mb-2.5 block text-base font-semibold ${labelCls}`}>
+                  {t('register.confirmPassword')}
+                </label>
+                <input
+                  type="password"
+                  value={formData.confirmPassword}
+                  onChange={(e) => {
+                    setFormData({ ...formData, confirmPassword: e.target.value });
+                    if (errors.confirmPassword) setErrors({ ...errors, confirmPassword: '' });
+                  }}
+                  className={errors.confirmPassword ? inputErr : inputOk}
+                  placeholder={t('common.confirmPasswordPlaceholder')}
+                />
+                {errors.confirmPassword && (
+                  <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">
+                    {errors.confirmPassword}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className={`flex cursor-pointer items-start gap-3 text-base leading-snug ${mutedCls}`}>
+                  <input
+                    type="checkbox"
+                    checked={agreedToTerms}
+                    onChange={(e) => {
+                      setAgreedToTerms(e.target.checked);
+                      if (errors.terms) setErrors({ ...errors, terms: '' });
+                    }}
+                    className={`${chk} focus:ring-cyan-600/30`}
+                  />
+                  <span>
+                    {t('register.agreePrefix')}{' '}
+                    <Link to="/terms-of-service" className={linkCyan}>
+                      {t('register.termsLink')}
+                    </Link>{' '}
+                    {t('register.termsAnd')}{' '}
+                    <Link to="/privacy-policy" className={linkCyan}>
+                      {t('register.privacyLink')}
+                    </Link>
+                    {t('register.termsSuffix')}
+                  </span>
+                </label>
+                {errors.terms && (
+                  <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">{errors.terms}</p>
+                )}
+              </div>
+
+              <button type="submit" disabled={submitDisabled} className={`${FIGMA_BTN} ${btnPrimary}`}>
+                {loading ? (
+                  <span className="flex items-center gap-2">
+                    <span className={FIGMA_BTN_SPINNER} />
+                    {t('register.submitting')}
+                  </span>
+                ) : (
+                  t('register.submit')
+                )}
+              </button>
+            </form>
+
+            <div className={FIGMA_REGISTER_FOOTER}>
+              {t('register.hasAccount')}{' '}
+              <Link to="/login" className={FIGMA_LINK_SM}>
+                {t('register.loginCta')}
+              </Link>
             </div>
-          </GlassCard>
-        </div>
-        </div>
+          </>
+        )}
       </div>
-    </div>
+    </>
+  );
+
+  if (suiteLayout) {
+    return (
+      <AuthFigmaCenteredLayout maxWidthClass="max-w-[480px]" logoMarginClass="mb-8">
+        {registerForm}
+      </AuthFigmaCenteredLayout>
+    );
+  }
+
+  return (
+    <AuthFigmaLoginLayout aside={<AuthMarketingAside />}>
+      <div className={FIGMA_REGISTER_SPLIT_INNER}>
+        <AuthFigmaLoginMobileLogo />
+        {registerForm}
+      </div>
+    </AuthFigmaLoginLayout>
   );
 }
 

@@ -1,0 +1,687 @@
+/**
+ * pack.aiAnalysis container helpers — empty shells + status gates (schema v2).
+ */
+
+const {
+  AI_ANALYSIS_SCHEMA_VERSION,
+  AI_ANALYSIS_ALL_JOB_KEYS,
+  AI_ANALYSIS_USER_JOBS,
+  AI_ANALYSIS_SECTION_KEYS,
+  AI_ANALYSIS_JOB_OUTPUT_MAP,
+  isAiAnalysisUserJob,
+  previousUserJob,
+  userJobsAfter,
+} = require('../../constants/aiAnalysisJobs.constants');
+const {
+  migrateAiAnalysisJobsV1ToV2,
+  needsJobMigration,
+} = require('./aiAnalysisMigrateJobs');
+const {
+  listFeatureRows,
+  buildFrChildrenByParent,
+} = require('../requirement/requirementFrLevel');
+const { normId } = require('../requirement/requirementTemplateTextNorm');
+
+function emptyJobMeta() {
+  return {
+    status: 'empty',
+    model: null,
+    generatedAt: null,
+    confirmedAt: null,
+    durationMs: null,
+    error: null,
+  };
+}
+
+function normalizeDurationMs(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n);
+}
+
+function emptyAnalysisSection() {
+  return {
+    status: 'empty',
+    model: null,
+    generatedAt: null,
+    items: [],
+    entities: [],
+    edges: [],
+    dataFlows: [],
+    orderHint: [],
+    chains: [],
+    meta: {},
+  };
+}
+
+/**
+ * HOW tool extras that must survive ensure() — whitelist-strip previously wiped
+ * RiskTool openQuestions (Monitor "Rủi ro / Giả định" empty) and Dependency proposalEdges.
+ */
+const HOW_ANALYSIS_SECTION_EXTRA_KEYS = Object.freeze([
+  'openQuestions',
+  'unresolvedQuestions',
+  'risks',
+  'maxSeverity',
+  'proposalEdges',
+  'schedulableEdges',
+  'analysisStatus',
+  'analysisComplete',
+  'scheduleReady',
+  'executionTerminal',
+  'assessment',
+  'inputHash',
+  'wbsVersion',
+  'promptVersion',
+  'runId',
+  'attemptId',
+]);
+
+/**
+ * @param {object|null|undefined} src
+ */
+function normalizeStandardAnalysisSection(src) {
+  if (!src || typeof src !== 'object') return emptyAnalysisSection();
+  const next = {
+    status: String(src.status || 'empty'),
+    model: src.model ?? null,
+    generatedAt: src.generatedAt ?? null,
+    items: Array.isArray(src.items) ? src.items : [],
+    entities: Array.isArray(src.entities) ? src.entities : [],
+    edges: Array.isArray(src.edges) ? src.edges : [],
+    dataFlows: Array.isArray(src.dataFlows) ? src.dataFlows : [],
+    orderHint: Array.isArray(src.orderHint) ? src.orderHint : [],
+    chains: Array.isArray(src.chains) ? src.chains : [],
+    meta: src.meta && typeof src.meta === 'object' ? src.meta : {},
+  };
+  for (const key of HOW_ANALYSIS_SECTION_EXTRA_KEYS) {
+    if (src[key] !== undefined) next[key] = src[key];
+  }
+  return next;
+}
+
+function emptyHierarchySection() {
+  return {
+    status: 'empty',
+    model: null,
+    generatedAt: null,
+    proposedFeatures: [],
+    proposedRequirements: [],
+    items: [],
+    entities: [],
+    edges: [],
+    dataFlows: [],
+    orderHint: [],
+    chains: [],
+    meta: {
+      agileMap: {
+        Module: 'Epic',
+        Feature: 'Feature',
+        Requirement: 'Requirement',
+      },
+    },
+  };
+}
+
+function normalizeHierarchySection(src) {
+  const base = emptyHierarchySection();
+  if (!src || typeof src !== 'object') return base;
+  const metaSrc = src.meta && typeof src.meta === 'object' ? src.meta : {};
+  return {
+    status: String(src.status || 'empty'),
+    model: src.model ?? null,
+    generatedAt: src.generatedAt ?? null,
+    proposedFeatures: Array.isArray(src.proposedFeatures) ? src.proposedFeatures : [],
+    proposedRequirements: Array.isArray(src.proposedRequirements)
+      ? src.proposedRequirements
+      : [],
+    items: Array.isArray(src.items) ? src.items : [],
+    entities: Array.isArray(src.entities) ? src.entities : [],
+    edges: Array.isArray(src.edges) ? src.edges : [],
+    dataFlows: Array.isArray(src.dataFlows) ? src.dataFlows : [],
+    orderHint: Array.isArray(src.orderHint) ? src.orderHint : [],
+    chains: Array.isArray(src.chains) ? src.chains : [],
+    meta: {
+      ...base.meta,
+      ...metaSrc,
+      agileMap: {
+        ...base.meta.agileMap,
+        ...(metaSrc.agileMap && typeof metaSrc.agileMap === 'object' ? metaSrc.agileMap : {}),
+      },
+    },
+  };
+}
+
+function emptyPlanningShell() {
+  return {
+    wbs: null,
+    tasks: [],
+    roles: [],
+    skills: [],
+    effort: null,
+    sequence: null,
+    theoreticalCpm: null,
+    criticalWorkIds: [],
+    completion: null,
+    executionPlan: null,
+    qualityPlan: null,
+    deployPlan: null,
+    milestones: [],
+    schedulePlan: null,
+    planSummary: null,
+    /** ScheduleTool LLM time sentences — Gate2 section Lịch */
+    taskTimings: [],
+    /** BacklogMapTool — Gate2 WBS tree merge */
+    backlog: null,
+  };
+}
+
+function emptyResourceShell() {
+  return {
+    fte: [],
+    recommendations: [],
+    assignments: [],
+    assignmentsMeta: {},
+    schedule: [],
+  };
+}
+
+function createEmptyAiAnalysisContainer() {
+  const analyses = {};
+  for (const key of AI_ANALYSIS_SECTION_KEYS) {
+    analyses[key] = key === 'hierarchy' ? emptyHierarchySection() : emptyAnalysisSection();
+  }
+  return {
+    schemaVersion: AI_ANALYSIS_SCHEMA_VERSION,
+    generatedAt: null,
+    analyses,
+    planning: emptyPlanningShell(),
+    resource: emptyResourceShell(),
+    phaseRuns: {},
+  };
+}
+
+function normalizeJobMeta(src) {
+  if (!src || typeof src !== 'object') return emptyJobMeta();
+  return {
+    status: String(src.status || 'empty'),
+    model: src.model ?? null,
+    generatedAt: src.generatedAt ?? null,
+    confirmedAt: src.confirmedAt ?? null,
+    durationMs: normalizeDurationMs(src.durationMs),
+    error: src.error ?? null,
+  };
+}
+
+/** Confirm gate: capability must have ≥1 item. */
+function assertCapabilityConfirmable(container) {
+  const items = container?.analyses?.capability?.items;
+  if (!Array.isArray(items) || items.length === 0) {
+    const err = new Error('Capability analysis has no items to confirm');
+    err.statusCode = 409;
+    err.errorCode = 'AI_ANALYSIS_CAPABILITY_EMPTY';
+    err.details = { job: 'capabilityAnalysis', itemCount: 0 };
+    throw err;
+  }
+}
+
+/** True when capability analysis has no items. */
+function capabilityItemsEmpty(container) {
+  const items = container?.analyses?.capability?.items;
+  return !Array.isArray(items) || items.length === 0;
+}
+
+/**
+ * ready + empty capability items (before Confirm) → stale so user can re-run.
+ * @returns {{ container: object, changed: boolean }}
+ */
+function normalizeEmptyCapabilityReady(container) {
+  if (!container || typeof container !== 'object') {
+    return { container, changed: false };
+  }
+  const jobMeta = container.jobs?.capabilityAnalysis;
+  if (!jobMeta || typeof jobMeta !== 'object') {
+    return { container, changed: false };
+  }
+  if (String(jobMeta.status || '') !== 'ready') {
+    return { container, changed: false };
+  }
+  if (!capabilityItemsEmpty(container)) {
+    return { container, changed: false };
+  }
+  const next = {
+    ...container,
+    jobs: {
+      ...container.jobs,
+      capabilityAnalysis: {
+        ...jobMeta,
+        status: 'stale',
+        confirmedAt: null,
+        error: jobMeta.error || 'empty_requirement_leaves',
+      },
+    },
+  };
+  return { container: next, changed: true };
+}
+
+function ensureAiAnalysisContainer(raw) {
+  const { migrateJobsProjectionToPhaseRuns } = require('./phaseGate2');
+  const base = createEmptyAiAnalysisContainer();
+  if (!raw || typeof raw !== 'object') {
+    return {
+      ...base,
+      ingestionRunId: require('crypto').randomUUID(),
+    };
+  }
+
+  let working = migrateJobsProjectionToPhaseRuns({ ...raw });
+  if (needsJobMigration(raw) && raw.jobs) {
+    const { jobs: migratedJobs } = migrateAiAnalysisJobsV1ToV2(raw.jobs || {});
+    working = migrateJobsProjectionToPhaseRuns({
+      ...raw,
+      jobs: migratedJobs,
+      schemaVersion: AI_ANALYSIS_SCHEMA_VERSION,
+    });
+  }
+
+  const analyses = { ...base.analyses };
+  for (const key of AI_ANALYSIS_SECTION_KEYS) {
+    const src = working.analyses?.[key];
+    if (src && typeof src === 'object') {
+      if (key === 'hierarchy') {
+        analyses[key] = normalizeHierarchySection(src);
+      } else {
+        analyses[key] = normalizeStandardAnalysisSection(src);
+      }
+    }
+  }
+
+  const rtSrc = working.analyses?.requirementTools;
+  if (rtSrc && typeof rtSrc === 'object') {
+    analyses.requirementTools = {
+      status: String(rtSrc.status || 'empty'),
+      model: rtSrc.model ?? null,
+      generatedAt: rtSrc.generatedAt ?? null,
+      recipe: rtSrc.recipe && typeof rtSrc.recipe === 'object' ? rtSrc.recipe : null,
+      gateA: rtSrc.gateA && typeof rtSrc.gateA === 'object' ? rtSrc.gateA : null,
+      facts: rtSrc.facts && typeof rtSrc.facts === 'object' ? rtSrc.facts : {},
+      meta: rtSrc.meta && typeof rtSrc.meta === 'object' ? rtSrc.meta : {},
+    };
+  }
+
+  const ctxSrc = working.analyses?.requirementAiContext;
+  if (ctxSrc && typeof ctxSrc === 'object') {
+    analyses.requirementAiContext = {
+      problem: ctxSrc.problem && typeof ctxSrc.problem === 'object' ? ctxSrc.problem : null,
+      consistency:
+        ctxSrc.consistency && typeof ctxSrc.consistency === 'object' ? ctxSrc.consistency : null,
+      constraints: Array.isArray(ctxSrc.constraints) ? ctxSrc.constraints : [],
+      ambiguity: ctxSrc.ambiguity && typeof ctxSrc.ambiguity === 'object' ? ctxSrc.ambiguity : null,
+      priorities: ctxSrc.priorities && typeof ctxSrc.priorities === 'object' ? ctxSrc.priorities : null,
+      feasibilitySummary:
+        ctxSrc.feasibilitySummary && typeof ctxSrc.feasibilitySummary === 'object'
+          ? ctxSrc.feasibilitySummary
+          : null,
+      factsSummary:
+        ctxSrc.factsSummary && typeof ctxSrc.factsSummary === 'object' ? ctxSrc.factsSummary : {},
+      gateA: ctxSrc.gateA && typeof ctxSrc.gateA === 'object' ? ctxSrc.gateA : null,
+      policyVersion: ctxSrc.policyVersion || null,
+    };
+  }
+
+  const insightsSrc = working.analyses?.requirementInsights;
+  if (insightsSrc && typeof insightsSrc === 'object') {
+    analyses.requirementInsights = insightsSrc;
+  }
+  const proposedSrc = working.analyses?.proposedSrs;
+  if (proposedSrc && typeof proposedSrc === 'object') {
+    analyses.proposedSrs = proposedSrc;
+  }
+  const preSrc = working.analyses?.preApproval;
+  if (preSrc && typeof preSrc === 'object') {
+    analyses.preApproval = preSrc;
+  }
+  // analyses.g4Understanding / frUnderstanding retired — never copy into container
+  const srsProposalSrc = working.analyses?.srsProposal;
+  if (srsProposalSrc && typeof srsProposalSrc === 'object') {
+    analyses.srsProposal = srsProposalSrc;
+  }
+  if (working.analyses?.approvedSrsVersionManifest && typeof working.analyses.approvedSrsVersionManifest === 'object') {
+    analyses.approvedSrsVersionManifest = working.analyses.approvedSrsVersionManifest;
+  }
+  if (working.analyses?.srsDraft && typeof working.analyses.srsDraft === 'object') {
+    analyses.srsDraft = working.analyses.srsDraft;
+  }
+  if (working.analyses?.approvedSrs && typeof working.analyses.approvedSrs === 'object') {
+    analyses.approvedSrs = working.analyses.approvedSrs;
+  }
+  if (
+    working.analyses?.approvedBacklogStructure &&
+    typeof working.analyses.approvedBacklogStructure === 'object'
+  ) {
+    analyses.approvedBacklogStructure = working.analyses.approvedBacklogStructure;
+  }
+  if (working.analyses?.customerRawRecord && typeof working.analyses.customerRawRecord === 'object') {
+    analyses.customerRawRecord = working.analyses.customerRawRecord;
+  }
+  if (Array.isArray(working.analyses?.evidenceSpans)) {
+    analyses.evidenceSpans = working.analyses.evidenceSpans;
+  }
+  if (working.analyses?.phase1Knowledge && typeof working.analyses.phase1Knowledge === 'object') {
+    analyses.phase1Knowledge = working.analyses.phase1Knowledge;
+  }
+
+  const planningSrc = working.planning && typeof working.planning === 'object' ? working.planning : {};
+  const resourceSrc = working.resource && typeof working.resource === 'object' ? working.resource : {};
+
+  const out = {
+    schemaVersion: AI_ANALYSIS_SCHEMA_VERSION,
+    generatedAt: working.generatedAt ?? null,
+    analyses,
+    planning: {
+      wbs: planningSrc.wbs ?? null,
+      tasks: Array.isArray(planningSrc.tasks) ? planningSrc.tasks : [],
+      roles: Array.isArray(planningSrc.roles) ? planningSrc.roles : [],
+      skills: Array.isArray(planningSrc.skills) ? planningSrc.skills : [],
+      effort: planningSrc.effort ?? null,
+      sequence: planningSrc.sequence ?? null,
+      theoreticalCpm: planningSrc.theoreticalCpm ?? null,
+      criticalWorkIds: Array.isArray(planningSrc.criticalWorkIds)
+        ? planningSrc.criticalWorkIds
+        : [],
+      completion: planningSrc.completion ?? null,
+      executionPlan: planningSrc.executionPlan ?? null,
+      qualityPlan: planningSrc.qualityPlan ?? null,
+      deployPlan: planningSrc.deployPlan ?? null,
+      milestones: Array.isArray(planningSrc.milestones) ? planningSrc.milestones : [],
+      schedulePlan: planningSrc.schedulePlan ?? null,
+      planSummary: planningSrc.planSummary ?? null,
+      taskTimings: Array.isArray(planningSrc.taskTimings) ? planningSrc.taskTimings : [],
+      backlog:
+        planningSrc.backlog && typeof planningSrc.backlog === 'object'
+          ? planningSrc.backlog
+          : null,
+      // Gate2 materialize / Monitor — do not drop HOW risk & dependency lists
+      ...(Array.isArray(planningSrc.risks) ? { risks: planningSrc.risks } : {}),
+      ...(Array.isArray(planningSrc.dependencies)
+        ? { dependencies: planningSrc.dependencies }
+        : {}),
+    },
+    resource: {
+      fte: Array.isArray(resourceSrc.fte) ? resourceSrc.fte : [],
+      recommendations: Array.isArray(resourceSrc.recommendations)
+        ? resourceSrc.recommendations
+        : [],
+      assignments: Array.isArray(resourceSrc.assignments) ? resourceSrc.assignments : [],
+      assignmentsMeta:
+        resourceSrc.assignmentsMeta && typeof resourceSrc.assignmentsMeta === 'object'
+          ? resourceSrc.assignmentsMeta
+          : {},
+      schedule: Array.isArray(resourceSrc.schedule) ? resourceSrc.schedule : [],
+    },
+    phaseRuns:
+      working.phaseRuns && typeof working.phaseRuns === 'object' ? working.phaseRuns : {},
+  };
+
+  // normalizeCatalog / canonicalSrs thin fields — preserve if present; stamp ingestion once
+  if (working.ingestionRunId != null && String(working.ingestionRunId).trim()) {
+    out.ingestionRunId = String(working.ingestionRunId).trim();
+  } else {
+    out.ingestionRunId = require('crypto').randomUUID();
+  }
+  if (working.approvedSrsVersion != null && String(working.approvedSrsVersion).trim()) {
+    out.approvedSrsVersion = String(working.approvedSrsVersion).trim();
+  }
+  if (working.intakeCorpus != null) out.intakeCorpus = working.intakeCorpus;
+  if (working.inputDocuments != null) out.inputDocuments = working.inputDocuments;
+  if (working.workbookDiagnostic != null) out.workbookDiagnostic = working.workbookDiagnostic;
+  if (working.workbookDiagnostics != null) out.workbookDiagnostics = working.workbookDiagnostics;
+  if (working.customerRawRows != null) out.customerRawRows = working.customerRawRows;
+  if (working.formValidation != null) out.formValidation = working.formValidation;
+  if (working.skillCatalogStub != null) out.skillCatalogStub = working.skillCatalogStub;
+  if (working.sources != null) out.sources = working.sources;
+  if (working.gate1Override != null) out.gate1Override = working.gate1Override;
+  // Gate1 Review Trust — active review/submission pointers (Wave A)
+  if (working.gate1 != null && typeof working.gate1 === 'object') {
+    out.gate1 = working.gate1;
+  }
+  // Gate2 Planning review lane (PM → PO) — must survive ensure() or lane resets to pm
+  if (working.gate2 != null && typeof working.gate2 === 'object') {
+    out.gate2 = working.gate2;
+  }
+  if (working.gate2Override != null) out.gate2Override = working.gate2Override;
+  if (working.gate2Promote != null) out.gate2Promote = working.gate2Promote;
+  // Semantic Contract P1 — intake SoT on pack (hydrate → APS derive)
+  if (working.canonicalRaw != null) out.canonicalRaw = working.canonicalRaw;
+  // Plan 0.5 Loop1 durable reuse seed
+  if (working.loop1Reuse != null) out.loop1Reuse = working.loop1Reuse;
+
+  return out;
+}
+
+function assertSchemaVersionPresent(container) {
+  const v = Number(container?.schemaVersion);
+  if (!Number.isFinite(v) || v < 1) {
+    const err = new Error('aiAnalysis.schemaVersion is required');
+    err.statusCode = 422;
+    err.errorCode = 'AI_ANALYSIS_SCHEMA_VERSION_REQUIRED';
+    throw err;
+  }
+}
+
+function getJobStatus(container, job) {
+  return String(container?.jobs?.[job]?.status || 'empty');
+}
+
+function assertPreviousJobConfirmed(container, job) {
+  const prev = previousUserJob(job);
+  if (!prev) return;
+  const status = getJobStatus(container, prev);
+  if (status !== 'confirmed') {
+    const err = new Error(
+      `Job ${job} requires previous job ${prev} to be confirmed (current: ${status})`
+    );
+    err.statusCode = 409;
+    err.errorCode = 'AI_ANALYSIS_PREV_JOB_NOT_CONFIRMED';
+    err.details = { job, previousJob: prev, previousStatus: status };
+    throw err;
+  }
+}
+
+/** True when any Feature row has no Requirement children (stuck hierarchy leaf gap). */
+function packHasFeatureWithoutRequirement(frList = []) {
+  const childrenByParent = buildFrChildrenByParent(frList || []);
+  for (const row of listFeatureRows(frList || [])) {
+    const rawId = String(row.externalId || '').trim();
+    const nid = normId(row.externalId);
+    const kids = [
+      ...(childrenByParent.get(rawId) || []),
+      ...(nid && nid !== rawId ? childrenByParent.get(nid) || [] : []),
+    ];
+    const hasRequirement = kids.some((c) => String(c.level || '').trim() === 'Requirement');
+    if (!hasRequirement) return true;
+  }
+  return false;
+}
+
+/** Confirmed jobs cannot be re-run (force does not bypass), except hierarchy stuck recovery. */
+function assertJobNotConfirmedForRerun(container, job, opts = {}) {
+  const status = getJobStatus(container, job);
+  if (status !== 'confirmed') return;
+  if (
+    String(job || '').trim() === 'hierarchyDecomposition' &&
+    packHasFeatureWithoutRequirement(opts.frList || opts.functionalRequirements || [])
+  ) {
+    return;
+  }
+  const err = new Error(`Job ${job} is already confirmed and cannot be re-run`);
+  err.statusCode = 409;
+  err.errorCode = 'AI_ANALYSIS_JOB_ALREADY_CONFIRMED';
+  err.details = { job, status };
+  throw err;
+}
+
+function markJobsStaleAfter(container) {
+  return ensureAiAnalysisContainer(container);
+}
+
+function summarizeAiAnalysis(container) {
+  const c = ensureAiAnalysisContainer(container);
+  return {
+    schemaVersion: c.schemaVersion,
+    phaseRuns: c.phaseRuns || {},
+    phase1: {
+      requirementInsights: c.analyses?.requirementInsights
+        ? {
+            schemaVersion: c.analyses.requirementInsights.schemaVersion || null,
+            clarificationCount: Array.isArray(c.analyses.requirementInsights.clarifications)
+              ? c.analyses.requirementInsights.clarifications.length
+              : 0,
+            quality: c.analyses.requirementInsights.quality || null,
+            gateAPassed: c.analyses.requirementInsights.quality?.gateAPassed ?? null,
+          }
+        : null,
+      proposedSrs: c.analyses?.proposedSrs
+        ? {
+            schemaVersion: c.analyses.proposedSrs.schemaVersion || null,
+            deltaCount: Array.isArray(c.analyses.proposedSrs.deltas)
+              ? c.analyses.proposedSrs.deltas.length
+              : 0,
+          }
+        : null,
+      preApproval: c.analyses?.preApproval
+        ? {
+            passed: Boolean(c.analyses.preApproval.passed),
+            checkCount: Array.isArray(c.analyses.preApproval.checks)
+              ? c.analyses.preApproval.checks.length
+              : 0,
+          }
+        : null,
+    },
+  };
+}
+
+/**
+ * Matching must not carry assignments; scheduleCapacity must not overwrite shortlist via edits.
+ */
+function assertMatchingAssignmentSeparation(job, edits) {
+  if (!edits || typeof edits !== 'object') return;
+  if (job === 'employeeMatching') {
+    if (edits.assignments != null || edits.resource?.assignments != null) {
+      const err = new Error(
+        'employeeMatching cannot set assignments — use scheduleCapacity'
+      );
+      err.statusCode = 400;
+      err.errorCode = 'AI_ANALYSIS_MATCHING_NO_ASSIGN';
+      throw err;
+    }
+  }
+  if (job === 'scheduleCapacity') {
+    if (edits.recommendations != null || edits.fte != null || edits.resource?.recommendations != null) {
+      const err = new Error(
+        'scheduleCapacity cannot edit matching shortlist — confirm employeeMatching separately'
+      );
+      err.statusCode = 400;
+      err.errorCode = 'AI_ANALYSIS_ASSIGN_NO_MATCHING_EDIT';
+      throw err;
+    }
+  }
+}
+
+function applyJobEdits(container, job, edits) {
+  assertMatchingAssignmentSeparation(job, edits);
+  const next = ensureAiAnalysisContainer(container);
+  if (!edits || typeof edits !== 'object') return next;
+
+  const map = AI_ANALYSIS_JOB_OUTPUT_MAP[job] || {};
+  if (map.analyses && edits.analyses && typeof edits.analyses === 'object') {
+    for (const key of map.analyses) {
+      if (edits.analyses[key] != null && typeof edits.analyses[key] === 'object') {
+        next.analyses[key] = {
+          ...next.analyses[key],
+          ...edits.analyses[key],
+          status: edits.analyses[key].status || next.analyses[key].status,
+        };
+      }
+    }
+  }
+  if (map.planning && edits.planning && typeof edits.planning === 'object') {
+    for (const key of map.planning) {
+      if (Object.prototype.hasOwnProperty.call(edits.planning, key)) {
+        next.planning[key] = edits.planning[key];
+      }
+    }
+  }
+  if (map.resource && edits.resource && typeof edits.resource === 'object') {
+    for (const key of map.resource) {
+      if (Object.prototype.hasOwnProperty.call(edits.resource, key)) {
+        next.resource[key] = edits.resource[key];
+      }
+    }
+  }
+  return next;
+}
+
+/** Mark job ready with empty stub shells. */
+function markJobReadyStub(container, job) {
+  const next = markJobsStaleAfter(container, job);
+  const now = new Date().toISOString();
+  next.jobs[job] = {
+    status: 'ready',
+    model: null,
+    generatedAt: now,
+    confirmedAt: null,
+    durationMs: next.jobs[job]?.durationMs ?? null,
+    error: null,
+  };
+  next.currentJob = job;
+  next.generatedAt = now;
+
+  const map = AI_ANALYSIS_JOB_OUTPUT_MAP[job] || {};
+  for (const key of map.analyses || []) {
+    next.analyses[key] = {
+      ...next.analyses[key],
+      status: 'ready',
+      generatedAt: now,
+    };
+  }
+  return next;
+}
+
+function markJobConfirmed(container, job) {
+  const next = ensureAiAnalysisContainer(container);
+  const now = new Date().toISOString();
+  next.jobs[job] = {
+    ...next.jobs[job],
+    status: 'confirmed',
+    confirmedAt: now,
+    error: null,
+  };
+  next.currentJob = job;
+  return next;
+}
+
+module.exports = {
+  createEmptyAiAnalysisContainer,
+  ensureAiAnalysisContainer,
+  emptyHierarchySection,
+  normalizeStandardAnalysisSection,
+  HOW_ANALYSIS_SECTION_EXTRA_KEYS,
+  assertSchemaVersionPresent,
+  getJobStatus,
+  assertPreviousJobConfirmed,
+  assertJobNotConfirmedForRerun,
+  packHasFeatureWithoutRequirement,
+  capabilityItemsEmpty,
+  normalizeEmptyCapabilityReady,
+  assertCapabilityConfirmable,
+  markJobsStaleAfter,
+  summarizeAiAnalysis,
+  assertMatchingAssignmentSeparation,
+  applyJobEdits,
+  markJobReadyStub,
+  markJobConfirmed,
+  AI_ANALYSIS_USER_JOBS,
+  isAiAnalysisUserJob,
+};

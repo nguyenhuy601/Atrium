@@ -1,26 +1,1197 @@
+const ROLE_PERMISSION_SERVICE_URL = String(process.env.ROLE_PERMISSION_SERVICE_URL || '').trim().replace(/\/+$/, '');
+if (!ROLE_PERMISSION_SERVICE_URL) throw new Error('Thiếu biến môi trường: ROLE_PERMISSION_SERVICE_URL');
 const Membership = require('../models/Membership');
+const {
+  orgUnauthorized,
+  orgAccessDenied,
+  orgNotFound,
+  orgMemberNotFound,
+  orgValidation,
+  orgConflict,
+  orgCatch,
+  orgOperationalError,
+  orgFail,
+} = require('../utils/orgApiError');
+const Organization = require('../models/Organization');
+const Department = require('../models/Department');
+const Branch = require('../models/Branch');
+const Division = require('../models/Division');
+const { resolveEffectiveScopesFromAssignments } = require('../services/memberScopePolicy.service');
+const { resolveOrgAccess, toObjectId } = require('../utils/orgAccess');
+const { fetchUserRolesInOrg } = require('../utils/orgRoles');
+const {
+  resolveMemberDirectoryAccess,
+  directoryAllowsDepartmentQuery,
+  memberInDirectoryUnits,
+} = require('../utils/memberDirectoryAccess');
+const jwt = require('jsonwebtoken');
+const axios = require('axios');
+const { emitRealtimeEvent } = require('../clients/realtime.client');
+const { coalesceJobTitle } = require('../utils/jobTitleProfile');
+const { logger } = require('@enterprise/shared');
+const { trustedFrontendUrl } = require('../utils/trustedFrontendUrl');
+const { resolveInviteLinkSecret } = require('../utils/inviteLinkSecret');
+const { ensureDefaultOrgRoles, syncUserOrgRole, stripUserOrgRoles } = require('../services/rolePermissionOrgSync');
+const { invalidateOrgReadCache, invalidateOrgAcl } = require('../services/orgReadCache.service');
+const { ORG_EVENT_TYPES } = require('../messaging/orgEvents.publisher');
+const { provisionUserByAdmin } = require('../clients/authProvision.client');
+const { searchUserByEmail } = require('../clients/userLookup.client');
+const {
+  sendCompanyInviteEmail,
+  sendProvisionSetPasswordEmail,
+} = require('../clients/authInviteEmail.client');
+const { assertOrgInviteAllowed, assertPublicAcceptAllowed } = require('../utils/orgInviteLimit');
+const { fetchProfilesByUserIds } = require('../clients/userProfilesBatch.client');
+const { fetchAuthSummaryByUserIds } = require('../clients/authSummaryBatch.client');
+const { fetchRbacAssignmentsByOrg } = require('../clients/rbacAssignmentsBatch.client');
+const {
+  VIEW_ADMIN_TABLE,
+  VIEW_DIRECTORY,
+  normalizeView,
+  projectMembersForView,
+} = require('../services/projectAdminMemberView');
+const { hasElevatedOrgAccess } = require('../utils/orgElevatedAccess');
+const { readStoredSystemAdminState } = require('../clients/storedSystemRole.client');
+const { resolveEffectiveGrants } = require('../services/orgRbacMatrix.service');
+const { listMembersForEmployeeView } = require('../services/employeeViewDirectory.service');
+const { employeeViewScope, scopeOpensAdminTable } = require('../utils/employeeViewMemberScope');
+const {
+  assertEmailDomainAllowed,
+  resolveAllowedEmailDomains,
+} = require('../utils/emailDomainPolicy');
+const CompanyInvite = require('../models/CompanyInvite');
+const { maskEmail } = require('../utils/orgErrorMap');
+const { toPlainId } = require('../utils/orgMemberIds');
+const {
+  resolveActorTier,
+  clampInviteRole,
+  evaluateRoleChange,
+  evaluateRemoval,
+} = require('../utils/memberRolePolicy');
+const { bulkUpdateUserProfileFields } = require('../clients/userProfileBulkImport.client');
+const {
+  parseOptionalHireCapability,
+  hireCapabilityHasDomain,
+} = require('../utils/inviteHireCapability');
+const {
+  allocateNextEmployeeCode,
+  peekNextEmployeeCode,
+} = require('../services/employeeCodeAllocate.service');
+const crypto = require('crypto');
+const {
+  attachPlacementFromStructure,
+  buildDepartmentRoster,
+} = require('../services/structurePlacement.service');
+// Không log JWT/link mời đầy đủ — production nên dùng HTTPS cho FRONTEND_URL.
+const ALLOWED_ROLES = ['owner', 'admin', 'hr', 'member'];
+const INVITE_LINK_SECRET = resolveInviteLinkSecret();
+const INVITE_LINK_EXPIRES_IN = process.env.INVITE_LINK_EXPIRES_IN || '7d';
+/** Cùng tiêu chí với guard route POST /invite-link. */
+const INVITE_LINK_CREATOR_ROLES = ['owner', 'admin', 'hr'];
+const INVITE_LINK_CREATOR_GRANT = 'organization.employee.invite';
+
+function inviteLinkUnavailable(res) {
+  logger.error('[member] invite link secret missing or not separated from JWT_SECRET');
+  return orgFail(res, 500, null, 'ORG_INVITE_LINK_UNAVAILABLE');
+}
+const COMPANY_INVITE_TTL_MS = Math.max(
+  3600000,
+  Number(process.env.COMPANY_INVITE_TTL_MS || 7 * 24 * 60 * 60 * 1000) || 7 * 24 * 60 * 60 * 1000
+);
+
+function hashInviteToken(token) {
+  return crypto.createHash('sha256').update(String(token || '').trim()).digest('hex');
+}
+
+function generateInviteToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+const NOTIFICATION_SERVICE_URL = String(process.env.NOTIFICATION_SERVICE_URL || '').trim().replace(/\/+$/, '');
+if (!NOTIFICATION_SERVICE_URL) throw new Error('Thiếu biến môi trường: NOTIFICATION_SERVICE_URL');
+const NOTIFICATION_INTERNAL_TOKEN = String(process.env.NOTIFICATION_INTERNAL_TOKEN || '').trim();
+
+function notificationServiceAxiosOpts() {
+  const opts = { timeout: 8000 };
+  if (NOTIFICATION_INTERNAL_TOKEN) {
+    opts.headers = { 'x-internal-notification-token': NOTIFICATION_INTERNAL_TOKEN };
+  }
+  return opts;
+}
+
+function countActiveOwners(orgId) {
+  return Membership.countDocuments({ organization: orgId, role: 'owner', status: 'active' });
+}
+
+async function getActiveOrgUserIds(orgId) {
+  if (!orgId) return [];
+  const userIds = await Membership.distinct('user', {
+    organization: orgId,
+    status: 'active',
+  });
+  return [...new Set((userIds || []).map((id) => String(id)).filter(Boolean))];
+}
+
+const ROLE_PERMISSION_BASE = String(
+  process.env.ROLE_PERMISSION_SERVICE_URL
+).replace(/\/$/, '');
+const GATEWAY_INTERNAL_TOKEN = String(process.env.GATEWAY_INTERNAL_TOKEN || '').trim();
+
+function rolePermissionInternalHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  if (GATEWAY_INTERNAL_TOKEN) h['x-gateway-internal-token'] = GATEWAY_INTERNAL_TOKEN;
+  return h;
+}
+
+async function fetchOrgRolesList(orgId, userId) {
+  const oid = String(orgId || '').trim();
+  const uid = String(userId || '').trim();
+  if (!oid || !uid || !GATEWAY_INTERNAL_TOKEN) return [];
+  try {
+    const headers = {
+      ...rolePermissionInternalHeaders(),
+      'x-user-id': uid,
+    };
+    const res = await axios.get(
+      `${ROLE_PERMISSION_BASE}/api/roles/server/${encodeURIComponent(oid)}`,
+      { headers, timeout: 8000, validateStatus: () => true }
+    );
+    if (res.status >= 400) {
+      logger.warn('[fetchOrgRolesList] list roles failed', {
+        orgId: oid,
+        userId: uid,
+        status: res.status,
+        message: res.data?.message,
+      });
+      return [];
+    }
+    const body = res.data?.data ?? res.data;
+    return Array.isArray(body) ? body : [];
+  } catch (err) {
+    logger.warn('[fetchOrgRolesList] list roles error', { orgId: oid, message: err?.message });
+    return [];
+  }
+}
+
+async function loadHierarchyEntities(orgId) {
+  const Department = require('../models/Department');
+  const Team = require('../models/Team');
+  const [departments, teams, divisions] = await Promise.all([
+    Department.find({ organization: orgId, isActive: { $ne: false } })
+      .select('_id name division')
+      .lean(),
+    Team.find({ organization: orgId, isActive: { $ne: false } })
+      .select('_id name department division')
+      .lean(),
+    Division.find({ organization: orgId, isActive: { $ne: false } }).select('_id name').lean(),
+  ]);
+  return { departments, teams, divisions };
+}
+
+async function resolveDepartmentRosterLookup(orgId, rawDeptId) {
+  const Department = require('../models/Department');
+  const OrganizationalUnit = require('../models/OrganizationalUnit');
+
+  const requested = String(rawDeptId || '').trim();
+  let legacyDeptId = requested;
+  const asDept = await Department.findOne({ _id: legacyDeptId, organization: orgId })
+    .select('_id')
+    .lean();
+  const ouIds = [];
+  if (!asDept) {
+    const ou = await OrganizationalUnit.findOne({ _id: legacyDeptId, organization: orgId })
+      .select('_id legacyRef')
+      .lean();
+    if (ou?._id) ouIds.push(String(ou._id));
+    if (ou?.legacyRef?.id) legacyDeptId = String(ou.legacyRef.id);
+  } else {
+    const ouByLegacy = await OrganizationalUnit.findOne({
+      organization: orgId,
+      'legacyRef.id': asDept._id,
+    })
+      .select('_id')
+      .lean();
+    if (ouByLegacy?._id) ouIds.push(String(ouByLegacy._id));
+  }
+
+  const lookupIds = [...new Set([requested, legacyDeptId, ...ouIds].filter(Boolean))];
+  return { legacyDeptId, ouIds, lookupIds };
+}
+
+async function resolveViewerDirectoryAccess(userId, orgId) {
+  const viewerRoles = await fetchUserRolesInOrg(userId, orgId);
+  let directoryAccess = resolveMemberDirectoryAccess(viewerRoles);
+  if (directoryAccess.mode === 'units') {
+    const structure = await loadHierarchyEntities(orgId);
+    directoryAccess = resolveMemberDirectoryAccess(viewerRoles, structure);
+  }
+  return directoryAccess;
+}
+
+async function assignmentScopeIds(orgId, userId) {
+  const scopes = await resolveEffectiveScopesFromAssignments(orgId, userId);
+  return [
+    ...new Set(
+      [
+        ...(scopes.departmentIds || []),
+        ...(scopes.teamIds || []),
+        ...(scopes.divisionIds || []),
+        ...(scopes.ouIds || []),
+      ].map((id) => String(id))
+    ),
+  ];
+}
+
+async function filterMembersByAssignmentOverlap(orgId, userId, members) {
+  const viewerEffectiveScopes = await resolveEffectiveScopesFromAssignments(orgId, userId);
+  const memberUserIds = [
+    ...new Set(members.map((row) => String(row.user?._id || row.user || '')).filter(Boolean)),
+  ];
+  const scopeByUserId = new Map();
+  await Promise.all(
+    memberUserIds.map(async (uid) => {
+      const scopes =
+        uid === userId ? viewerEffectiveScopes : await resolveEffectiveScopesFromAssignments(orgId, uid);
+      scopeByUserId.set(uid, scopes);
+    })
+  );
+
+  const filtered = members.filter((member) => {
+    const memberUserId = String(member.user?._id || member.user || '');
+    if (memberUserId === userId) return true;
+    const memberScopes = scopeByUserId.get(memberUserId);
+    if (!memberScopes) return false;
+    for (const tid of viewerEffectiveScopes.teamIds) {
+      if (memberScopes.teamIds.has(String(tid))) return true;
+    }
+    for (const did of viewerEffectiveScopes.departmentIds) {
+      if (memberScopes.departmentIds.has(String(did))) return true;
+    }
+    for (const vid of viewerEffectiveScopes.divisionIds) {
+      if (memberScopes.divisionIds.has(String(vid))) return true;
+    }
+    return false;
+  });
+
+  return filtered.map((member) => {
+    const memberUserId = String(member.user?._id || member.user || '');
+    const scopes = scopeByUserId.get(memberUserId);
+    const teamId = scopes?.teamIds?.values?.().next?.().value || null;
+    const departmentId = scopes?.departmentIds?.values?.().next?.().value || null;
+    const divisionId = scopes?.divisionIds?.values?.().next?.().value || null;
+    return {
+      ...member,
+      team: teamId ? String(teamId) : null,
+      department: departmentId ? String(departmentId) : null,
+      division: divisionId ? String(divisionId) : null,
+      branch: null,
+    };
+  });
+}
+
+async function listMembersForOrg(req) {
+  const orgIdRaw = String(req.params.orgId || '').trim();
+  if (!toObjectId(orgIdRaw)) {
+    const err = new Error('orgId không hợp lệ');
+    err.statusCode = 400;
+    err.errorCode = 'VALIDATION_INVALID_ID';
+    throw err;
+  }
+  const orgId = orgIdRaw;
+  const userId = String(req.user?.id || req.user?.userId || req.user?._id || '');
+  if (!userId) {
+    const err = new Error('Not authenticated');
+    err.statusCode = 401;
+    throw err;
+  }
+
+  const access = await resolveOrgAccess(userId, orgId);
+  if (!access.ok) {
+    const err = new Error('Access denied');
+    err.statusCode = 403;
+    err.code = 'ORG_ACCESS_DENIED';
+    throw err;
+  }
+  const viewerMembership = access.membership;
+  if (!viewerMembership) {
+    return [];
+  }
+
+  const directoryAccess = await resolveViewerDirectoryAccess(userId, orgId);
+  const departmentIdQuery = String(req.query?.departmentId || '').trim();
+  if (departmentIdQuery) {
+    const lookup = await resolveDepartmentRosterLookup(orgId, departmentIdQuery);
+    const extraAllowed =
+      directoryAccess.mode === 'assignment' ? await assignmentScopeIds(orgId, userId) : [];
+    if (!directoryAllowsDepartmentQuery(directoryAccess, lookup.lookupIds, extraAllowed)) {
+      return [];
+    }
+    return listMembersForDepartmentRoster(orgId, lookup);
+  }
+
+  const members = await Membership.find({ organization: orgId, status: 'active' })
+    .select('user organization role joinedAt status invitedBy createdAt updatedAt')
+    .lean();
+
+  if (directoryAccess.mode === 'all') {
+    return members;
+  }
+  if (directoryAccess.mode === 'units') {
+    const placed = await attachPlacementFromStructure(orgId, members);
+    return placed.filter((row) => memberInDirectoryUnits(row, directoryAccess, userId));
+  }
+
+  return filterMembersByAssignmentOverlap(orgId, userId, members);
+}
+
+/**
+ * Roster 1 phòng cho wizard tạo project — People Graph + OU matrix.
+ * Query param trên GET /members (không thêm route).
+ */
+async function listMembersForDepartmentRoster(orgId, lookupOrRaw) {
+  const OrgUnitMembership = require('../models/OrgUnitMembership');
+  const lookup =
+    lookupOrRaw && typeof lookupOrRaw === 'object' && lookupOrRaw.legacyDeptId
+      ? lookupOrRaw
+      : await resolveDepartmentRosterLookup(orgId, lookupOrRaw);
+
+  const { legacyDeptId, ouIds } = lookup;
+  const roster = await buildDepartmentRoster(orgId, { departmentIds: [legacyDeptId] });
+  const ids = new Set((roster[0]?.memberIds || []).map((id) => String(id)));
+
+  if (ouIds.length) {
+    const rows = await OrgUnitMembership.find({
+      organization: orgId,
+      unitId: { $in: ouIds },
+    })
+      .select('userId')
+      .lean();
+    for (const row of rows) {
+      if (row?.userId) ids.add(String(row.userId));
+    }
+  }
+
+  if (!ids.size) return [];
+
+  const objectIds = [...ids].map((id) => toObjectId(id)).filter(Boolean);
+  const members = await Membership.find({
+    organization: orgId,
+    status: 'active',
+    user: { $in: objectIds.length ? objectIds : ids },
+  })
+    .select('user organization role joinedAt status invitedBy createdAt updatedAt')
+    .lean();
+
+  return members.map((member) => ({
+    ...member,
+    department: legacyDeptId,
+    departmentId: legacyDeptId,
+  }));
+}
+
+/** Bảng quản trị khi phạm vi employee.view từ DEPARTMENT trở lên, hoặc system admin bảo trì.
+ * SELF không mở bảng. Danh bạ chat vẫn đi nhánh directory.
+ */
+async function resolveMembersAccess(req, requestedView) {
+  const userId = String(req.user?.id || req.user?.userId || req.user?._id || '');
+  const orgId = String(req.params.orgId || '');
+  const stored = await readStoredSystemAdminState(userId);
+  let scope = null;
+  if (stored.state !== 'admin') {
+    const resolved = await resolveEffectiveGrants(orgId, userId);
+    scope = employeeViewScope(resolved?.grantScopes);
+  }
+  const elevated = stored.state === 'admin' || scopeOpensAdminTable(scope);
+  const view = requestedView === VIEW_ADMIN_TABLE && !elevated ? VIEW_DIRECTORY : requestedView;
+  return { view, restrictContact: view === VIEW_DIRECTORY && !elevated, scope, storedAdmin: stored.state === 'admin' };
+}
 
 exports.getMembers = async (req, res, next) => {
   try {
-    const members = await Membership.find({ organization: req.params.orgId })
-      .populate('user', 'name email avatar')
-      .populate('department', 'name')
-      .populate('team', 'name');
-
-    res.json({ status: 'success', data: members });
+    const userId = String(req.user?.id || req.user?.userId || req.user?._id || '');
+    const { view, restrictContact } = await resolveMembersAccess(req, VIEW_ADMIN_TABLE);
+    const members =
+      view === VIEW_ADMIN_TABLE
+        ? await listMembersForEmployeeView(req.params.orgId, userId)
+        : await listMembersForOrg(req);
+    const enriched = await enrichMembersForAdminList(members);
+    const projected = projectMembersForView(enriched, view, { restrictContact });
+    return res.json({ status: 'success', data: projected });
   } catch (error) {
-    next(error);
+    const handled = orgOperationalError(res, error);
+    if (handled) return handled;
+    return next(error);
+  }
+};
+
+async function enrichMembersForAdminList(members, { includeRbac = false, organizationId = '' } = {}) {
+  const userIds = members
+    .map((m) => String(m.user?._id || m.user || m.userId || '').trim())
+    .filter(Boolean);
+  const [profileMap, authMap, rbacMap] = await Promise.all([
+    fetchProfilesByUserIds(userIds),
+    fetchAuthSummaryByUserIds(userIds),
+    includeRbac && organizationId
+      ? fetchRbacAssignmentsByOrg(organizationId)
+      : Promise.resolve(new Map()),
+  ]);
+
+  return members.map((member) => {
+    const userId = String(member.user?._id || member.user || member.userId || '').trim();
+    const profile = profileMap.get(userId) || {};
+    const auth = authMap.get(userId) || {};
+    const email = String(profile.email || auth.email || '').trim() || null;
+    const emailLocal = email && email.includes('@') ? email.split('@')[0] : '';
+    const displayName =
+      profile.displayName ||
+      profile.fullName ||
+      [profile.firstName, profile.lastName].filter(Boolean).join(' ').trim() ||
+      profile.username ||
+      emailLocal ||
+      null;
+    const employeeCode = String(profile.employeeCode || '').trim().toUpperCase() || null;
+    const capStatus = String(profile?.capability?.verificationStatus || '').trim() || 'draft';
+    const rbacRoles = includeRbac ? rbacMap.get(userId) || [] : undefined;
+    return {
+      ...member,
+      userId,
+      email,
+      displayName,
+      employeeCode,
+      username: profile.username || null,
+      avatar: profile.avatar || null,
+      jobTitle: coalesceJobTitle(profile) || null,
+      isActive: auth.isActive,
+      mustChangePassword: auth.mustChangePassword,
+      isLocked: auth.isLocked,
+      lastLoginAt: auth.lastLoginAt || null,
+      // Huy: gắn systemRole để FE/BE lọc tài khoản admin hệ thống khỏi danh sách user
+      systemRole: String(auth.systemRole || 'employee').toLowerCase() === 'admin' ? 'admin' : 'employee',
+      /** Additive — admin list / filter (Wave B). */
+      capabilityStatus: capStatus,
+      ...(includeRbac ? { rbacRoles } : {}),
+    };
+  });
+}
+
+/** Gom members + roles RBAC — một request cho sidebar (wave-2d).
+ * Query `view`:
+ * - (mặc định / thiếu) — project như admin_table (Wave 1 E)
+ * - directory — allowlist DTO, không bulk UserRole, omit auth flags
+ * - admin_table — allowlist DTO + rbacRoles[] (1 S2S bulk) + auth flags
+ */
+exports.getMembersWithRoles = async (req, res, next) => {
+  try {
+    const userId = String(req.user?.id || req.user?.userId || req.user?._id || '');
+    const [{ view, restrictContact }, roles] = await Promise.all([
+      resolveMembersAccess(req, normalizeView(req.query?.view) || VIEW_ADMIN_TABLE),
+      fetchOrgRolesList(req.params.orgId, userId),
+    ]);
+    const members =
+      view === VIEW_ADMIN_TABLE
+        ? await listMembersForEmployeeView(req.params.orgId, userId)
+        : await listMembersForOrg(req);
+    const includeRbac = view === VIEW_ADMIN_TABLE;
+    const enriched = await enrichMembersForAdminList(members, {
+      includeRbac,
+      organizationId: req.params.orgId,
+    });
+    const withPlacement = await attachPlacementFromStructure(req.params.orgId, enriched);
+    const projected = projectMembersForView(withPlacement, view, { restrictContact });
+    return res.json({ status: 'success', data: { members: projected, roles } });
+  } catch (error) {
+    const handled = orgOperationalError(res, error);
+    if (handled) return handled;
+    return next(error);
+  }
+};
+
+exports.previewNextEmployeeCode = async (req, res, next) => {
+  try {
+    const orgId = req.params.orgId;
+    if (!orgId) return orgValidation(res, 'orgId is required');
+    const employeeCode = await peekNextEmployeeCode(orgId);
+    return res.json({ status: 'success', data: { employeeCode } });
+  } catch (error) {
+    return next(error);
   }
 };
 
 exports.inviteMember = async (req, res, next) => {
   try {
-    const { email, role } = req.body;
+    const { email, firstName, lastName, role, departmentId, jobTitle } = req.body || {};
+    const inviterId = req.user?.id || req.user?.userId || req.user?._id;
+    const orgId = req.params.orgId;
 
-    // TODO: Send invitation email
-    // For now, just create pending membership
+    const hireParsed = parseOptionalHireCapability(req.body || {});
+    if (!hireParsed.ok) {
+      return orgValidation(res, hireParsed.message);
+    }
 
-    res.json({ status: 'success', message: 'Invitation sent' });
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail || !normalizedEmail.includes('@')) {
+      return orgValidation(res, 'email is required');
+    }
+
+    const jobTitleTrim = String(jobTitle || '').trim();
+    if (!jobTitleTrim) {
+      return orgValidation(res, 'jobTitle (chức danh) bắt buộc khi mời nhân sự.');
+    }
+
+    const deptIdRaw = String(departmentId || '').trim();
+    if (!deptIdRaw) {
+      return orgValidation(res, 'departmentId (phòng ban) bắt buộc khi mời nhân sự.');
+    }
+
+    await assertOrgInviteAllowed({ userId: inviterId, bucket: 'invite' });
+
+    const department = await Department.findOne({
+      _id: deptIdRaw,
+      organization: orgId,
+      isActive: { $ne: false },
+    })
+      .select('_id name')
+      .lean();
+    if (!department) {
+      return orgValidation(res, 'Phòng ban không tồn tại trong công ty.');
+    }
+
+    const organization = await Organization.findById(orgId).select('name settings.allowedEmailDomains').lean();
+    if (!organization) {
+      return orgNotFound(res);
+    }
+
+    const domainGate = assertEmailDomainAllowed(
+      normalizedEmail,
+      resolveAllowedEmailDomains(organization)
+    );
+    if (!domainGate.ok) {
+      return orgValidation(res, domainGate.message);
+    }
+
+    const inviterMembership = await Membership.findOne({
+      user: inviterId,
+      organization: orgId,
+      status: 'active',
+    })
+      .select('role')
+      .lean();
+    const inviterTier = resolveActorTier(Membership.normalizeRole(inviterMembership?.role));
+    const normalizedRole = clampInviteRole(inviterTier, Membership.normalizeRole(role || 'member'));
+    if (!ALLOWED_ROLES.includes(normalizedRole)) {
+      return orgValidation(res, 'Invalid role');
+    }
+
+    const existingProfile = await searchUserByEmail(normalizedEmail);
+    if (existingProfile) {
+      const existingUserId = String(
+        existingProfile.userId || existingProfile.id || existingProfile._id || ''
+      ).trim();
+      if (existingUserId) {
+        const existingMembership = await Membership.findOne({
+          user: existingUserId,
+          organization: orgId,
+          status: 'active',
+        }).lean();
+        if (existingMembership) {
+          return orgConflict(res, 'Đã là thành viên công ty.', 'ORG_ALREADY_MEMBER');
+        }
+      }
+    }
+
+    await CompanyInvite.updateMany(
+      { organization: orgId, email: normalizedEmail, status: 'pending' },
+      { $set: { status: 'revoked' } }
+    );
+
+    let employeeCode;
+    try {
+      employeeCode = await allocateNextEmployeeCode(orgId);
+    } catch (allocErr) {
+      return orgCatch(res, allocErr, 500, 'Không cấp được mã nhân viên', 'EMPLOYEE_CODE_ALLOCATE_FAILED');
+    }
+
+    const rawToken = generateInviteToken();
+    const invite = await CompanyInvite.create({
+      organization: orgId,
+      email: normalizedEmail,
+      firstName: String(firstName || '').trim(),
+      lastName: String(lastName || '').trim(),
+      employeeCode,
+      departmentId: department._id,
+      departmentName: String(department.name || '').trim(),
+      jobTitle: jobTitleTrim,
+      role: normalizedRole,
+      invitedBy: inviterId || null,
+      tokenHash: hashInviteToken(rawToken),
+      status: 'pending',
+      expiresAt: new Date(Date.now() + COMPANY_INVITE_TTL_MS),
+      hireCapability: hireParsed.value,
+    });
+
+    const frontendUrl = trustedFrontendUrl(req);
+    const inviteUrl = `${frontendUrl}/accept-company-invite?token=${encodeURIComponent(rawToken)}`;
+
+    const invitePayload = {
+      inviteId: String(invite._id),
+      email: normalizedEmail,
+      role: normalizedRole,
+      employeeCode,
+      departmentId: String(department._id),
+      departmentName: invite.departmentName,
+      jobTitle: jobTitleTrim,
+      expiresAt: invite.expiresAt,
+      hireCapabilityApplied: Boolean(hireParsed.value),
+    };
+
+    try {
+      await sendCompanyInviteEmail({
+        email: normalizedEmail,
+        inviteUrl,
+        organizationName: organization.name || 'Atrium',
+        firstName: invite.firstName,
+        lastName: invite.lastName,
+      });
+    } catch (emailErr) {
+      logger.warn('[inviteMember] invite email failed; returning inviteUrl for manual share', {
+        email: maskEmail(normalizedEmail),
+        errorCode: emailErr?.errorCode,
+        statusCode: emailErr?.statusCode,
+      });
+      return res.status(201).json({
+        status: 'success',
+        data: {
+          ...invitePayload,
+          emailSent: false,
+          inviteUrl,
+          emailError: 'Không gửi được email lời mời. Hãy gửi link thủ công.',
+        },
+        message:
+          'Lời mời đã tạo nhưng chưa gửi được email. Hãy copy link bên dưới gửi tay cho nhân viên.',
+      });
+    }
+
+    res.status(201).json({
+      status: 'success',
+      data: {
+        ...invitePayload,
+        emailSent: true,
+        inviteUrl: process.env.NODE_ENV !== 'production' ? inviteUrl : undefined,
+      },
+      message: 'Đã gửi email lời mời nhận tài khoản',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Public — nhân viên mở link trong email: tạo tài khoản (nếu chưa có) + membership active.
+ * Không trả temporaryPassword (RULE-02); tài khoản mới nhận email đặt mật khẩu.
+ */
+exports.acceptCompanyInvite = async (req, res, next) => {
+  try {
+    const bodyToken = req.body?.token;
+    const queryToken = req.query?.token;
+    const rawToken =
+      bodyToken !== undefined && bodyToken !== null && bodyToken !== ''
+        ? bodyToken
+        : queryToken;
+    await assertPublicAcceptAllowed({ ip: req.ip, rawToken });
+
+    const tokenHash = hashInviteToken(rawToken);
+    const invite = await CompanyInvite.findOne({ tokenHash }).lean();
+    if (!invite) {
+      return orgFail(res, 404, 'Lời mời không hợp lệ hoặc đã hết hạn.', 'ORG_INVITE_INVALID');
+    }
+
+    if (invite.status === 'accepted' && invite.acceptedUserId) {
+      return res.json({
+        status: 'success',
+        data: {
+          email: invite.email,
+          alreadyAccepted: true,
+          alreadyHadAccount: true,
+          mustSetPassword: false,
+          organizationId: String(invite.organization),
+        },
+        message: 'Tài khoản đã được tạo trước đó. Vui lòng đăng nhập.',
+      });
+    }
+
+    if (invite.status !== 'pending') {
+      return orgFail(res, 400, 'Lời mời không còn hiệu lực.', 'ORG_INVITE_INVALID');
+    }
+
+    if (invite.expiresAt && new Date(invite.expiresAt).getTime() < Date.now()) {
+      await CompanyInvite.updateOne({ _id: invite._id }, { $set: { status: 'expired' } });
+      return orgFail(res, 400, 'Lời mời đã hết hạn.', 'ORG_INVITE_EXPIRED');
+    }
+
+    let provisionMeta;
+    try {
+      provisionMeta = await provisionUserByAdmin({
+        email: invite.email,
+        firstName: invite.firstName,
+        lastName: invite.lastName,
+        // Click invite = chứng minh mailbox → active ngay + mk tạm một lần trên FE.
+        readyForLogin: true,
+      });
+    } catch (provisionErr) {
+      return orgCatch(res, provisionErr, 500, 'Không tạo được tài khoản', 'ORG_PROVISION_FAILED');
+    }
+
+    const resolvedUserId = String(provisionMeta.userId || '').trim();
+    if (!resolvedUserId) {
+      return orgFail(res, 500, 'Không tạo được tài khoản', 'ORG_PROVISION_FAILED');
+    }
+
+    const existingMembership = await Membership.findOne({
+      user: resolvedUserId,
+      organization: invite.organization,
+    })
+      .select('role status')
+      .lean();
+    if (existingMembership?.status === 'suspended') {
+      return orgAccessDenied(res, 'Tài khoản của bạn đang bị tạm ngưng trong tổ chức này.', 'ORG_MEMBERSHIP_SUSPENDED');
+    }
+    const invitedRole = Membership.normalizeRole(invite.role || 'member');
+    const normalizedRole = existingMembership?.status === 'active'
+      ? Membership.normalizeRole(existingMembership.role)
+      : (invitedRole === 'owner' ? 'member' : invitedRole);
+    const membership = await Membership.findOneAndUpdate(
+      { user: resolvedUserId, organization: invite.organization },
+      {
+        $set: {
+          role: normalizedRole,
+          status: 'active',
+          ...(existingMembership?.status === 'active' ? {} : { invitedBy: invite.invitedBy || null }),
+        },
+        $setOnInsert: { user: resolvedUserId, organization: invite.organization },
+      },
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
+    );
+
+    await syncUserOrgRole(resolvedUserId, invite.organization, normalizedRole);
+
+    // Ghi mã NV + chức danh HR; nếu HR điền KN lúc mời → cùng bulk-fields Excel (verified).
+    const displayName = [invite.lastName, invite.firstName].filter(Boolean).join(' ').trim();
+    const hire = invite.hireCapability;
+    const hasHireKn = hireCapabilityHasDomain(hire);
+    try {
+      const profilePayload = {
+        email: invite.email,
+        uploadedBy: invite.invitedBy || null,
+        resourceConfig: {
+          maxConcurrentProjects: hasHireKn
+            ? Math.max(1, Math.min(20, Number(hire.maxConcurrentProjects) || 2))
+            : 2,
+        },
+      };
+      if (invite.employeeCode) profilePayload.employeeCode = invite.employeeCode;
+      if (invite.jobTitle) profilePayload.jobTitle = invite.jobTitle;
+      if (displayName) profilePayload.displayName = displayName;
+      if (hasHireKn) {
+        const skills = Array.isArray(hire.skills) ? hire.skills : [];
+        const past = Array.isArray(hire.pastProjects) ? hire.pastProjects : [];
+        profilePayload.capability = {
+          primaryDomain: String(hire.primaryDomain || '').trim(),
+          skills: skills.map((name) => ({ name: String(name || '').trim(), level: 3 })).filter((s) => s.name),
+          yearsExperience: hire.yearsExperience,
+          availability: 'available',
+          summary: '',
+          source: 'excel_import',
+          projectExperiences: past.map((p) => ({
+            name: p.name,
+            role: p.role,
+            work: p.work,
+            ...(p.year != null ? { year: p.year } : {}),
+            source: 'excel_import',
+            status: 'verified',
+          })),
+        };
+      } else {
+        profilePayload.structureOnly = true;
+      }
+      if (invite.employeeCode || invite.jobTitle || displayName || hasHireKn) {
+        await bulkUpdateUserProfileFields(resolvedUserId, profilePayload);
+      }
+    } catch (profileErr) {
+      logger.warn('[acceptCompanyInvite] profile bulk fields failed:', profileErr?.message || profileErr);
+    }
+
+    if (invite.departmentId) {
+      try {
+        await Department.updateOne(
+          { _id: invite.departmentId, organization: invite.organization },
+          { $addToSet: { members: resolvedUserId } }
+        );
+      } catch (deptErr) {
+        logger.warn('[acceptCompanyInvite] department placement failed:', deptErr?.message || deptErr);
+      }
+    }
+
+    await CompanyInvite.updateOne(
+      { _id: invite._id },
+      {
+        $set: {
+          status: 'accepted',
+          acceptedAt: new Date(),
+          acceptedUserId: resolvedUserId,
+        },
+      }
+    );
+
+    const created = Boolean(provisionMeta.created);
+    if (created) {
+      const frontendUrl = trustedFrontendUrl(req);
+      void sendProvisionSetPasswordEmail({
+        userId: resolvedUserId,
+        frontendUrl,
+        organizationName: undefined,
+        firstName: invite.firstName || '',
+        lastName: invite.lastName || '',
+      }).catch((mailErr) => {
+        logger.warn('[acceptCompanyInvite] set-password email failed (fail-soft):', {
+          errorCode: mailErr?.errorCode,
+          statusCode: mailErr?.statusCode,
+        });
+      });
+    }
+
+    res.json({
+      status: 'success',
+      data: {
+        email: invite.email,
+        alreadyAccepted: false,
+        alreadyHadAccount: !created,
+        mustSetPassword: created || Boolean(provisionMeta.mustChangePassword),
+        organizationId: String(invite.organization),
+        membershipId: String(membership._id),
+        userId: resolvedUserId,
+        employeeCode: invite.employeeCode || null,
+        jobTitle: invite.jobTitle || null,
+        departmentId: invite.departmentId ? String(invite.departmentId) : null,
+      },
+      message: created
+        ? 'Tài khoản đã được tạo. Vui lòng kiểm tra email để đặt mật khẩu rồi đăng nhập.'
+        : 'Tài khoản đã tồn tại và đã được thêm vào công ty. Vui lòng đăng nhập.',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getMyInvitations = async (req, res, next) => {
+  try {
+    const userId = req.user?.id || req.user?.userId || req.user?._id;
+    if (!userId) {
+      return orgUnauthorized(res);
+    }
+
+    const invitations = await Membership.find({
+      user: userId,
+      status: 'pending',
+    })
+      .select('organization role invitedBy createdAt')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const orgIds = [...new Set(invitations.map((i) => String(i.organization)).filter(Boolean))];
+    const orgDocs = orgIds.length
+      ? await Organization.find({ _id: { $in: orgIds }, isActive: true })
+        .select('name description logo')
+        .lean()
+      : [];
+    const orgMap = Object.fromEntries(orgDocs.map((o) => [String(o._id), o]));
+
+    const normalized = invitations
+      .filter((item) => orgMap[String(item.organization)])
+      .map((item) => ({
+        invitationId: item._id,
+        organization: orgMap[String(item.organization)],
+        role: item.role,
+        invitedBy: item.invitedBy || null,
+        createdAt: item.createdAt,
+      }));
+
+    res.json({ status: 'success', data: normalized });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.respondToInvitation = async (req, res, next) => {
+  try {
+    const userId = req.user?.id || req.user?.userId || req.user?._id;
+    const { action } = req.body || {};
+    const { invitationId } = req.params;
+
+    if (!userId) {
+      return orgUnauthorized(res);
+    }
+    if (!['accept', 'reject'].includes(action)) {
+      return orgValidation(res, 'Action must be accept or reject');
+    }
+
+    const invitation = await Membership.findOne({
+      _id: invitationId,
+      user: userId,
+      status: 'pending',
+    });
+
+    if (!invitation) {
+      return orgFail(res, 404, 'Invitation not found', 'ORG_NOT_FOUND');
+    }
+
+    if (action === 'accept') {
+      const org = await Organization.findById(invitation.organization).lean();
+      if (!org || !org.isActive) {
+        return orgNotFound(res);
+      }
+
+      // Chuẩn hoá role mặc định khi tham gia thành công: luôn là member.
+      invitation.role = 'member';
+      invitation.status = 'active';
+      invitation.joinedAt = new Date();
+      await invitation.save();
+
+      await ensureDefaultOrgRoles(invitation.organization);
+      await syncUserOrgRole(
+        userId,
+        invitation.organization,
+        'member'
+      );
+
+      await emitRealtimeEvent({
+        event: 'organization:invitation_accepted',
+        userIds: [String(userId), String(invitation.invitedBy || '')].filter(Boolean),
+        payload: {
+          invitationId: String(invitation._id),
+          organizationId: String(invitation.organization),
+          userId: String(userId),
+          timestamp: new Date().toISOString(),
+        },
+      });
+      return res.json({ status: 'success', data: invitation, message: 'Invitation accepted' });
+    }
+
+    await Membership.deleteOne({ _id: invitationId });
+    await emitRealtimeEvent({
+      event: 'organization:invitation_rejected',
+      userIds: [String(userId), String(invitation.invitedBy || '')].filter(Boolean),
+      payload: {
+        invitationId: String(invitation._id),
+        organizationId: String(invitation.organization),
+        userId: String(userId),
+        timestamp: new Date().toISOString(),
+      },
+    });
+    return res.json({ status: 'success', message: 'Invitation rejected' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.createInviteLink = async (req, res, next) => {
+  try {
+    if (!INVITE_LINK_SECRET) {
+      return inviteLinkUnavailable(res);
+    }
+
+    const orgId = req.params.orgId;
+    const userId = req.user?.id || req.user?._id || req.user?.userId;
+    const branchIdRaw = toPlainId(req.body?.branchId);
+    const divisionIdRaw = toPlainId(req.body?.divisionId);
+    if (!orgId || !userId) {
+      return orgValidation(res, 'Invalid request');
+    }
+
+    await assertOrgInviteAllowed({ userId, bucket: 'invite', denyWhenFailOpen: true });
+
+    let branchContext = null;
+    let divisionContext = null;
+    if (branchIdRaw) {
+      branchContext = await Branch.findOne({
+        _id: branchIdRaw,
+        organization: orgId,
+        isActive: true,
+      })
+        .select('_id name')
+        .lean();
+      if (!branchContext) {
+        return orgValidation(res, 'Chi nhánh không hợp lệ');
+      }
+    }
+    if (divisionIdRaw) {
+      divisionContext = await Division.findOne({
+        _id: divisionIdRaw,
+        organization: orgId,
+        isActive: true,
+      })
+        .select('_id name branch')
+        .lean();
+      if (!divisionContext) {
+        return orgValidation(res, 'Khối không hợp lệ');
+      }
+      if (branchContext && String(divisionContext.branch) !== String(branchContext._id)) {
+        return orgValidation(res, 'Khối không thuộc chi nhánh đã chọn');
+      }
+      if (!branchContext) {
+        branchContext = await Branch.findById(divisionContext.branch).select('_id name').lean();
+      }
+    }
+
+    const token = jwt.sign(
+      {
+        type: 'organization_invite',
+        orgId,
+        createdBy: userId,
+        inviteContext: {
+          branchId: branchContext?._id ? String(branchContext._id) : null,
+          branchName: branchContext?.name || '',
+          divisionId: divisionContext?._id ? String(divisionContext._id) : null,
+          divisionName: divisionContext?.name || '',
+        },
+      },
+      INVITE_LINK_SECRET,
+      { expiresIn: INVITE_LINK_EXPIRES_IN }
+    );
+
+    const frontendUrl = trustedFrontendUrl(req);
+    const inviteUrl = `${frontendUrl}/organizations?orgId=${encodeURIComponent(orgId)}&inviteToken=${encodeURIComponent(
+      token
+    )}`;
+
+    res.json({
+      status: 'success',
+      data: {
+        token,
+        inviteUrl,
+        expiresIn: INVITE_LINK_EXPIRES_IN,
+        context: {
+          branchId: branchContext?._id ? String(branchContext._id) : null,
+          branchName: branchContext?.name || '',
+          divisionId: divisionContext?._id ? String(divisionContext._id) : null,
+          divisionName: divisionContext?.name || '',
+        },
+      },
+      message: 'Invite link generated',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.joinViaLink = async (req, res, next) => {
+  try {
+    if (!INVITE_LINK_SECRET) {
+      return inviteLinkUnavailable(res);
+    }
+
+    const { token } = req.body || {};
+    if (!token) {
+      return orgValidation(res, 'Invite token is required');
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, INVITE_LINK_SECRET);
+    } catch (error) {
+      return orgValidation(res, 'Invalid or expired invite token');
+    }
+
+    if (decoded?.type !== 'organization_invite') {
+      return orgValidation(res, 'Invalid invite token type');
+    }
+
+    if (String(decoded.orgId) !== String(req.params.orgId)) {
+      return orgValidation(res, 'Invite token organization mismatch');
+    }
+
+    const userId = req.user?.id || req.user?._id || req.user?.userId;
+    if (!userId) {
+      return orgUnauthorized(res);
+    }
+
+    await assertOrgInviteAllowed({ userId, bucket: 'join' });
+
+    const org = await Organization.findById(req.params.orgId).lean();
+    if (!org || !org.isActive) {
+      return orgNotFound(res);
+    }
+
+    const inviterStillAllowed = await hasElevatedOrgAccess({
+      userId: decoded.createdBy,
+      orgId: req.params.orgId,
+      roles: INVITE_LINK_CREATOR_ROLES,
+      grantKey: INVITE_LINK_CREATOR_GRANT,
+    });
+    if (!inviterStillAllowed) {
+      logger.warn('[member] join link rejected: creator lost invite permission', {
+        orgId: String(req.params.orgId),
+        errorCode: 'ORG_INVITE_LINK_REVOKED',
+      });
+      return orgFail(res, 403, 'Liên kết mời không còn hiệu lực.', 'ORG_INVITE_LINK_REVOKED');
+    }
+
+    const inviteContext = decoded?.inviteContext || {};
+    const responseInviteContext = {
+      branchId: inviteContext?.branchId || null,
+      branchName: inviteContext?.branchName || '',
+      divisionId: inviteContext?.divisionId || null,
+      divisionName: inviteContext?.divisionName || '',
+    };
+    const existing = await Membership.findOne({ user: userId, organization: req.params.orgId })
+      .select('role status')
+      .lean();
+    if (existing?.status === 'suspended') {
+      return orgAccessDenied(res, 'Tài khoản của bạn đang bị tạm ngưng trong tổ chức này.', 'ORG_MEMBERSHIP_SUSPENDED');
+    }
+    if (existing?.status === 'active') {
+      return res.json({
+        status: 'success',
+        data: { membership: existing, inviteContext: responseInviteContext },
+        message: 'Joined organization via invite link',
+      });
+    }
+
+    // Join-link luôn cấp role member (đồng bộ respondToInvitation), kể cả khi có lời mời pending role cao hơn.
+    const membership = await Membership.findOneAndUpdate(
+      { user: userId, organization: req.params.orgId },
+      {
+        $set: { status: 'active', role: 'member', joinedAt: new Date() },
+        $setOnInsert: { user: userId, organization: req.params.orgId },
+      },
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
+    );
+
+    await ensureDefaultOrgRoles(req.params.orgId);
+    await syncUserOrgRole(userId, req.params.orgId, 'member');
+
+    await emitRealtimeEvent({
+      event: 'organization:member_joined',
+      userIds: await getActiveOrgUserIds(req.params.orgId),
+      payload: {
+        organizationId: String(req.params.orgId),
+        userId: String(userId),
+        membershipId: String(membership._id),
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    await invalidateOrgReadCache(req.params.orgId, {
+      userId: String(userId),
+      eventType: ORG_EVENT_TYPES.MEMBER_JOINED,
+    });
+
+    res.json({
+      status: 'success',
+      data: {
+        membership,
+        inviteContext: responseInviteContext,
+      },
+      message: 'Joined organization via invite link',
+    });
   } catch (error) {
     next(error);
   }
@@ -28,13 +1199,71 @@ exports.inviteMember = async (req, res, next) => {
 
 exports.updateMemberRole = async (req, res, next) => {
   try {
-    const { role, department, team } = req.body;
+    const { role } = req.body;
+    const requesterId = req.user?.id || req.user?.userId || req.user?._id;
+    const requesterMembership = await Membership.findOne({
+      user: requesterId,
+      organization: req.params.orgId,
+      status: 'active',
+    })
+      .select('role')
+      .lean();
+    const actorTier = resolveActorTier(Membership.normalizeRole(requesterMembership?.role));
+    const normalizedRole = Membership.normalizeRole(role || 'member');
+    if (!ALLOWED_ROLES.includes(normalizedRole)) {
+      return orgValidation(res, 'Invalid role');
+    }
+    const targetMembership = await Membership.findOne({
+      user: req.params.userId,
+      organization: req.params.orgId,
+      status: 'active',
+    })
+      .select('role')
+      .lean();
+    if (!targetMembership) {
+      return orgMemberNotFound(res);
+    }
+    const targetRole = Membership.normalizeRole(targetMembership.role);
+    const activeOwnerCount = targetRole === 'owner'
+      ? await countActiveOwners(req.params.orgId)
+      : 0;
+    const decision = evaluateRoleChange({
+      actorTier,
+      actorUserId: requesterId,
+      targetUserId: req.params.userId,
+      targetRole,
+      nextRole: normalizedRole,
+      activeOwnerCount,
+    });
+    if (!decision.ok) {
+      return orgFail(res, decision.status, decision.message, decision.errorCode);
+    }
 
     const membership = await Membership.findOneAndUpdate(
-      { user: req.params.userId, organization: req.params.orgId },
-      { role, department, team },
-      { new: true }
+      { user: req.params.userId, organization: req.params.orgId, status: 'active' },
+      { role: normalizedRole },
+      { returnDocument: 'after' }
     );
+
+    if (membership) {
+      await ensureDefaultOrgRoles(req.params.orgId);
+      await syncUserOrgRole(req.params.userId, req.params.orgId, normalizedRole);
+    }
+
+    await emitRealtimeEvent({
+      event: 'organization:member_role_updated',
+      userIds: await getActiveOrgUserIds(req.params.orgId),
+      payload: {
+        organizationId: String(req.params.orgId),
+        userId: String(req.params.userId),
+        role: normalizedRole,
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    await invalidateOrgAcl(req.params.orgId, String(req.params.userId), {
+      eventType: ORG_EVENT_TYPES.ROLE_UPDATED,
+    });
 
     res.json({ status: 'success', data: membership });
   } catch (error) {
@@ -44,12 +1273,132 @@ exports.updateMemberRole = async (req, res, next) => {
 
 exports.removeMember = async (req, res, next) => {
   try {
+    const requesterId = req.user?.id || req.user?.userId || req.user?._id;
+    const requesterMembership = await Membership.findOne({
+      user: requesterId,
+      organization: req.params.orgId,
+      status: 'active',
+    })
+      .select('role')
+      .lean();
+    const actorTier = resolveActorTier(Membership.normalizeRole(requesterMembership?.role));
+
+    const targetMembership = await Membership.findOne({
+      user: req.params.userId,
+      organization: req.params.orgId,
+      status: 'active',
+    })
+      .select('role')
+      .lean();
+    if (!targetMembership) {
+      return orgMemberNotFound(res);
+    }
+    const targetRole = Membership.normalizeRole(targetMembership.role);
+    const activeOwnerCount = targetRole === 'owner'
+      ? await countActiveOwners(req.params.orgId)
+      : 0;
+    const decision = evaluateRemoval({
+      actorTier,
+      actorUserId: requesterId,
+      targetUserId: req.params.userId,
+      targetRole,
+      activeOwnerCount,
+    });
+    if (!decision.ok) {
+      return orgFail(res, decision.status, decision.message, decision.errorCode);
+    }
+
     await Membership.findOneAndDelete({
       user: req.params.userId,
       organization: req.params.orgId,
     });
 
+    await stripUserOrgRoles(req.params.userId, req.params.orgId);
+
+    const orgUserIds = await getActiveOrgUserIds(req.params.orgId);
+    const targetUserId = String(req.params.userId || '');
+    if (targetUserId && !orgUserIds.includes(targetUserId)) {
+      orgUserIds.push(targetUserId);
+    }
+
+    await emitRealtimeEvent({
+      event: 'organization:member_removed',
+      userIds: orgUserIds,
+      payload: {
+        organizationId: String(req.params.orgId),
+        userId: String(req.params.userId),
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    await invalidateOrgReadCache(req.params.orgId, {
+      userId: String(req.params.userId),
+      eventType: ORG_EVENT_TYPES.MEMBER_REMOVED,
+    });
+
     res.json({ status: 'success', message: 'Member removed' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Người dùng tự rời tổ chức (không cần quyền admin). Chủ sở hữu duy nhất không được rời — phải xóa tổ chức hoặc chuyển quyền. */
+exports.leaveOrganization = async (req, res, next) => {
+  try {
+    const orgId = req.params.orgId;
+    const userId = req.user?.id || req.user?.userId || req.user?._id;
+    if (!userId) {
+      return orgUnauthorized(res);
+    }
+
+    const membership = await Membership.findOne({
+      user: userId,
+      organization: orgId,
+      status: 'active',
+    });
+
+    if (!membership) {
+      return orgMemberNotFound(res, 'Bạn không thuộc tổ chức này');
+    }
+
+    const normalizedRole = Membership.normalizeRole(membership.role);
+    if (normalizedRole === 'owner') {
+      const ownerCount = await Membership.countDocuments({
+        organization: orgId,
+        status: 'active',
+        role: 'owner',
+      });
+      if (ownerCount <= 1) {
+        return orgValidation(res, 'Bạn là chủ sở hữu duy nhất. Hãy xóa tổ chức hoặc chuyển quyền sở hữu trước khi rời.');
+      }
+    }
+
+    await Membership.findOneAndDelete({ _id: membership._id });
+
+    await stripUserOrgRoles(userId, orgId);
+
+    const orgUserIds = await getActiveOrgUserIds(orgId);
+    const leavingUserId = String(userId || '');
+    if (leavingUserId && !orgUserIds.includes(leavingUserId)) {
+      orgUserIds.push(leavingUserId);
+    }
+
+    await emitRealtimeEvent({
+      event: 'organization:member_removed',
+      userIds: orgUserIds,
+      payload: {
+        organizationId: String(orgId),
+        userId: String(userId),
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    await invalidateOrgReadCache(orgId, {
+      userId: String(userId),
+      eventType: ORG_EVENT_TYPES.MEMBER_REMOVED,
+    });
+
+    res.json({ status: 'success', message: 'Đã rời tổ chức' });
   } catch (error) {
     next(error);
   }

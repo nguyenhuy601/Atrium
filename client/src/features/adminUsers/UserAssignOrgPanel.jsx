@@ -1,0 +1,196 @@
+/** Huy: Gán phòng ban / nhóm — chỉ list + search nhân viên chưa có dept và team. */
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import AdminUserPicker from '../../components/adminUsers/AdminUserPicker';
+import {
+  AdminUserFormCard,
+  AdminUserPanelShell,
+  adminInputClass,
+  adminLabelClass,
+  adminPrimaryBtnClass,
+} from '../../components/adminUsers/adminUserPanelUi';
+import { organizationAPI } from '../../services/api/organizationAPI';
+import useAdminMembers from '../../hooks/useAdminMembers';
+import useAdminOrgStructure from '../../hooks/useAdminOrgStructure';
+import { useAppStrings } from '../../locales/appStrings';
+import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
+import { clearAdminUserSelection } from '../../utils/adminSelectionParams';
+import {
+  memberDisplayName,
+  memberEmail,
+  memberIsUnplaced,
+  memberUserId,
+} from '../../utils/adminUserUtils';
+import { unitId, unitName } from '../../utils/adminOrgStructureUtils';
+
+export default function UserAssignOrgPanel({ orgId, embedded = false }) {
+  const { t } = useAppStrings();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const userId = String(searchParams.get('userId') || '').trim();
+  const { departments, teams, loadStructure, loading: structureLoading, error: structureError } = useAdminOrgStructure(orgId);
+  const { loadMembers, membersById } = useAdminMembers(orgId, { view: 'directory' });
+  const [departmentId, setDepartmentId] = useState('');
+  const [teamId, setTeamId] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const unplacedFilter = useCallback((m) => memberIsUnplaced(m), []);
+
+  const selectedMember = membersById.get(userId) || null;
+  const selectedIsUnplaced = selectedMember ? memberIsUnplaced(selectedMember) : false;
+
+  const teamsInDept = useMemo(
+    () => teams.filter((row) => String(row.departmentId || '') === String(departmentId || '')),
+    [teams, departmentId]
+  );
+
+  useEffect(() => {
+    if (!teamId) return;
+    if (!teamsInDept.some((row) => unitId(row) === teamId)) {
+      setTeamId('');
+    }
+  }, [teamsInDept, teamId]);
+
+  const validationMessage = useMemo(() => {
+    if (!userId) return t('adminUsers.selectUserFirst');
+    if (!selectedIsUnplaced) return t('adminUsers.assignOrgAlreadyPlaced');
+    if (!departments.length) return t('adminOrg.noDepartments');
+    if (!departmentId) return t('adminUsers.assignOrgNeedDept');
+    return '';
+  }, [userId, selectedIsUnplaced, departments.length, departmentId, t]);
+
+  const canSubmit = !validationMessage && !busy;
+
+  const assign = async () => {
+    if (!orgId || busy || validationMessage) {
+      if (validationMessage) toast.error(validationMessage);
+      return;
+    }
+    setBusy(true);
+    try {
+      const dep = departments.find((d) => unitId(d) === departmentId);
+      const depMembers = (dep?.memberIds || []).map(String);
+      if (!depMembers.includes(userId)) {
+        await organizationAPI.updateDepartment(orgId, departmentId, {
+          membersAdd: [userId],
+        });
+      }
+      if (teamId) {
+        const team = teams.find((row) => unitId(row) === teamId);
+        const teamMembers = (team?.memberIds || []).map(String);
+        if (!teamMembers.includes(userId)) {
+          await organizationAPI.updateTeamByHierarchy(orgId, teamId, {
+            members: Array.from(new Set([...teamMembers, userId])),
+          });
+        }
+      }
+      toast.success(t('adminUsers.assignOrgSaved'));
+      setDepartmentId('');
+      setTeamId('');
+      clearAdminUserSelection(searchParams, setSearchParams);
+      await Promise.all([loadStructure(), loadMembers()]);
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('adminUsers.assignOrgFail') }));
+      // Tối thiểu vẫn refresh lại danh sách để picker bên trái không bị "stale".
+      await Promise.allSettled([loadStructure(), loadMembers()]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const body = (
+    <AdminUserFormCard title={t('adminDomains.users.assignOrg')} hint={t('adminUsers.assignOrgHint')}>
+      {!userId ? (
+        <p className="mb-4 text-sm text-muted-foreground">{t('adminUsers.selectUserFirst')}</p>
+      ) : null}
+      {structureLoading ? (
+        <div className="mb-3 space-y-2" aria-busy="true" aria-label={t('common.loading')}>
+          {Array.from({ length: 2 }, (_, idx) => (
+            <div key={idx} className="h-10 rounded-xl bg-muted motion-safe:animate-pulse" />
+          ))}
+        </div>
+      ) : structureError ? (
+        <div className="mb-2 space-y-3 rounded-lg border border-destructive bg-error-bg px-3 py-2" role="alert">
+          <p className="text-sm text-destructive">{structureError}</p>
+          <button
+            type="button"
+            className={adminPrimaryBtnClass()}
+            onClick={() => loadStructure()}
+            disabled={busy}
+          >
+            {t('adminRbac.retry')}
+          </button>
+        </div>
+      ) : null}
+      <div className="space-y-4">
+        <label className="block">
+          <span className={adminLabelClass()}>{t('adminOrg.toDept')}</span>
+          <select
+            className={adminInputClass()}
+            value={departmentId}
+            onChange={(e) => setDepartmentId(e.target.value)}
+          >
+            <option value="">{t('adminOrg.selectDepartment')}</option>
+            {departments.map((d) => (
+              <option key={unitId(d)} value={unitId(d)}>
+                {unitName(d)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className={adminLabelClass()}>{t('adminUsers.assignOrgTeamOptional')}</span>
+          <select
+            className={adminInputClass()}
+            value={teamId}
+            onChange={(e) => setTeamId(e.target.value)}
+            disabled={!departmentId}
+          >
+            <option value="">{t('adminUsers.assignOrgTeamNone')}</option>
+            {teamsInDept.map((row) => (
+              <option key={unitId(row)} value={unitId(row)}>
+                {unitName(row)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {validationMessage ? (
+          <p className="text-xs text-warning" role="status">{validationMessage}</p>
+        ) : selectedMember ? (
+          <p className="text-xs text-muted-foreground">
+            {t('adminUsers.assignOrgReady', {
+              name: memberDisplayName(selectedMember) || memberUserId(selectedMember),
+            })}
+          </p>
+        ) : null}
+        <button
+          type="button"
+          disabled={!canSubmit}
+          aria-busy={busy}
+          className={adminPrimaryBtnClass()}
+          onClick={assign}
+        >
+          {busy ? t('common.saving') : t('adminUsers.saveAssignment')}
+        </button>
+      </div>
+    </AdminUserFormCard>
+  );
+
+  if (embedded) return body;
+
+  return (
+    <AdminUserPanelShell title={t('adminDomains.users.assignOrg')} hint={t('adminUsers.assignOrgHint')} wide>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start">
+        <AdminUserPicker
+          orgId={orgId}
+          selectedUserId={userId}
+          hint={t('adminUsers.assignOrgPickerHint')}
+          filterFn={unplacedFilter}
+          emptyLabel={t('adminUsers.assignOrgNoUnplaced')}
+          subtitleFn={(m) => `${memberEmail(m)} · ${t('adminOrg.deptTransferUnassignedBadge')}`}
+        />
+        {body}
+      </div>
+    </AdminUserPanelShell>
+  );
+}

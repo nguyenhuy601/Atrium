@@ -1,0 +1,37 @@
+---
+name: data-integrity-analysis
+description: >-
+  Analyzes data integrity within a Atrium service: invariants, orphans, consistency. Use when data corruption suspected.
+---
+
+# data integrity analysis
+
+## When to use
+
+Suspected inconsistent or orphan data.
+
+## When NOT to use
+
+Normal CRUD feature work.
+
+## Related Rules
+
+- `.cursor/rules/deep-agents-dispatch.mdc` (agent: `implementer`); skills `database-design` / `migration`
+
+## Input
+
+Symptom + owning service
+
+## Workflow
+
+1. Define invariants.
+2. Search for violations in code/data access patterns.
+3. Recommend fixes without cross-service DB access.
+
+## Expected output
+
+Integrity findings + remediation
+
+## Tools
+
+Read, Grep.

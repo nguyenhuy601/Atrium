@@ -1,0 +1,134 @@
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { ArrowRight, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
+import AuthPageLayout from '../../components/Auth/AuthPageLayout';
+import AuthMarketingAside from '../../components/Auth/AuthMarketingAside';
+import authService from '../../services/authService';
+import { useAppStrings } from '../../locales/appStrings';
+import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
+import { readAuthTokenFromUrl } from '../../utils/authUrlToken';
+
+function VerifyEmailPage() {
+  const navigate = useNavigate();
+  const { t } = useAppStrings();
+  const [searchParams] = useSearchParams();
+  const [loading, setLoading] = useState(true);
+  const [verified, setVerified] = useState(false);
+  const token = readAuthTokenFromUrl(searchParams);
+  const mode = String(searchParams.get('mode') || '').trim().toLowerCase();
+  const isEmailChangeMode = mode === 'email-change' || window.location.pathname === '/verify-email-change';
+  const hasRunRef = useRef(false);
+
+  const titleCls = 'text-foreground';
+  const mutedCls = 'text-muted-foreground';
+  const iconWrap = 'bg-primary/15 text-primary';
+  const iconWrapSuccess = 'bg-success/15 text-success';
+  const motionBtn = 'motion-safe:transition-colors motion-reduce:transition-none';
+
+  useEffect(() => {
+    if (!token) {
+      toast.error(t('verifyEmail.toastNoToken'));
+      navigate('/register', {
+        state: {
+          error: t('verifyEmail.registerFlashInvalid'),
+        },
+      });
+      return;
+    }
+    if (hasRunRef.current) return;
+    hasRunRef.current = true;
+
+    const run = async () => {
+      setLoading(true);
+      try {
+        const response = isEmailChangeMode
+          ? await authService.verifyEmailChange(token)
+          : await authService.verifyEmail(token);
+
+        if (response.success) {
+          setVerified(true);
+          toast.success(
+            isEmailChangeMode ? t('verifyEmail.toastChangeEmailSuccess') : t('verifyEmail.toastSuccess')
+          );
+          setTimeout(() => {
+            if (isEmailChangeMode) {
+              navigate('/settings', {
+                state: { message: t('verifyEmail.settingsFlashEmailChanged') },
+              });
+            } else {
+              navigate('/login', {
+                state: { message: t('verifyEmail.loginFlashVerified') },
+              });
+            }
+          }, 2000);
+        } else {
+          const errorMessage = response.message || t('verifyEmail.verifyFailedGeneric');
+          toast.error(`${t('verifyEmail.verifyFailedPrefix')} ${errorMessage}`);
+          setTimeout(() => {
+            navigate('/register', { state: { error: errorMessage } });
+          }, 2000);
+        }
+      } catch (error) {
+        const errorMessage = resolveApiErrorMessage(error, {
+          t,
+          fallback: t('verifyEmail.verifyFailedGeneric'),
+        });
+        toast.error(`${t('verifyEmail.verifyFailedPrefix')} ${errorMessage}`);
+        setTimeout(() => {
+          navigate('/register', { state: { error: errorMessage } });
+        }, 2000);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    run();
+  }, [token, navigate, t, isEmailChangeMode]);
+
+  return (
+    <AuthPageLayout aside={<AuthMarketingAside />}>
+      {verified ? (
+        <>
+          <div className="flex flex-col items-center text-center">
+            <div className={`flex h-16 w-16 items-center justify-center rounded-2xl ${iconWrapSuccess}`}>
+              <CheckCircle2 className="h-9 w-9" strokeWidth={1.75} aria-hidden />
+            </div>
+            <h1 className={`mt-6 text-[1.65rem] font-bold tracking-tight sm:text-[1.85rem] ${titleCls}`}>{t('verifyEmail.titleSuccess')}</h1>
+            <p className={`mt-3 max-w-md text-base leading-relaxed sm:text-lg ${mutedCls}`}>{t('verifyEmail.bodySuccess')}</p>
+            <Link
+              to="/login"
+              className={`mt-8 inline-flex items-center justify-center gap-2 rounded-2xl bg-primary px-8 py-4 text-lg font-bold text-primary-foreground shadow-lg hover:bg-primary-hover ${motionBtn}`}
+            >
+              {t('verifyEmail.ctaLogin')}
+              <ArrowRight className="h-5 w-5" strokeWidth={2} aria-hidden />
+            </Link>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="flex flex-col items-center text-center">
+            <div className={`relative flex h-16 w-16 items-center justify-center rounded-2xl ${iconWrap}`}>
+              {loading ? (
+                <Loader2 className="h-8 w-8 animate-spin" strokeWidth={1.75} aria-hidden />
+              ) : (
+                <Sparkles className="h-8 w-8" strokeWidth={1.75} aria-hidden />
+              )}
+            </div>
+            <h1 className={`mt-6 text-[1.65rem] font-bold tracking-tight sm:text-[1.85rem] ${titleCls}`}>{t('verifyEmail.titlePending')}</h1>
+            <p className={`mt-3 max-w-md text-base leading-relaxed sm:text-lg ${mutedCls}`}>
+              {loading ? t('verifyEmail.bodyLoading') : t('verifyEmail.bodyDone')}
+            </p>
+            <div
+              className="mx-auto mt-6 h-1.5 w-44 overflow-hidden rounded-full bg-muted"
+            >
+              <div className="h-full w-1/2 animate-[pulse_1.4s_ease-in-out_infinite] rounded-full bg-primary motion-reduce:animate-none" />
+            </div>
+          </div>
+        </>
+      )}
+    </AuthPageLayout>
+  );
+}
+
+export default VerifyEmailPage;

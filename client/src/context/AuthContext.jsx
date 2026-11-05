@@ -8,7 +8,8 @@
 ======================================== */
 
 // Import hooks từ React để build context
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { useCallback, useContext, useEffect, useState } from 'react';
+import { AuthContext } from './auth-context';
 
 // Import toast để hiển thị notifications
 // Dùng để show "Đăng nhập thành công", "Đăng xuất", etc.
@@ -17,15 +18,26 @@ import toast from 'react-hot-toast';
 // Import authService để call API authentication
 // File: ../services/authService.js - chứa login(), register(), logout()
 import authService from '../services/authService';
+import { restoreAuthSession, restoreAuthSessionAfterLogin } from '../services/authSessionRestore';
 
+// Import userService để update user status
+import userService from '../services/userService';
+import {
+  getToken,
+  setToken,
+  removeToken,
+  onTokenChange,
+  getResolvedBearerToken,
+} from '../utils/tokenStorage';
+import { isAutoLogoutDisabled } from '../utils/devAuth';
+import { resolveApiErrorMessage, extractApiErrorMeta } from '../utils/resolveApiErrorMessage';
+import { resolveApiBaseUrl } from '../utils/browserOrigin';
+import { applyUiRoleOverlay, clearStoredUiRole } from '../utils/uiRoleUtils';
+import { useAppStrings } from '../locales/appStrings';
+import { notifyWorkspaceClearedOnLogout } from './WorkspaceContext';
 /* ========================================
-   TẠO CONTEXT
-   - createContext(null): tạo Context với giá trị mặc định null
-   - Context này sẽ được provide ở AuthProvider
-   - Các component con dùng useAuth() để access
+   CONTEXT: đối tượng React Context được tạo trong ./auth-context.js (tách file để HMR ổn định).
 ======================================== */
-const AuthContext = createContext(null);
-
 /* ========================================
    CUSTOM HOOK: useAuth()
    Cách dùng: const { user, login, logout } = useAuth();
@@ -35,7 +47,7 @@ const AuthContext = createContext(null);
    - Chỉ cần import useAuth() - ngắn gọn hơn
    - Có error handling: báo lỗi nếu dùng ngoài Provider
 ======================================== */
-export const useAuth = () => {
+function useAuth() {
   // Lấy context value từ AuthContext
   const context = useContext(AuthContext);
   
@@ -48,7 +60,10 @@ export const useAuth = () => {
   // Return context để component có thể dùng
   // VD: { user, login, logout, isAuthenticated, ... }
   return context;
-};
+}
+
+// Export useAuth để dùng trong components
+export { useAuth };
 
 /* ========================================
    AUTHPROVIDER COMPONENT
@@ -58,22 +73,19 @@ export const useAuth = () => {
    Props:
    - children: các component con (App, Toaster, etc.)
 ======================================== */
-export const AuthProvider = ({ children }) => {
+function AuthProvider({ children }) {
+  const { t } = useAppStrings();
   /* ----- STATE MANAGEMENT ----- */
   
   // State lưu thông tin user hiện tại
-  // Default: Demo user (để test UI không cần login)
+  // Default: null (Guest role - chưa đăng nhập)
   // Khi login thành công → setUser(userData từ API)
-  const [user, setUser] = useState({
-    id: '1',                        // User ID
-    name: 'Demo User',              // Tên hiển thị
-    email: 'demo@example.com',      // Email
-    avatar: null                    // Avatar URL (null = dùng default)
-  });
+  const [user, setUser] = useState(null);
+  /** JWT đồng bộ state — React Query `enabled` phải phản ứng khi token đổi (getToken() một mình không re-render). */
+  const [accessToken, setAccessToken] = useState(() => getToken());
   
-  // State loading: true khi đang check auth hoặc đang login
-  // Dùng để hiển thị loading spinner
-  const [loading, setLoading] = useState(false);
+  // State loading: true khi đang check auth lần đầu (reload) — tránh ProtectedRoute redirect oan
+  const [loading, setLoading] = useState(true);
 
   /* ========================================
      useEffect: CHECK AUTH KHI APP KHỞI ĐỘNG
@@ -85,36 +97,33 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     // Async function để check authentication
     const checkAuth = async () => {
+      setLoading(true);
       try {
-        // Lấy token từ localStorage (được lưu khi login)
-        const token = localStorage.getItem('token');
-        
-        // Nếu có token → nghĩa là user đã login trước đó
-        if (token) {
-          // Gọi API để lấy thông tin user hiện tại
-          // authService.getCurrentUser() → GET /api/auth/me
-          const userData = await authService.getCurrentUser();
-          
-          // Set user data vào state
-          setUser(userData);
+        const { user: restored } = await restoreAuthSession();
+        if (restored) {
+          setUser(applyUiRoleOverlay(restored));
+          setAccessToken(getToken());
         }
       } catch (error) {
-        // Nếu có lỗi (token hết hạn, invalid, etc.)
+        // Chỉ xóa token khi server xác nhận 401 — lỗi mạng/503 không được logout oan
         console.error('Auth check failed:', error);
-        
-        // Xóa token lỗi khỏi localStorage
-        localStorage.removeItem('token');
+        const st = error?.response?.status ?? error?.status;
+        if (st === 401 && !isAutoLogoutDisabled()) {
+          removeToken();
+        }
       } finally {
+        setAccessToken(getToken());
         // Dù thành công hay thất bại cũng set loading = false
         setLoading(false);
       }
     };
 
-    // Hiện tại skip auth check để demo
-    // Comment lại để test UI không cần backend
-    setLoading(false);
-    // checkAuth(); // Uncomment khi có backend
+    // Chạy checkAuth khi app khởi động
+    checkAuth();
   }, []); // Empty deps → chỉ chạy 1 lần khi mount
+
+  /** Đồng bộ accessToken khi apiClient/axios xóa JWT (401) mà không qua logout(). */
+  useEffect(() => onTokenChange(() => setAccessToken(getToken())), []);
 
   /* ========================================
      LOGIN FUNCTION
@@ -136,31 +145,48 @@ export const AuthProvider = ({ children }) => {
       // Body: { email, password }
       const response = await authService.login(email, password);
       
-      // Destructure response để lấy token và user data
-      // VD response: { token: "jwt...", user: { id, name, email } }
-      const { token, user: userData } = response;
+      // Backend trả về: { success: true, data: { accessToken, refreshToken, user: {...} } }
+      // Hoặc sau interceptor: { accessToken, refreshToken, user: {...} }
+      const token = response.accessToken || response.token || response.data?.accessToken;
+      const userData = response.user || response.data?.user;
+      
+      if (!token || !userData) {
+        throw new Error('Invalid response from server');
+      }
       
       // Lưu token vào localStorage để persist login
       // Token này sẽ được gửi kèm mọi API request
-      localStorage.setItem('token', token);
-      
-      // Cập nhật user state
-      setUser(userData);
+      setToken(token);
+      setAccessToken(token);
+
+      // Xóa cache user trước — tránh CHỨC DANH / org role dính tài khoản cũ
+      try {
+        const { queryClient } = await import('../lib/queryClient');
+        queryClient.clear();
+      } catch {
+        /* ignore */
+      }
+      notifyWorkspaceClearedOnLogout();
+
+      try {
+        const merged = await restoreAuthSessionAfterLogin(userData);
+        setUser(applyUiRoleOverlay(merged));
+      } catch (e) {
+        setUser(applyUiRoleOverlay(userData));
+      }
       
       // Hiển thị toast notification thành công
-      toast.success('Đăng nhập thành công!');
+      toast.success(t('authSession.loginSuccess'));
       
-      // Return true để component biết login OK
-      return true;
+      return { ok: true };
     } catch (error) {
       // Nếu có lỗi (sai password, user không tồn tại, etc.)
       // Hiển thị error message từ API hoặc message mặc định
-      toast.error(error.message || 'Đăng nhập thất bại');
-      
-      // Return false để component biết login failed
-      return false;
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('authSession.loginFailed') }));
+      const meta = extractApiErrorMeta(error);
+      return { ok: false, errorCode: meta.errorCode || '' };
     }
-  }, []); // Empty deps vì không phụ thuộc state/props nào
+  }, [t]);
 
   /* ========================================
      REGISTER FUNCTION
@@ -176,65 +202,174 @@ export const AuthProvider = ({ children }) => {
      - userData: { name, email, password, ... }
   ======================================== */
   const register = useCallback(async (userData) => {
+    // Khai báo startTime ở ngoài try block để có thể dùng trong catch block
+    const startTime = Date.now();
+    
     try {
+      console.log('[AuthContext] Starting registration for:', userData.email);
+      console.log('[AuthContext] Registration data:', {
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        email: userData.email,
+        hasPassword: !!userData.password,
+        hasDateOfBirth: !!userData.dateOfBirth,
+      });
+      
+      // Log API endpoint để debug
+      const API_URL = resolveApiBaseUrl();
+      console.log('[AuthContext] API Base URL:', API_URL);
+      console.log('[AuthContext] Register endpoint:', `${API_URL}/auth/register`);
+      
       // Gọi API register qua authService
       // authService.register() → POST /api/auth/register
-      // Body: { name, email, password }
+      // Body: { firstName, lastName, email, password }
       const response = await authService.register(userData);
       
-      // Destructure response giống login
-      const { token, user: newUser } = response;
+      const duration = Date.now() - startTime;
+      console.log(`[AuthContext] Registration API call completed in ${duration}ms`);
+      console.log('[AuthContext] Full response:', JSON.stringify(response, null, 2));
       
-      // Lưu token để auto login
-      localStorage.setItem('token', token);
+      // Backend trả về: { success: true, message: "...", data: { email, message, emailScheduled, ... } }
+      // Sau interceptor: { success: true, message: "...", data: { email, message, emailScheduled, ... } }
       
-      // Set user mới vào state
-      setUser(newUser);
+      // Kiểm tra response structure
+      if (!response) {
+        console.error('[AuthContext] ❌ Response is null or undefined');
+        toast.error(t('authSession.noServerResponse'));
+        return false;
+      }
       
-      // Show success notification
-      toast.success('Đăng ký thành công!');
+      console.log('[AuthContext] Registration response:', {
+        success: response.success,
+        emailScheduled: response.data?.emailScheduled,
+        email: response.data?.email,
+        message: response.message,
+        hasData: !!response.data,
+      });
+      
+      // Kiểm tra success flag - hiển thị thông báo NGAY LẬP TỨC
+      if (response.success === false) {
+        const errorMessage = response.message || response.data?.message || t('authSession.registerFailed');
+        console.error('[AuthContext] ❌ Registration failed:', errorMessage);
+        toast.error(errorMessage);
+        return false;
+      }
+      
+      // Hiển thị toast đăng ký — mail xác thực chỉ gửi khi user bấm gửi lại
+      if (response.success === true) {
+        toast.success(response.message || t('authSession.registerSuccess'));
+      }
       
       return true;
     } catch (error) {
-      // Handle errors: email đã tồn tại, password yếu, etc.
-      toast.error(error.message || 'Đăng ký thất bại');
+      // Handle errors: email đã tồn tại, password yếu, timeout, network error, etc.
+      console.error('[AuthContext] ❌ Registration error:', error);
+      console.error('[AuthContext] Error type:', error?.constructor?.name);
+      console.error('[AuthContext] Error details:', {
+        message: error?.message,
+        status: error?.status,
+        data: error?.data,
+        code: error?.code,
+        response: error?.response,
+      });
+      
+      // Xử lý timeout - request vượt quá 60 giây
+      if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')) {
+        const duration = Date.now() - startTime;
+        const API_URL = resolveApiBaseUrl();
+        const message = t('authSession.registerTimeout', { url: API_URL });
+        toast.error(message, { duration: 7000 });
+        console.error('[AuthContext] ❌ Request timeout - backend may be slow or unresponsive');
+        console.error('[AuthContext] Request took:', duration, 'ms before timeout');
+        console.error('[AuthContext] API URL:', API_URL);
+        console.error('[AuthContext] Endpoint:', `${API_URL}/auth/register`);
+        console.error('[AuthContext] 💡 Hướng dẫn debug:');
+        console.error('   1. Kiểm tra API Gateway (atrium_api-gateway) đang chạy');
+        console.error('   2. Kiểm tra Auth Service có chạy: curl http://localhost:3001/health');
+        console.error('   3. Xem logs của API Gateway và Auth Service');
+        return false;
+      }
+      
+      // Xử lý empty response - server không trả về response
+      // Thường xảy ra khi backend crash hoặc không chạy
+      if (error?.code === 'ERR_EMPTY_RESPONSE' || error?.message?.includes('EMPTY_RESPONSE')) {
+        const message = t('authSession.serverNoResponseDetail');
+        toast.error(message, { duration: 5000 });
+        console.error('[AuthContext] ❌ Empty response - backend may be down or crashed');
+        console.error('[AuthContext] Error occurred after waiting:', Date.now() - startTime, 'ms');
+        return false;
+      }
+
+      // Xử lý network error
+      if (error?.code === 'ERR_NETWORK' || error?.message?.includes('Network Error')) {
+        toast.error(t('api.networkError'));
+        return false;
+      }
+      
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('authSession.registerFailed') }));
       return false;
     }
-  }, []);
+  }, [t]);
 
   /* ========================================
      LOGOUT FUNCTION
      Đăng xuất user
      
      Luồng:
-     1. Call API logout (invalidate token trên server)
-     2. Xóa token khỏi localStorage
-     3. Set user = null
-     4. Socket sẽ disconnect (ở SocketContext)
+     1. Update status to offline
+     2. Call API logout (invalidate token trên server)
+     3. Xóa token khỏi localStorage
+     4. Set user = null
+     5. Socket sẽ disconnect (ở SocketContext)
   ======================================== */
-  const logout = useCallback(async () => {
+  const logout = useCallback(async (options = {}) => {
+    const silent = Boolean(options?.silent);
     try {
+      // Update status to 'offline' trước khi logout
+      try {
+        await userService.updateStatus('offline');
+      } catch (statusError) {
+        console.warn('Failed to update status to offline:', statusError);
+        // Vẫn tiếp tục logout dù status update fail
+      }
+
       // Gọi API logout (optional - để invalidate token server-side)
       // authService.logout() → POST /api/auth/logout
       await authService.logout();
       
-      // Xóa token khỏi localStorage
-      localStorage.removeItem('token');
+      removeToken();
+      setAccessToken(null);
       
       // Set user = null → app sẽ redirect về login
       setUser(null);
-      
-      // Show logout notification
-      toast.success('Đăng xuất thành công!');
+      clearStoredUiRole();
+      notifyWorkspaceClearedOnLogout();
+      try {
+        const { queryClient } = await import('../lib/queryClient');
+        queryClient.clear();
+      } catch {
+        /* ignore */
+      }
+      if (!silent) toast.success(t('authSession.logoutSuccess'));
     } catch (error) {
       // Nếu API lỗi vẫn logout local
       console.error('Logout error:', error);
       
       // Force logout: xóa token và user dù API fail
-      localStorage.removeItem('token');
+      removeToken();
+      setAccessToken(null);
       setUser(null);
+      clearStoredUiRole();
+      notifyWorkspaceClearedOnLogout();
+      try {
+        const { queryClient } = await import('../lib/queryClient');
+        queryClient.clear();
+      } catch {
+        /* ignore */
+      }
+      if (!silent) toast.success(t('authSession.logoutSuccess'));
     }
-  }, []);
+  }, [t]);
 
   /* ========================================
      UPDATE USER FUNCTION
@@ -263,14 +398,13 @@ export const AuthProvider = ({ children }) => {
   ======================================== */
   const value = {
     user,              // User hiện tại: { id, name, email, avatar }
+    accessToken,       // JWT hiện tại (state) — dùng cho React Query enabled
     loading,           // Loading state: true/false
     login,             // Function: login(email, password)
     register,          // Function: register(userData)
     logout,            // Function: logout()
     updateUser,        // Function: updateUser(userData)
-    isAuthenticated: !!user,  // Boolean: true nếu có user (đã login)
-                              // !! convert object → boolean
-                              // null → false, object → true
+    isAuthenticated: Boolean(user && getResolvedBearerToken()),
   };
 
   /* ========================================
@@ -279,7 +413,10 @@ export const AuthProvider = ({ children }) => {
      Pass value object xuống mọi component con
   ======================================== */
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-};
+}
+
+// AuthContext: re-export từ ./auth-context.js (override cục bộ trong LandingDemoAuth)
+export { AuthProvider, AuthContext };
 
 /* ========================================
    CÁCH DÙNG TRONG COMPONENT:

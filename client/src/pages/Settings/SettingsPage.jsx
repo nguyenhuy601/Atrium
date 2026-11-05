@@ -1,471 +1,822 @@
-﻿import { useState } from 'react';
-import NavigationSidebar from '../../components/Layout/NavigationSidebar';
-import { GlassCard, GradientButton, Toast } from '../../components/Shared';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { ConfirmDialog, GradientButton } from '../../components/Shared';
+import roleAPI from '../../services/api/roleAPI';
+import userService from '../../services/userService';
+import authService from '../../services/authService';
+import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
+import { useAppStrings } from '../../locales/appStrings';
+import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
+import { mergeAuthUserFromProfile, unwrapApiData } from '../../utils/helpers';
+import { pickAvatarValue } from '../../utils/avatarDisplay';
+import { invalidateProtectedAvatarCache } from '../../utils/protectedMediaFetch';
+import { getJwtEmail } from '../../utils/tokenStorage';
+import UserAvatar from '../../components/Shared/UserAvatar';
+import { FIGMA_PAGE_SHELL } from '../../components/Layout/figmaPageClasses';
+import SettingsFigmaLayout from '../../components/Settings/SettingsFigmaLayout';
+import useUiRole from '../../hooks/useUiRole';
+import { settingsTabsForRole } from '../../config/roleMeta';
+import SettingsRbacMatrix from '../../components/Settings/SettingsRbacMatrix';
+import SettingsApiKeysPanel from '../../components/Settings/SettingsApiKeysPanel';
+import CapabilityProfilePanel from '../../components/Settings/CapabilityProfilePanel';
+import { FIGMA_SETTINGS_CARD, FIGMA_SETTINGS_INPUT } from '../../components/Settings/figmaSettingsClasses';
+import { hasBackendCapability } from '../../config/backendCapabilities';
+import { useOrganizationsMy } from '../../hooks/queries/useOrganizationsMy';
+import useUserMe from '../../hooks/useUserMe';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../../lib/queryKeys';
+
+const isValidMongoObjectId = (s) =>
+  typeof s === 'string' && /^[a-fA-F0-9]{24}$/.test(s);
+
+const NOTIF_LABEL_KEYS = {
+  'new-message': 'notifNewMsg',
+  mention: 'notifMention',
+  'new-task': 'notifNewTask',
+  deadline: 'notifDeadline',
+  email: 'notifEmail',
+  'mobile-push': 'notifPush',
+};
+
+const SHOW_ROLE_DEBUG_SWITCHER =
+  import.meta.env.DEV && import.meta.env.VITE_ENABLE_UI_ROLE_DEBUG === 'true';
 
 function SettingsPage() {
+  const { t, locale } = useAppStrings();
+  const { user, updateUser } = useAuth();
+  const queryClient = useQueryClient();
+  const { me: meProfile } = useUserMe({ enabled: Boolean(user?.id || user?.userId || user?._id) });
+  const orgsQuery = useOrganizationsMy({ enabled: Boolean(user) });
+  const { isDarkMode, toggleTheme, fontScale, setFontScale } = useTheme();
   const [activeTab, setActiveTab] = useState('general');
-  const [toast, setToast] = useState(null);
+  const { role: uiRole, meta: uiRoleMeta } = useUiRole();
+  const figmaSettingsTabs = useMemo(
+    () =>
+      settingsTabsForRole(uiRole).map((tab) => ({
+        ...tab,
+        label: t(`settingsPage.figmaTab${tab.id.charAt(0).toUpperCase()}${tab.id.slice(1)}`),
+      })),
+    [uiRole, t]
+  );
+  const [searchParams] = useSearchParams();
+  const [figmaTab, setFigmaTab] = useState('profile');
+  useEffect(() => {
+    const tab = String(searchParams.get('tab') || '').trim();
+    if (tab === 'capability') setFigmaTab('capability');
+    // Legacy tabs đã ẩn khỏi sidebar Cài đặt
+    if (tab === 'overview' || tab === 'security') setFigmaTab('profile');
+  }, [searchParams]);
+  const [apiKeyDeleteConfirm, setApiKeyDeleteConfirm] = useState(null);
+  const [roleDeleteConfirm, setRoleDeleteConfirm] = useState(null);
   const [userRole, setUserRole] = useState('admin'); // 'admin', 'manager', 'user'
+  const [organizationForm, setOrganizationForm] = useState({
+    name: 'Atrium Tech',
+    description: 'Leading technology company focused on communication solutions.',
+    website: 'https://atrium.com',
+    contactEmail: 'contact@atrium.com',
+  });
+  const [userProfileForm, setUserProfileForm] = useState({
+    fullName: '',
+    phone: '',
+    email: '',
+  });
+  const [apiKeys, setApiKeys] = useState([
+    { id: 'k1', name: 'Production API Key', created: '15/12/2025', lastUsed: '2h ago', value: 'vh_prod_xxxxxxxxxxxx' },
+    { id: 'k2', name: 'Development API Key', created: '10/01/2026', lastUsed: '1d ago', value: 'vh_dev_xxxxxxxxxxxx' },
+  ]);
+  const [integrations, setIntegrations] = useState([
+    { id: 'slack', name: 'Slack', icon: '💬', connected: true, color: 'from-cyan-600 to-teal-600' },
+    { id: 'gdrive', name: 'Google Drive', icon: '📁', connected: false, color: 'from-blue-500 to-cyan-500' },
+    { id: 'github', name: 'GitHub', icon: '🐙', connected: true, color: 'from-green-500 to-emerald-500' },
+    { id: 'jira', name: 'Jira', icon: '📊', connected: false, color: 'from-orange-500 to-yellow-500' },
+  ]);
+  const [notificationSettings, setNotificationSettings] = useState([
+    { id: 'new-message', checked: true },
+    { id: 'mention', checked: true },
+    { id: 'new-task', checked: true },
+    { id: 'deadline', checked: true },
+    { id: 'email', checked: false },
+    { id: 'mobile-push', checked: true },
+  ]);
+  const [privacySettings, setPrivacySettings] = useState({
+    onlineStatus: 'everyone',
+    directMessagePermission: 'everyone',
+  });
+  const [avatarUrl, setAvatarUrl] = useState('');
+  const [avatarCacheBust, setAvatarCacheBust] = useState(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [roles, setRoles] = useState([
+    { id: 'r1', name: 'Administrator', members: 3, permissions: 'Full access', color: 'from-red-500 to-orange-500', icon: '👑' },
+    { id: 'r2', name: 'Department lead', members: 4, permissions: 'Manage department', color: 'from-cyan-600 to-teal-600', icon: '👔' },
+    { id: 'r3', name: 'Team lead', members: 8, permissions: 'Manage team', color: 'from-blue-500 to-cyan-500', icon: '👨‍💼' },
+    { id: 'r4', name: 'Member', members: 30, permissions: 'Basic', color: 'from-green-500 to-emerald-500', icon: '👷' },
+  ]);
+  const [roleEditorOpen, setRoleEditorOpen] = useState(false);
+  const [editingRoleId, setEditingRoleId] = useState(null);
+  const [roleLoading, setRoleLoading] = useState(false);
+  /** Mongo ObjectId tổ chức đầu tiên — dùng cho roles API (không dùng placeholder kiểu org_123). */
+  const [roleContextOrganizationId, setRoleContextOrganizationId] = useState(null);
+  const [roleDraft, setRoleDraft] = useState({
+    name: '',
+    permissions: '',
+    members: 0,
+    color: 'from-cyan-600 to-teal-600',
+    icon: '🧩'
+  });
 
-  const showToast = (message, type = "success") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+  /* ----- LOAD ROLES ON MOUNT ----- */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setRoleLoading(true);
+        const orgs = Array.isArray(orgsQuery.data) ? orgsQuery.data : [];
+        const first = orgs[0];
+        const oid = first?._id ?? first?.id;
+        const idStr = oid != null ? String(oid) : '';
+        if (!isValidMongoObjectId(idStr)) {
+          if (!cancelled) setRoleContextOrganizationId(null);
+          return;
+        }
+        if (!cancelled) setRoleContextOrganizationId(idStr);
+        const response = await roleAPI.getRolesByOrganization(idStr);
+        const raw = response?.data ?? response;
+        const data = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : [];
+        if (!cancelled && data.length > 0) setRoles(data);
+      } catch (err) {
+        if (import.meta.env.DEV) console.warn('Settings: roles fetch skipped', err?.message);
+      } finally {
+        if (!cancelled) setRoleLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [orgsQuery.data]);
+
+  useEffect(() => {
+    const orgData = localStorage.getItem('settings:organization');
+    const userProfileData = localStorage.getItem('settings:userProfile');
+    const apiKeyData = localStorage.getItem('settings:apiKeys');
+    const integrationData = localStorage.getItem('settings:integrations');
+    const notificationData = localStorage.getItem('settings:notifications');
+    const privacyData = localStorage.getItem('settings:privacy');
+    const avatarData = localStorage.getItem('settings:avatar');
+
+    if (orgData) setOrganizationForm(JSON.parse(orgData));
+    if (userProfileData) {
+      try {
+        const parsed = JSON.parse(userProfileData);
+        setUserProfileForm((prev) => ({
+          ...prev,
+          fullName:
+            typeof parsed?.fullName === 'string' && parsed.fullName.trim()
+              ? parsed.fullName.trim()
+              : prev.fullName,
+          phone:
+            typeof parsed?.phone === 'string' && parsed.phone.trim()
+              ? parsed.phone.trim()
+              : prev.phone,
+          email:
+            typeof parsed?.email === 'string' && parsed.email.trim()
+              ? parsed.email.trim()
+              : prev.email || getJwtEmail(),
+        }));
+      } catch {
+        /* ignore */
+      }
+    }
+    if (apiKeyData) setApiKeys(JSON.parse(apiKeyData));
+    if (integrationData) setIntegrations(JSON.parse(integrationData));
+    if (notificationData) {
+      try {
+        const parsed = JSON.parse(notificationData);
+        if (Array.isArray(parsed)) {
+          setNotificationSettings(parsed.map((x) => ({ id: x.id, checked: Boolean(x.checked) })));
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (privacyData) {
+      try {
+        const p = JSON.parse(privacyData);
+        const mapPrivacy = (v, keys) => {
+          if (keys.includes(v)) return v;
+          if (v === 'M\u1ecdi ng\u01b0\u1eddi' || v === 'everyone') return 'everyone';
+          if (v === 'Ch\u1ec9 \u0111\u1ed3ng nghi\u1ec7p' || v === 'colleagues') return 'colleagues';
+          if (v === 'Kh\u00f4ng ai' || v === 'nobody') return 'nobody';
+          return 'everyone';
+        };
+        setPrivacySettings({
+          onlineStatus: mapPrivacy(p.onlineStatus, ['everyone', 'colleagues', 'nobody']),
+          directMessagePermission: mapPrivacy(p.directMessagePermission, ['everyone', 'colleagues']),
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+    const storedAvatar = pickAvatarValue(avatarData);
+    if (storedAvatar && !storedAvatar.startsWith('data:')) setAvatarUrl(storedAvatar);
+  }, []);
+
+  const fetchRoles = async () => {
+    try {
+      setRoleLoading(true);
+      await orgsQuery.refetch();
+      const orgs = Array.isArray(orgsQuery.data) ? orgsQuery.data : [];
+      const first = orgs[0];
+      const oid = first?._id ?? first?.id;
+      const idStr = oid != null ? String(oid) : '';
+      if (!isValidMongoObjectId(idStr)) {
+        setRoleContextOrganizationId(null);
+        return;
+      }
+      setRoleContextOrganizationId(idStr);
+      const response = await roleAPI.getRolesByOrganization(idStr);
+      const raw = response?.data ?? response;
+      const data = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : [];
+      if (data.length > 0) setRoles(data);
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('Settings: roles fetch skipped', err?.message);
+    } finally {
+      setRoleLoading(false);
+    }
   };
 
-  // Tabs dành cho Admin
-  const adminTabs = [
-    { id: 'general', label: 'Tổng Quan', icon: '⚙️' },
-    { id: 'roles', label: 'Vai Trò & Quyền', icon: '🔐' },
-    { id: 'security', label: 'Bảo Mật', icon: '🛡️' },
-    { id: 'integrations', label: 'Tích Hợp', icon: '🔗' },
-    { id: 'billing', label: 'Thanh Toán', icon: '💳' },
-    { id: 'audit', label: 'Nhật Ký', icon: '📜' }
-  ];
+  useEffect(() => {
+    if (!user) return;
+    setUserProfileForm((prev) => ({
+      ...prev,
+      fullName:
+        user?.displayName || user?.fullName || user?.name || prev.fullName || t('settingsPage.userFallback'),
+      phone: user?.phone || user?.phoneNumber || user?.mobile || prev.phone || '',
+      email: user?.email || prev.email || getJwtEmail() || '',
+    }));
+  }, [user, t]);
 
-  // Tabs dành cho User (Nhân viên/Quản lý)
-  const userTabs = [
-    { id: 'profile', label: 'Hồ Sơ Cá Nhân', icon: '👤' },
-    { id: 'notifications', label: 'Thông Báo', icon: '🔔' },
-    { id: 'privacy', label: 'Quyền Riêng Tư', icon: '🔒' },
-    { id: 'appearance', label: 'Giao Diện', icon: '🎨' }
-  ];
+  /** Bootstrap BFF không gửi phone — hydrate từ shared GET /users/me */
+  useEffect(() => {
+    if (!meProfile || typeof meProfile !== 'object') return;
+    const phoneValue = String(meProfile.phone || meProfile.phoneNumber || meProfile.mobile || '').trim();
+    setUserProfileForm((prev) => ({
+      ...prev,
+      fullName: meProfile.displayName || meProfile.fullName || meProfile.name || prev.fullName,
+      phone:
+        phoneValue ||
+        prev.phone ||
+        user?.phone ||
+        user?.phoneNumber ||
+        user?.mobile ||
+        '',
+      email: meProfile.email || prev.email || user?.email || getJwtEmail() || '',
+    }));
+    updateUser(
+      mergeAuthUserFromProfile(user, {
+        ...meProfile,
+        ...(phoneValue ? { phone: phoneValue } : {}),
+      })
+    );
+    const fromMe = pickAvatarValue(meProfile.avatar || meProfile.avatarUrl);
+    if (fromMe) setAvatarUrl(fromMe);
+  }, [meProfile]);
+
+  useEffect(() => {
+    localStorage.setItem('settings:apiKeys', JSON.stringify(apiKeys));
+  }, [apiKeys]);
+
+  useEffect(() => {
+    localStorage.setItem('settings:integrations', JSON.stringify(integrations));
+  }, [integrations]);
+
+  useEffect(() => {
+    localStorage.setItem('settings:notifications', JSON.stringify(notificationSettings));
+  }, [notificationSettings]);
+
+  useEffect(() => {
+    localStorage.setItem('settings:privacy', JSON.stringify(privacySettings));
+  }, [privacySettings]);
+
+  useEffect(() => {
+    if (!avatarUrl || String(avatarUrl).startsWith('data:')) return;
+    localStorage.setItem('settings:avatar', avatarUrl);
+  }, [avatarUrl]);
+
+  useEffect(() => {
+    const fromUser = pickAvatarValue(user?.avatar || user?.avatarUrl);
+    if (fromUser) setAvatarUrl(fromUser);
+  }, [user?.avatar, user?.avatarUrl]);
+
+  useEffect(() => {
+    const nextTab = userRole === 'admin' ? 'general' : 'profile';
+    setActiveTab(nextTab);
+  }, [userRole]);
+
+  const handleSaveOrganization = () => {
+    localStorage.setItem('settings:organization', JSON.stringify(organizationForm));
+    toast.success(t('settingsPage.toastSaveOrg'));
+  };
+
+  const handleSaveUserProfile = async () => {
+    if (profileSaving) return;
+    const nextEmail = String(userProfileForm.email || '').trim().toLowerCase();
+    const currentEmail = String(user?.email || '').trim().toLowerCase();
+    const payload = {
+      displayName: String(userProfileForm.fullName || '').trim(),
+      phone: String(userProfileForm.phone || '').trim(),
+    };
+    setProfileSaving(true);
+    try {
+      if (nextEmail && nextEmail !== currentEmail) {
+        await authService.requestEmailChange(nextEmail);
+      }
+      const res = await userService.updateProfile(payload);
+      const saved = unwrapApiData(res) || res?.data || res;
+      updateUser(mergeAuthUserFromProfile(user, { ...payload, ...saved }));
+      queryClient.setQueryData(queryKeys.user.me(), (prev) =>
+        prev && typeof prev === 'object' ? { ...prev, ...payload, ...saved } : saved
+      );
+      setUserProfileForm((prev) => ({
+        ...prev,
+        fullName: payload.displayName || prev.fullName,
+        phone: saved?.phone || payload.phone || prev.phone,
+      }));
+      localStorage.setItem('settings:userProfile', JSON.stringify(userProfileForm));
+      if (nextEmail && nextEmail !== currentEmail) {
+        toast.success(t('settingsPage.toastEmailChangeRequested'));
+      } else {
+        toast.success(t('settingsPage.toastSaveProfile'));
+      }
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('errors.generic') }));
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const handleCopyApiKey = async (keyValue) => {
+    try {
+      await navigator.clipboard.writeText(keyValue);
+      toast.success(t('settingsPage.toastCopyKey'));
+    } catch (error) {
+      toast.error(t('settingsPage.toastCopyFail'));
+    }
+  };
+
+  const requestDeleteApiKey = (keyId) => {
+    setApiKeyDeleteConfirm(keyId);
+  };
+
+  const confirmDeleteApiKey = () => {
+    if (!apiKeyDeleteConfirm) return;
+    setApiKeys((prev) => prev.filter((item) => item.id !== apiKeyDeleteConfirm));
+    toast.success(t('settingsPage.toastDeleteKey'));
+  };
+
+  const handleCreateApiKey = () => {
+    const id = `k${Date.now()}`;
+    const keyValue = `vh_${id}_${Math.random().toString(36).slice(2, 10)}`;
+    setApiKeys((prev) => [
+      {
+        id,
+        name: t('settingsPage.apiKeyGeneratedName', { n: prev.length + 1 }),
+        created: new Date().toLocaleDateString(locale === 'en' ? 'en-US' : 'vi-VN'),
+        lastUsed: t('settingsPage.apiKeyNeverUsed'),
+        value: keyValue,
+      },
+      ...prev,
+    ]);
+    toast.success(t('settingsPage.toastCreateKey'));
+  };
+
+  const handleToggleIntegration = (integrationId) => {
+    setIntegrations((prev) => prev.map((item) => (
+      item.id === integrationId ? { ...item, connected: !item.connected } : item
+    )));
+  };
+
+  const handleToggleNotificationSetting = (settingId) => {
+    setNotificationSettings((prev) => prev.map((item) => (
+      item.id === settingId ? { ...item, checked: !item.checked } : item
+    )));
+  };
+
+  const handleAvatarChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!String(file.type || '').startsWith('image/')) {
+      toast.error(t('profileModal.imageOnly'));
+      return;
+    }
+    const profileUserId = user?.userId || user?.id || user?._id;
+    try {
+      setAvatarUploading(true);
+      const res = await userService.uploadAvatar(file);
+      const updated = unwrapApiData(res);
+      const nextUrl = pickAvatarValue(updated?.avatar || updated?.avatarUrl);
+      if (!nextUrl) {
+        toast.error(t('profileModal.avatarUrlMissing'));
+        return;
+      }
+      const bust = Date.now();
+      invalidateProtectedAvatarCache({ userId: profileUserId, cacheBust: bust });
+      setAvatarCacheBust(bust);
+      setAvatarUrl(nextUrl);
+      updateUser(mergeAuthUserFromProfile(user, { ...updated, avatar: nextUrl }, { avatarBust: bust }));
+      queryClient.invalidateQueries({ queryKey: queryKeys.friends.all });
+      toast.success(t('settingsPage.toastAvatar'));
+    } catch (error) {
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('profileModal.avatarUploadFail') }));
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  const handleExportAuditLog = () => {
+    const content = [
+      t('settingsPage.auditExportHeader'),
+      t('settingsPage.auditExportedAt', { iso: new Date().toISOString() }),
+      '---',
+      t('settingsPage.auditLog1'),
+      t('settingsPage.auditLog2'),
+      t('settingsPage.auditLog3'),
+    ].join('\n');
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `atrium-audit-${Date.now()}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success(t('settingsPage.toastExportAudit'));
+  };
+
+  const handleExportInvoice = () => {
+    const content = [
+      t('settingsPage.invoiceExportHeader'),
+      t('settingsPage.invoiceGeneratedAt', { iso: new Date().toISOString() }),
+      t('settingsPage.invoicePlanLine'),
+      t('settingsPage.invoiceMembersLine'),
+      t('settingsPage.invoiceStorageLine'),
+      t('settingsPage.invoiceMonthlyFeeLine'),
+    ].join('\n');
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `atrium-invoice-${Date.now()}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success(t('settingsPage.toastExportInvoice'));
+  };
+
+  const handleContactBilling = () => {
+    window.location.href = `mailto:billing@atrium.com?subject=${encodeURIComponent(t('settingsPage.billingMailSubject'))}`;
+  };
+
+  const adminTabs = useMemo(
+    () => [
+      { id: 'general', label: t('settingsPage.tabGeneral'), icon: '⚙️' },
+      { id: 'roles', label: t('settingsPage.tabRoles'), icon: '🔐' },
+      { id: 'security', label: t('settingsPage.tabSecurity'), icon: '🛡️' },
+      ...(hasBackendCapability('integrations') ? [{ id: 'integrations', label: t('settingsPage.tabIntegrations'), icon: '🔗' }] : []),
+      ...(hasBackendCapability('billingInvoices') ? [{ id: 'billing', label: t('settingsPage.tabBilling'), icon: '💳' }] : []),
+      ...(hasBackendCapability('auditLogs') ? [{ id: 'audit', label: t('settingsPage.tabAudit'), icon: '📜' }] : []),
+    ],
+    [t]
+  );
+
+  const userTabs = useMemo(
+    () => [
+      { id: 'profile', label: t('settingsPage.tabProfile'), icon: '👤' },
+      { id: 'notifications', label: t('settingsPage.tabNotifications'), icon: '🔔' },
+      { id: 'privacy', label: t('settingsPage.tabPrivacy'), icon: '🔒' },
+      { id: 'appearance', label: t('settingsPage.tabAppearance'), icon: '🎨' },
+    ],
+    [t]
+  );
 
   const currentTabs = userRole === 'admin' ? adminTabs : userTabs;
 
+  const openCreateRoleEditor = () => {
+    setEditingRoleId(null);
+    setRoleDraft({
+      name: '',
+      permissions: '',
+      members: 0,
+      color: 'from-cyan-600 to-teal-600',
+      icon: '🧩'
+    });
+    setRoleEditorOpen(true);
+  };
+
+  const openEditRoleEditor = (role) => {
+    setEditingRoleId(role.id);
+    setRoleDraft({
+      name: role.name,
+      permissions: role.permissions,
+      members: role.members,
+      color: role.color,
+      icon: role.icon
+    });
+    setRoleEditorOpen(true);
+  };
+
+  const handleSaveRole = async () => {
+    if (!roleDraft.name.trim() || !roleDraft.permissions.trim()) {
+      toast.error(t('settingsPage.toastRoleFill'));
+      return;
+    }
+
+    try {
+      setRoleLoading(true);
+      if (editingRoleId) {
+        // Update existing role
+        if (!roleContextOrganizationId) {
+          toast.error(t('settingsPage.toastRoleNoOrg'));
+          return;
+        }
+        await roleAPI.updateRole(editingRoleId, {
+          name: roleDraft.name.trim(),
+          permissions: roleDraft.permissions.trim(),
+          color: roleDraft.color,
+          icon: roleDraft.icon,
+          serverId: roleContextOrganizationId,
+          organizationId: roleContextOrganizationId
+        });
+        setRoles((prev) => prev.map((role) => (
+          role.id === editingRoleId
+            ? { ...role, ...roleDraft, members: Number(roleDraft.members) || 0 }
+            : role
+        )));
+        toast.success(t('settingsPage.toastRoleUpdated'));
+      } else {
+        if (!roleContextOrganizationId) {
+          toast.error(t('settingsPage.toastRoleNoOrg'));
+          return;
+        }
+        const response = await roleAPI.clonePermissionGroup({
+          organizationId: roleContextOrganizationId,
+          serverId: roleContextOrganizationId,
+          templateKey: 'viewer',
+          specialization: 'Other',
+          allowOtherName: true,
+          otherName: roleDraft.name.trim(),
+          createRole: true,
+          color: roleDraft.color,
+        });
+        const wrapped = response?.data ?? response;
+        const payload = wrapped?.data ?? wrapped;
+        const newRole = payload?.role || payload;
+        setRoles((prev) => [
+          ...prev,
+          {
+            id: newRole?._id || newRole?.id || `r${Date.now()}`,
+            name: roleDraft.name,
+            permissions: roleDraft.permissions,
+            members: 0,
+            color: roleDraft.color,
+            icon: roleDraft.icon
+          }
+        ]);
+        toast.success(t('settingsPage.toastRoleCreated'));
+      }
+      setRoleEditorOpen(false);
+    } catch (error) {
+      console.error('Error saving role:', error);
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('settingsPage.toastRoleErr') }));
+    } finally {
+      setRoleLoading(false);
+    }
+  };
+
+  const requestDeleteRole = (roleId) => {
+    setRoleDeleteConfirm(roleId);
+  };
+
+  const confirmDeleteRole = async () => {
+    const roleId = roleDeleteConfirm;
+    if (!roleId || !roleContextOrganizationId) return;
+    try {
+      setRoleLoading(true);
+      await roleAPI.deleteRole(roleId, roleContextOrganizationId);
+      setRoles((prev) => prev.filter((role) => role.id !== roleId));
+      toast.success(t('settingsPage.toastRoleDeleted'));
+    } catch (error) {
+      console.error('Error deleting role:', error);
+      toast.error(resolveApiErrorMessage(error, { t, fallback: t('settingsPage.toastRoleDeleteErr') }));
+    } finally {
+      setRoleLoading(false);
+    }
+  };
+
+  const auditEntries = useMemo(() => [], []);
+
+  const suiteSettingsBody = (
+    <SettingsFigmaLayout
+      activeTab={figmaTab}
+      onTabChange={setFigmaTab}
+      userRoleLabel={uiRoleMeta.label}
+      tabs={figmaSettingsTabs}
+    >
+      {figmaTab === 'profile' && (
+        <div className="max-w-xl space-y-6">
+          <div>
+            <h2 className="mb-1 font-display text-xl font-bold text-foreground">{t('settingsPage.profileTitle')}</h2>
+            <p className="text-sm text-muted-foreground">{t('settingsPage.pageSubtitleUser')}</p>
+          </div>
+          <div className={`${FIGMA_SETTINGS_CARD} space-y-4`}>
+            <div className="flex items-center gap-5">
+              <UserAvatar
+                avatar={avatarUrl || user?.avatar || null}
+                userId={user?.userId || user?.id || user?._id}
+                name={userProfileForm.fullName || user?.displayName || user?.name}
+                size="2xl"
+                cacheBust={avatarCacheBust || user?.avatarCacheKey || undefined}
+              />
+              <label className={`inline-flex ${avatarUploading ? 'pointer-events-none opacity-60' : 'cursor-pointer'}`}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={avatarUploading}
+                  onChange={handleAvatarChange}
+                />
+                <span className="motion-safe:transition-colors motion-reduce:transition-none rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">
+                  {avatarUploading ? t('profileModal.changeAvatarUploading') : t('settingsPage.changeAvatar')}
+                </span>
+              </label>
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-foreground">{t('settingsPage.fullName')}</label>
+              <input
+                type="text"
+                value={userProfileForm.fullName}
+                onChange={(e) => setUserProfileForm((prev) => ({ ...prev, fullName: e.target.value }))}
+                className={`${FIGMA_SETTINGS_INPUT} motion-safe:transition-colors motion-reduce:transition-none`}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-foreground">{t('settingsPage.email')}</label>
+                <input
+                  type="email"
+                  value={userProfileForm.email}
+                  onChange={(e) => setUserProfileForm((prev) => ({ ...prev, email: e.target.value }))}
+                  className={`${FIGMA_SETTINGS_INPUT} motion-safe:transition-colors motion-reduce:transition-none`}
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-foreground">{t('settingsPage.phone')}</label>
+                <input
+                  type="tel"
+                  value={userProfileForm.phone}
+                  onChange={(e) => setUserProfileForm((prev) => ({ ...prev, phone: e.target.value }))}
+                  className={`${FIGMA_SETTINGS_INPUT} motion-safe:transition-colors motion-reduce:transition-none`}
+                />
+              </div>
+            </div>
+            <GradientButton
+              variant="primary"
+              onClick={handleSaveUserProfile}
+              aria-busy={profileSaving}
+              disabled={profileSaving}
+              className="motion-safe:transition-colors motion-reduce:transition-none"
+            >
+              {t('settingsPage.saveChanges')}
+            </GradientButton>
+          </div>
+        </div>
+      )}
+
+      {figmaTab === 'capability' && <CapabilityProfilePanel />}
+
+      {figmaTab === 'notifications' && (
+        <div className="max-w-xl space-y-5">
+          <h2 className="font-display text-xl font-bold text-foreground">{t('settingsPage.notifSettingsTitle')}</h2>
+          <div className={`${FIGMA_SETTINGS_CARD} space-y-3`}>
+            {notificationSettings.map((setting) => (
+              <label key={setting.id} className="flex cursor-pointer items-center justify-between rounded-lg border border-border bg-background p-3">
+                <span className="text-sm text-foreground">{t(`settingsPage.${NOTIF_LABEL_KEYS[setting.id]}`)}</span>
+                <input
+                  type="checkbox"
+                  checked={setting.checked}
+                  onChange={() => handleToggleNotificationSetting(setting.id)}
+                  className="h-5 w-5 rounded"
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {figmaTab === 'api' && (
+        <SettingsApiKeysPanel
+          apiKeys={apiKeys}
+          onCreate={handleCreateApiKey}
+          onCopy={handleCopyApiKey}
+          onDelete={requestDeleteApiKey}
+          title={t('settingsPage.apiKeysTitle')}
+          description={t('settingsPage.apiKeysDesc')}
+          createLabel={t('settingsPage.createApiKey')}
+        />
+      )}
+
+      {figmaTab === 'organization' && (
+        <div className="max-w-xl space-y-5">
+          <div>
+            <h2 className="mb-1 font-display text-xl font-bold text-foreground">{t('settingsPage.orgInfoTitle')}</h2>
+            <p className="text-sm text-muted-foreground">{t('settingsPage.pageSubtitleOrg')}</p>
+          </div>
+          <div className={`${FIGMA_SETTINGS_CARD} space-y-4`}>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-foreground">{t('settingsPage.orgName')}</label>
+              <input
+                type="text"
+                value={organizationForm.name}
+                onChange={(e) => setOrganizationForm((prev) => ({ ...prev, name: e.target.value }))}
+                className={FIGMA_SETTINGS_INPUT}
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-sm font-medium text-foreground">{t('settingsPage.orgDesc')}</label>
+              <textarea
+                className={`${FIGMA_SETTINGS_INPUT} h-auto min-h-[80px] py-2`}
+                rows={3}
+                value={organizationForm.description}
+                onChange={(e) => setOrganizationForm((prev) => ({ ...prev, description: e.target.value }))}
+              />
+            </div>
+            <GradientButton variant="primary" onClick={handleSaveOrganization}>
+              {t('settingsPage.saveChanges')}
+            </GradientButton>
+          </div>
+        </div>
+      )}
+
+      {figmaTab === 'rbac' && <SettingsRbacMatrix />}
+
+      {figmaTab === 'appearance' && (
+        <div className="max-w-xl space-y-5">
+          <h2 className="font-display text-xl font-bold text-foreground">{t('settingsPage.appearanceTitle')}</h2>
+          <div className={`${FIGMA_SETTINGS_CARD} space-y-4`}>
+            <label className="block text-sm font-medium text-foreground">{t('settingsPage.themeLabel')}</label>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { id: 'dark', name: t('settingsPage.themeDark'), icon: '🌙' },
+                { id: 'light', name: t('settingsPage.themeLight'), icon: '☀️' },
+              ].map((theme) => {
+                const selected = theme.id === 'dark' ? isDarkMode : !isDarkMode;
+                return (
+                  <button
+                    key={theme.id}
+                    type="button"
+                    onClick={() => {
+                      if (theme.id === 'dark' && !isDarkMode) toggleTheme();
+                      if (theme.id === 'light' && isDarkMode) toggleTheme();
+                      toast.success(t('settingsPage.toastTheme', { name: theme.name }));
+                    }}
+                    className={`rounded-xl border-2 p-4 text-left transition ${
+                      selected ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-muted'
+                    }`}
+                  >
+                    <div className="mb-2 text-3xl">{theme.icon}</div>
+                    <div className="font-semibold text-foreground">{theme.name}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </SettingsFigmaLayout>
+  );
+
   return (
     <>
-      <div className="min-h-screen flex">
-        <NavigationSidebar currentPage="Cài Đặt" />
-        <div className="flex-1 p-6 overflow-y-auto overflow-x-visible scrollbar-gradient">
-        {/* Role Switcher for demo */}
-        <div className="mb-6 glass-strong p-4 rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-bold text-white mb-1">Chế độ cài đặt</h2>
-              <p className="text-sm text-gray-400">Demo: Chọn vai trò để xem cài đặt tương ứng</p>
-            </div>
-            <div className="flex gap-2">
-              <button 
-                onClick={() => setUserRole('admin')}
-                className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                  userRole === 'admin'
-                    ? 'bg-gradient-to-r from-red-500 to-orange-500 text-white'
-                    : 'glass hover:bg-white/10 text-gray-400'
-                }`}
-              >
-                👑 Quản Trị Viên
-              </button>
-              <button 
-                onClick={() => setUserRole('manager')}
-                className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                  userRole === 'manager'
-                    ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white'
-                    : 'glass hover:bg-white/10 text-gray-400'
-                }`}
-              >
-                👔 Trưởng Phòng
-              </button>
-              <button 
-                onClick={() => setUserRole('user')}
-                className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                  userRole === 'user'
-                    ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white'
-                    : 'glass hover:bg-white/10 text-gray-400'
-                }`}
-              >
-                👷 Nhân Viên
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <h1 className="text-4xl font-black text-gradient mb-2">
-          {userRole === 'admin' ? 'Cài Đặt Tổ Chức' : 'Cài Đặt Cá Nhân'}
-        </h1>
-        <p className="text-gray-400 mb-8">
-          {userRole === 'admin' 
-            ? 'Quản lý cấu hình và chính sách toàn tổ chức' 
-            : 'Tùy chỉnh trải nghiệm cá nhân của bạn'}
-        </p>
-
-        {/* Tabs */}
-        <div className="flex gap-2 mb-6 overflow-x-auto scrollbar-gradient">
-          {currentTabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2 rounded-xl font-semibold transition-all whitespace-nowrap ${
-                activeTab === tab.id
-                  ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white'
-                  : 'glass hover:bg-white/10 text-gray-400'
-              }`}
-            >
-              <span className="mr-2">{tab.icon}</span>
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Admin Tabs Content */}
-        {userRole === 'admin' && (
-        <>
-        {/* General Tab */}
-        {activeTab === 'general' && (
-          <div className="max-w-3xl space-y-6">
-            <GlassCard>
-              <h3 className="text-xl font-bold text-white mb-4">Thông Tin Tổ Chức</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-semibold mb-2 text-gray-300">Tên Tổ Chức</label>
-                  <input type="text" defaultValue="VoiceHub Tech" className="w-full px-4 py-3 rounded-xl glass border border-white/20 focus:border-purple-500 outline-none text-white" />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold mb-2 text-gray-300">Mô Tả</label>
-                  <textarea className="w-full px-4 py-3 rounded-xl glass border border-white/20 focus:border-purple-500 outline-none text-white" rows="3" defaultValue="Công ty công nghệ hàng đầu chuyên về giải pháp truyền thông"></textarea>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold mb-2 text-gray-300">Website</label>
-                    <input type="url" defaultValue="https://voicehub.com" className="w-full px-4 py-3 rounded-xl glass border border-white/20 focus:border-purple-500 outline-none text-white" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold mb-2 text-gray-300">Email Liên Hệ</label>
-                    <input type="email" defaultValue="contact@voicehub.com" className="w-full px-4 py-3 rounded-xl glass border border-white/20 focus:border-purple-500 outline-none text-white" />
-                  </div>
-                </div>
-                <GradientButton 
-                  variant="primary"
-                  onClick={() => showToast("Đã lưu thông tin tổ chức!", "success")}
-                >
-                  💾 Lưu Thay Đổi
-                </GradientButton>
-              </div>
-            </GlassCard>
-
-            <GlassCard>
-              <h3 className="text-xl font-bold text-white mb-4">Quota & Giới Hạn</h3>
-              <div className="space-y-4">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-gray-400">Số lượng thành viên</span>
-                    <span className="text-sm font-bold text-white">45 / 100</span>
-                  </div>
-                  <div className="w-full h-2 glass-strong rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-purple-600 to-pink-600" style={{width: '45%'}}></div>
-                  </div>
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-gray-400">Dung lượng lưu trữ</span>
-                    <span className="text-sm font-bold text-white">45.8 GB / 100 GB</span>
-                  </div>
-                  <div className="w-full h-2 glass-strong rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-blue-500 to-cyan-500" style={{width: '45.8%'}}></div>
-                  </div>
-                </div>
-              </div>
-            </GlassCard>
-          </div>
-        )}
-
-        {/* Roles Tab */}
-        {activeTab === 'roles' && (
-          <div className="max-w-4xl">
-            <GlassCard className="mb-6">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-white">Quản Lý Vai Trò (RBAC)</h3>
-                <GradientButton 
-                  variant="primary"
-                  onClick={() => showToast("Mở modal tạo vai trò...", "info")}
-                >
-                  ➕ Tạo Vai Trò Mới
-                </GradientButton>
-              </div>
-              <div className="space-y-3">
-                {[
-                  { name: 'Quản Trị Viên', members: 3, permissions: 'Toàn quyền', color: 'from-red-500 to-orange-500' },
-                  { name: 'Trưởng Phòng', members: 4, permissions: 'Quản lý phòng ban', color: 'from-purple-600 to-pink-600' },
-                  { name: 'Trưởng Nhóm', members: 8, permissions: 'Quản lý nhóm', color: 'from-blue-500 to-cyan-500' },
-                  { name: 'Nhân Viên', members: 30, permissions: 'Cơ bản', color: 'from-green-500 to-emerald-500' }
-                ].map((role, idx) => (
-                  <div key={idx} className="glass-strong p-4 rounded-xl flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${role.color} flex items-center justify-center text-2xl`}>
-                        {['👑', '👔', '👨‍💼', '👷'][idx]}
-                      </div>
-                      <div>
-                        <div className="font-bold text-white">{role.name}</div>
-                        <div className="text-sm text-gray-400">{role.members} thành viên • {role.permissions}</div>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button className="glass px-4 py-2 rounded-lg hover:bg-white/10 transition-all text-sm">Sửa</button>
-                      <button className="glass px-4 py-2 rounded-lg hover:bg-white/10 transition-all text-sm text-red-400">Xóa</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </GlassCard>
-          </div>
-        )}
-
-        {/* Security Tab */}
-        {activeTab === 'security' && (
-          <div className="max-w-3xl space-y-6">
-            <GlassCard>
-              <h3 className="text-xl font-bold text-white mb-4">Chính Sách Bảo Mật</h3>
-              <div className="space-y-4">
-                {[
-                  { label: 'Bắt buộc 2FA cho tất cả thành viên', checked: true },
-                  { label: 'Yêu cầu mật khẩu mạnh (8+ ký tự, chữ hoa, số, ký tự đặc biệt)', checked: true },
-                  { label: 'Tự động đăng xuất sau 30 phút không hoạt động', checked: false },
-                  { label: 'Chặn đăng nhập từ IP lạ', checked: false },
-                  { label: 'Gửi email thông báo khi đăng nhập thiết bị mới', checked: true }
-                ].map((setting, idx) => (
-                  <label key={idx} className="flex items-center justify-between p-4 glass-strong rounded-xl cursor-pointer hover:bg-white/5 transition-all">
-                    <span className="text-white">{setting.label}</span>
-                    <input type="checkbox" defaultChecked={setting.checked} className="w-5 h-5 rounded" />
-                  </label>
-                ))}
-              </div>
-            </GlassCard>
-
-            <GlassCard>
-              <h3 className="text-xl font-bold text-white mb-4">API Keys</h3>
-              <p className="text-gray-400 mb-4">Quản lý API keys cho tích hợp bên ngoài</p>
-              <div className="space-y-3 mb-4">
-                {[
-                  { name: 'Production API Key', created: '15/12/2025', lastUsed: '2 giờ trước' },
-                  { name: 'Development API Key', created: '10/01/2026', lastUsed: '1 ngày trước' }
-                ].map((key, idx) => (
-                  <div key={idx} className="glass-strong p-4 rounded-xl flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-white">{key.name}</div>
-                      <div className="text-sm text-gray-400">Tạo: {key.created} • Sử dụng: {key.lastUsed}</div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button className="glass px-3 py-2 rounded-lg hover:bg-white/10 transition-all text-sm">Copy</button>
-                      <button className="glass px-3 py-2 rounded-lg hover:bg-white/10 transition-all text-sm text-red-400">Xóa</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <GradientButton variant="secondary">🔑 Tạo API Key Mới</GradientButton>
-            </GlassCard>
-          </div>
-        )}
-
-        {/* Integrations Tab */}
-        {activeTab === 'integrations' && (
-          <div className="max-w-4xl">
-            <GlassCard>
-              <h3 className="text-xl font-bold text-white mb-6">Tích Hợp Bên Ngoài</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {[
-                  { name: 'Slack', icon: '💬', status: 'Đã kết nối', color: 'from-purple-600 to-pink-600' },
-                  { name: 'Google Drive', icon: '📁', status: 'Chưa kết nối', color: 'from-blue-500 to-cyan-500' },
-                  { name: 'GitHub', icon: '🐙', status: 'Đã kết nối', color: 'from-green-500 to-emerald-500' },
-                  { name: 'Jira', icon: '📊', status: 'Chưa kết nối', color: 'from-orange-500 to-yellow-500' }
-                ].map((integration, idx) => (
-                  <GlassCard key={idx} hover>
-                    <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${integration.color} flex items-center justify-center text-3xl mb-3`}>
-                      {integration.icon}
-                    </div>
-                    <h4 className="font-bold text-white mb-1">{integration.name}</h4>
-                    <p className="text-sm text-gray-400 mb-3">{integration.status}</p>
-                    <button className={`w-full py-2 rounded-lg transition-all text-sm font-semibold ${
-                      integration.status === 'Đã kết nối' 
-                        ? 'glass hover:bg-white/10' 
-                        : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700'
-                    }`}>
-                      {integration.status === 'Đã kết nối' ? 'Ngắt Kết Nối' : 'Kết Nối'}
-                    </button>
-                  </GlassCard>
-                ))}
-              </div>
-            </GlassCard>
-          </div>
-        )}
-
-        {/* Audit Log Tab */}
-        {activeTab === 'audit' && (
-          <div className="max-w-4xl">
-            <GlassCard>
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-white">Nhật Ký Hoạt Động (Audit Log)</h3>
-                <button className="glass px-4 py-2 rounded-xl hover:bg-white/10 transition-all font-semibold">
-                  📥 Xuất Log
-                </button>
-              </div>
-              <div className="space-y-2">
-                {[
-                  { user: 'Admin', action: 'Tạo vai trò "Trưởng Nhóm Mới"', time: '5 phút trước', type: 'create' },
-                  { user: 'Sarah Chen', action: 'Cập nhật thông tin tổ chức', time: '1 giờ trước', type: 'update' },
-                  { user: 'Mike Ross', action: 'Mời thành viên mới: anna@voicehub.com', time: '3 giờ trước', type: 'invite' },
-                  { user: 'Admin', action: 'Bật 2FA bắt buộc', time: '1 ngày trước', type: 'security' },
-                  { user: 'Emma Wilson', action: 'Xóa API key "Test Key"', time: '2 ngày trước', type: 'delete' }
-                ].map((log, idx) => (
-                  <div key={idx} className="glass-strong p-4 rounded-xl flex items-center gap-4">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xl ${
-                      log.type === 'create' ? 'bg-green-500/20' :
-                      log.type === 'update' ? 'bg-blue-500/20' :
-                      log.type === 'delete' ? 'bg-red-500/20' :
-                      log.type === 'security' ? 'bg-orange-500/20' :
-                      'bg-purple-500/20'
-                    }`}>
-                      {log.type === 'create' ? '➕' :
-                       log.type === 'update' ? '✏️' :
-                       log.type === 'delete' ? '🗑️' :
-                       log.type === 'security' ? '🔒' : '📧'}
-                    </div>
-                    <div className="flex-1">
-                      <div className="font-semibold text-white">
-                        <span className="text-purple-400">{log.user}</span> {log.action}
-                      </div>
-                      <div className="text-xs text-gray-500">🕐 {log.time}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </GlassCard>
-          </div>
-        )}
-        </>
-        )}
-
-        {/* User/Manager Tabs Content */}
-        {(userRole === 'user' || userRole === 'manager') && (
-        <>
-        {/* Profile Tab */}
-        {activeTab === 'profile' && (
-          <div className="max-w-3xl space-y-6">
-            <GlassCard>
-              <h3 className="text-xl font-bold text-white mb-4">Thông Tin Cá Nhân</h3>
-              <div className="flex items-center gap-6 mb-6">
-                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-5xl">
-                  👤
-                </div>
-                <GradientButton variant="secondary">📷 Thay Đổi Avatar</GradientButton>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-semibold mb-2 text-gray-300">Họ và Tên</label>
-                  <input type="text" defaultValue="Nguyễn Văn Danh" className="w-full px-4 py-3 rounded-xl glass border border-white/20 focus:border-purple-500 outline-none text-white" />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold mb-2 text-gray-300">Email</label>
-                    <input type="email" defaultValue="danh@voicehub.com" className="w-full px-4 py-3 rounded-xl glass border border-white/20 focus:border-purple-500 outline-none text-white" disabled />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold mb-2 text-gray-300">Số điện thoại</label>
-                    <input type="tel" defaultValue="+84 123 456 789" className="w-full px-4 py-3 rounded-xl glass border border-white/20 focus:border-purple-500 outline-none text-white" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold mb-2 text-gray-300">Chức vụ</label>
-                  <input type="text" defaultValue={userRole === 'manager' ? 'Trưởng Phòng' : 'Nhân Viên'} className="w-full px-4 py-3 rounded-xl glass border border-white/20 bg-white/5 text-gray-400" disabled />
-                </div>
-                <GradientButton 
-                  variant="primary"
-                  onClick={() => showToast("Đã cập nhật thông tin!", "success")}
-                >
-                  💾 Lưu Thay Đổi
-                </GradientButton>
-              </div>
-            </GlassCard>
-          </div>
-        )}
-
-        {/* Notifications Tab */}
-        {activeTab === 'notifications' && (
-          <div className="max-w-3xl">
-            <GlassCard>
-              <h3 className="text-xl font-bold text-white mb-4">Cài Đặt Thông Báo</h3>
-              <div className="space-y-4">
-                {[
-                  { label: 'Thông báo tin nhắn mới', checked: true },
-                  { label: 'Thông báo khi được mention', checked: true },
-                  { label: 'Thông báo công việc mới', checked: true },
-                  { label: 'Thông báo deadline sắp đến', checked: true },
-                  { label: 'Thông báo qua email', checked: false },
-                  { label: 'Thông báo push trên mobile', checked: true }
-                ].map((setting, idx) => (
-                  <label key={idx} className="flex items-center justify-between p-4 glass-strong rounded-xl cursor-pointer hover:bg-white/5 transition-all">
-                    <span className="text-white">{setting.label}</span>
-                    <input type="checkbox" defaultChecked={setting.checked} className="w-5 h-5 rounded" />
-                  </label>
-                ))}
-              </div>
-            </GlassCard>
-          </div>
-        )}
-
-        {/* Privacy Tab */}
-        {activeTab === 'privacy' && (
-          <div className="max-w-3xl space-y-6">
-            <GlassCard>
-              <h3 className="text-xl font-bold text-white mb-4">Quyền Riêng Tư</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-semibold mb-2 text-gray-300">Hiển thị trạng thái online</label>
-                  <select className="w-full px-4 py-3 rounded-xl glass border border-white/20 text-white">
-                    <option>Mọi người</option>
-                    <option>Chỉ đồng nghiệp</option>
-                    <option>Không ai</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold mb-2 text-gray-300">Ai có thể nhắn tin cho tôi</label>
-                  <select className="w-full px-4 py-3 rounded-xl glass border border-white/20 text-white">
-                    <option>Mọi người</option>
-                    <option>Chỉ đồng nghiệp</option>
-                  </select>
-                </div>
-              </div>
-            </GlassCard>
-          </div>
-        )}
-
-        {/* Appearance Tab */}
-        {activeTab === 'appearance' && (
-          <div className="max-w-3xl">
-            <GlassCard>
-              <h3 className="text-xl font-bold text-white mb-4">Giao Diện</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-semibold mb-2 text-gray-300">Chủ đề</label>
-                  <div className="grid grid-cols-2 gap-4">
-                    {[
-                      { name: 'Tối', icon: '🌙', active: true },
-                      { name: 'Sáng', icon: '☀️', active: false }
-                    ].map((theme, idx) => (
-                      <div key={idx} className={`p-6 rounded-xl cursor-pointer transition-all ${
-                        theme.active ? 'bg-gradient-to-br from-purple-600 to-pink-600' : 'glass hover:bg-white/10'
-                      }`}>
-                        <div className="text-4xl mb-2">{theme.icon}</div>
-                        <div className="font-bold text-white">{theme.name}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </GlassCard>
-          </div>
-        )}
-        </>
-        )}
-      </div>
-    </div>
-
-    {/* Toast */}
-    {toast && (
-      <Toast 
-        message={toast.message} 
-        type={toast.type}
-        onClose={() => setToast(null)}
+      <div className={`${FIGMA_PAGE_SHELL} h-full overflow-hidden`}>{suiteSettingsBody}</div>
+      <ConfirmDialog
+        isOpen={apiKeyDeleteConfirm != null}
+        onClose={() => setApiKeyDeleteConfirm(null)}
+        onConfirm={confirmDeleteApiKey}
+        title={t('settingsPage.confirmDeleteApiKeyTitle')}
+        message={t('settingsPage.confirmDeleteApiKeyMsg')}
+        confirmText={t('settingsPage.confirmOk')}
+        cancelText={t('settingsPage.cancel')}
       />
-    )}
+      <ConfirmDialog
+        isOpen={roleDeleteConfirm != null}
+        onClose={() => setRoleDeleteConfirm(null)}
+        onConfirm={confirmDeleteRole}
+        title={t('settingsPage.confirmDeleteRoleTitle')}
+        message={t('settingsPage.confirmDeleteRoleMsg')}
+        confirmText={t('settingsPage.confirmOk')}
+        cancelText={t('settingsPage.cancel')}
+      />
     </>
   );
 }

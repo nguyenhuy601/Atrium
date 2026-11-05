@@ -1,0 +1,162 @@
+const crypto = require('crypto');
+const express = require('express');
+const router = express.Router();
+const messageController = require('../controllers/message.controller');
+const { authenticate } = require('@enterprise/shared/middleware/auth');
+
+const { sendServiceError } = require('../middleware/sendServiceError');
+const { compareGatewayToken } = require('@enterprise/shared/middleware/compareGatewayToken');
+const {
+  messageWriteLimiter,
+  reactionWriteLimiter,
+  voteWriteLimiter,
+} = require('../middleware/userWriteRateLimit');
+
+const CHAT_INTERNAL_TOKEN = process.env.CHAT_INTERNAL_TOKEN || '';
+
+function internalServiceOnly(req, res, next) {
+  const token = String(
+    req.headers['x-internal-token'] || req.headers['x-chat-internal-token'] || ''
+  ).trim();
+  if (!CHAT_INTERNAL_TOKEN) {
+    return sendServiceError(res, 503, {
+      errorCode: 'GATEWAY_SERVICE_UNAVAILABLE',
+      messageUser: 'Dịch vụ tạm thời không khả dụng.',
+      message: 'CHAT_INTERNAL_TOKEN is not configured on chat-service',
+    });
+  }
+  if (!token) {
+    return sendServiceError(res, 401, {
+      errorCode: 'AUTH_NO_TOKEN',
+      messageUser: 'Vui lòng đăng nhập lại.',
+      message: 'Missing x-internal-token',
+    });
+  }
+  if (!compareGatewayToken(token, CHAT_INTERNAL_TOKEN)) {
+    return sendServiceError(res, 403, {
+      errorCode: 'MESSAGE_FORBIDDEN',
+      messageUser: 'Không đủ quyền thực hiện thao tác này.',
+      message: 'Forbidden',
+    });
+  }
+  next();
+}
+
+// Service-to-service: xóa DM khi hủy kết bạn (trước authenticate JWT)
+router.post(
+  '/internal/dm/delete-between',
+  internalServiceOnly,
+  messageController.deleteDmBetweenUsers.bind(messageController)
+);
+
+router.get(
+  '/internal/messages/:messageId',
+  internalServiceOnly,
+  messageController.getMessageInternal.bind(messageController)
+);
+
+router.patch(
+  '/internal/messages/:messageId/file-promoted',
+  internalServiceOnly,
+  messageController.promoteMessageFileInternal.bind(messageController)
+);
+
+router.get(
+  '/internal/storage/signed-read',
+  internalServiceOnly,
+  messageController.getSignedReadUrlInternal.bind(messageController)
+);
+
+router.post(
+  '/internal/purge-organization-messages',
+  internalServiceOnly,
+  messageController.purgeOrganizationMessagesInternal.bind(messageController)
+);
+
+router.post(
+  '/internal/call-log',
+  internalServiceOnly,
+  messageController.createCallLogInternal.bind(messageController)
+);
+
+router.post(
+  '/internal/system-channel-message',
+  internalServiceOnly,
+  messageController.createSystemChannelMessageInternal.bind(messageController)
+);
+
+// Tất cả routes đều cần authentication
+router.use(authenticate);
+
+// Signed upload URL (Firebase) — đặt trước POST /
+router.post(
+  '/storage/signed-upload',
+  messageWriteLimiter,
+  messageController.createSignedUploadUrl.bind(messageController)
+);
+
+// Tạo tin nhắn mới
+router.post('/', messageWriteLimiter, messageController.createMessage.bind(messageController));
+
+// Thống kê (đặt trước /:messageId để không bị nuốt bởi param)
+router.get('/stats/summary', messageController.getMessageStatsSummary.bind(messageController));
+
+// Tin chưa đọc — kênh tổ chức
+router.get('/unread/org', messageController.getUnreadOrgMessagesFeed.bind(messageController));
+
+// Tìm kiếm tin kênh tổ chức (đặt trước /:messageId)
+router.get('/search', messageController.searchMessages.bind(messageController));
+
+// Lấy danh sách tin nhắn
+router.get('/', messageController.getMessages.bind(messageController));
+
+// Lấy tin nhắn theo ID
+router.get('/:messageId', messageController.getMessageById.bind(messageController));
+
+// Đánh dấu tin nhắn đã đọc
+router.patch('/:messageId/read', messageController.markAsRead.bind(messageController));
+
+// Xóa tin nhắn (soft delete)
+router.delete(
+  '/:messageId',
+  messageWriteLimiter,
+  messageController.deleteMessage.bind(messageController)
+);
+
+// Thu hồi tin nhắn (recall)
+router.patch(
+  '/:messageId/recall',
+  messageWriteLimiter,
+  messageController.recallMessage.bind(messageController)
+);
+
+// Phản hồi emoji
+router.post(
+  '/:messageId/reactions',
+  reactionWriteLimiter,
+  messageController.addReaction.bind(messageController)
+);
+router.delete(
+  '/:messageId/reactions/:emoji',
+  reactionWriteLimiter,
+  messageController.removeReaction.bind(messageController)
+);
+
+router.post(
+  '/:messageId/votes',
+  voteWriteLimiter,
+  messageController.votePoll.bind(messageController)
+);
+
+// Chỉnh sửa tin nhắn
+router.patch(
+  '/:messageId/edit',
+  messageWriteLimiter,
+  messageController.editMessage.bind(messageController)
+);
+
+// Alias tương thích: một số client cũ gọi PATCH /messages/:id
+router.patch('/:messageId', messageWriteLimiter, messageController.editMessage.bind(messageController));
+
+module.exports = router;
+

@@ -1,0 +1,157 @@
+const { services, buildTrustedHeaders, fetchJson, unwrapPayload } = require('./httpDownstream');
+const { getDashboardReadModelMode } = require('@enterprise/shared/config/reportServiceFlags');
+const { fetchDashboardReadModel } = require('./dashboardReadModel.client');
+const { mergeOrgDashboardStats } = require('./dashboardSummary.merge');
+
+const SUMMARY_TIMEOUT_MS = Math.min(
+  8000,
+  Math.max(3000, parseInt(process.env.DASHBOARD_SUMMARY_TIMEOUT_MS || '7000', 10) || 7000)
+);
+
+function unwrapFriendsList(body) {
+  const data = unwrapPayload(body);
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.friends)) return data.friends;
+  return [];
+}
+
+async function fetchDashboardTaskStats(orgIds, headers) {
+  if (!orgIds.length) {
+    return mergeOrgDashboardStats([]);
+  }
+  const capped = orgIds.slice(0, 8);
+  const perOrg = [];
+  await Promise.all(
+    capped.map(async (oid) => {
+      const url = `${services.task.url}/api/tasks/statistics?organizationId=${encodeURIComponent(oid)}&view=dashboard`;
+      const res = await fetchJson(url, headers, `tasks/stats/${oid}`, SUMMARY_TIMEOUT_MS);
+      if (!res.ok) return;
+      const stats = unwrapPayload(res.data);
+      if (!stats || typeof stats !== 'object') return;
+      perOrg.push({ ...stats, organizationId: oid });
+    })
+  );
+  return mergeOrgDashboardStats(perOrg);
+}
+
+function sumOrgMembers(organizations) {
+  return (Array.isArray(organizations) ? organizations : []).reduce((sum, org) => {
+    const direct =
+      org?.memberCount ?? org?.membersCount ?? org?.totalMembers ?? org?.stats?.memberCount;
+    if (Number.isFinite(Number(direct))) return sum + Number(direct);
+    if (Array.isArray(org?.members)) return sum + org.members.length;
+    return sum;
+  }, 0);
+}
+
+function pickMembershipRole(organizations, statsRole) {
+  if (statsRole) return String(statsRole);
+  const first = Array.isArray(organizations) ? organizations[0] : null;
+  const role = first?.myRole || first?.role || first?.membershipRole;
+  return role ? String(role) : null;
+}
+
+function pickStructureRole(organizations) {
+  const first = Array.isArray(organizations) ? organizations[0] : null;
+  const raw = first?.myStructureRole || first?.structureRole || null;
+  const v = String(raw || '').trim().toLowerCase();
+  return v === 'head' || v === 'leader' ? v : null;
+}
+
+async function buildDashboardSummaryFanout(userId, userEmail) {
+  const headers = buildTrustedHeaders(userId, userEmail);
+  const startFrom = new Date();
+  const startTo = new Date(startFrom.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+  const orgUrl = `${services.organization.url}/api/organizations/my`;
+  const friendsUrl = `${services.friend.url}/api/friends`;
+  const notifUrl = `${services.notification.url}/api/notifications?scope=personal&limit=1`;
+  const meetingsUrl = `${services.voice.url}/api/meetings?startFrom=${encodeURIComponent(startFrom.toISOString())}&startTo=${encodeURIComponent(startTo.toISOString())}&limit=8`;
+
+  const [orgRes, friendsRes, notifRes, meetingsRes] = await Promise.all([
+    fetchJson(orgUrl, headers, 'organizations/my', SUMMARY_TIMEOUT_MS),
+    fetchJson(friendsUrl, headers, 'friends', SUMMARY_TIMEOUT_MS),
+    fetchJson(notifUrl, headers, 'notifications', SUMMARY_TIMEOUT_MS),
+    fetchJson(meetingsUrl, headers, 'meetings', SUMMARY_TIMEOUT_MS),
+  ]);
+
+  const orgList = orgRes.ok ? unwrapPayload(orgRes.data) : [];
+  const organizations = Array.isArray(orgList) ? orgList : [];
+  const orgIds = organizations
+    .map((o) => String(o?._id || o?.id || '').trim())
+    .filter((id) => /^[a-f\d]{24}$/i.test(id));
+
+  const friendsRaw = friendsRes.ok ? unwrapFriendsList(friendsRes.data) : [];
+  /** Friend graph pending retired. */
+  const friendsPending = [];
+
+  let notificationsUnreadPersonal = 0;
+  if (notifRes.ok) {
+    const nd = unwrapPayload(notifRes.data);
+    notificationsUnreadPersonal = Number(nd?.unreadCount) || 0;
+  }
+
+  const taskBundle = await fetchDashboardTaskStats(orgIds, headers);
+  const membershipRole = pickMembershipRole(organizations, taskBundle.membershipRole);
+  const structureRole = pickStructureRole(organizations);
+  const totalMembers = sumOrgMembers(organizations);
+
+  let upcomingMeetings = [];
+  if (meetingsRes.ok) {
+    const inner = unwrapPayload(meetingsRes.data);
+    const meetings = inner?.meetings ?? inner?.data?.meetings;
+    if (Array.isArray(meetings)) {
+      upcomingMeetings = meetings.slice(0, 5).map((m) => ({
+        id: m._id,
+        title: m.title,
+        startTime: m.startTime,
+        participants: Array.isArray(m.participants) ? m.participants.length : 0,
+      }));
+    }
+  }
+
+  return {
+    orgCount: organizations.length,
+    friendsTotal: friendsRaw.length,
+    pendingCount: friendsPending.length,
+    unread: notificationsUnreadPersonal,
+    taskDone: taskBundle.failed ? null : taskBundle.taskDone,
+    openCount: taskBundle.openCount,
+    overdue: taskBundle.overdue,
+    dueThisWeek: taskBundle.dueThisWeek,
+    myOpen: taskBundle.myOpen,
+    myOverdue: taskBundle.myOverdue,
+    myDueThisWeek: taskBundle.myDueThisWeek,
+    boards: taskBundle.boards,
+    overdueItems: Array.isArray(taskBundle.overdueItems) ? taskBundle.overdueItems : [],
+    membershipRole,
+    structureRole,
+    primaryOrgId: orgIds[0] || null,
+    totalMembers: Number.isFinite(totalMembers) ? totalMembers : null,
+    upcomingMeetings,
+    partial: {
+      organizations: !orgRes.ok,
+      friends: !friendsRes.ok,
+      pending: !pendingRes.ok,
+      notifications: !notifRes.ok,
+      meetings: !meetingsRes.ok,
+      tasks: taskBundle.failed,
+    },
+  };
+}
+
+async function buildDashboardSummary(userId, userEmail) {
+  const mode = getDashboardReadModelMode();
+  if (mode !== 'off') {
+    const rm = await fetchDashboardReadModel(userId, userEmail);
+    if (rm.ok && rm.data) {
+      return { ...rm.data, _rm: 'HIT' };
+    }
+    const fanout = await buildDashboardSummaryFanout(userId, userEmail);
+    return { ...fanout, _rm: 'MISS' };
+  }
+  const fanout = await buildDashboardSummaryFanout(userId, userEmail);
+  return { ...fanout, _rm: 'OFF' };
+}
+
+module.exports = { buildDashboardSummary, buildDashboardSummaryFanout };

@@ -1,0 +1,107 @@
+import { useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useAdminTabLoading } from '../../hooks/useAdminShellLoading';
+import AdminOrgUnitPicker from '../adminOrgStructure/AdminOrgUnitPicker';
+import { AdminUserPanelShell } from '../adminUsers/adminUserPanelUi';
+import { AdminHubTablist, AdminHubTabPanel, useAdminHubTabIds } from './AdminHubTablist';
+
+/**
+ * Khung hub org unit: 1 picker + tabs thao tác (Dept / Team / Division / Branch).
+ * unitId qua ?unitId= (AdminOrgUnitPicker).
+ *
+ * @param {{
+ *   title: string,
+ *   hint?: string,
+ *   tabs: Array<{ id: string, label: string }>,
+ *   defaultTab: string,
+ *   tabParam?: string,
+ *   items: object[],
+ *   loading?: boolean,
+ *   error?: string,
+ *   onRetry?: () => void,
+ *   pickerHint?: string,
+ *   subtitleFn?: (row: object) => string,
+ *   badgeFn?: (row: object) => string,
+ *   getPickerProps?: (activeTab: string) => {
+ *     pickerHint?: string,
+ *     subtitleFn?: (row: object) => string,
+ *     badgeFn?: (row: object) => string,
+ *     items?: object[],
+ *   },
+ *   children: (ctx: { activeTab: string, unitId: string }) => import('react').ReactNode,
+ * }} props
+ */
+export default function AdminOrgUnitOpsHubShell({
+  title,
+  hint,
+  tabs,
+  defaultTab,
+  tabParam = 'tab',
+  items,
+  loading = false,
+  error = '',
+  onRetry,
+  pickerHint,
+  subtitleFn,
+  badgeFn,
+  getPickerProps,
+  children,
+}) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabIdPrefix = useAdminHubTabIds();
+
+  const activeTab = useMemo(() => {
+    const raw = String(searchParams.get(tabParam) || '').trim();
+    if (raw && tabs.some((tab) => tab.id === raw)) return raw;
+    return defaultTab;
+  }, [searchParams, tabParam, tabs, defaultTab]);
+
+  const unitId = String(searchParams.get('unitId') || '').trim();
+  const { markTabSwitch } = useAdminTabLoading(activeTab);
+
+  const pickerOverride = getPickerProps?.(activeTab) || {};
+  const resolvedItems = pickerOverride.items ?? items;
+  const resolvedPickerHint = pickerOverride.pickerHint ?? pickerHint;
+  const resolvedSubtitleFn = pickerOverride.subtitleFn ?? subtitleFn;
+  const resolvedBadgeFn = pickerOverride.badgeFn ?? badgeFn;
+
+  const setTab = (nextId) => {
+    markTabSwitch(nextId);
+    const params = new URLSearchParams(searchParams);
+    if (nextId === defaultTab) params.delete(tabParam);
+    else params.set(tabParam, nextId);
+    setSearchParams(params, { replace: true });
+  };
+
+  return (
+    <AdminUserPanelShell title={title} hint={hint} wide fillHeight>
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:items-stretch">
+        <div className="min-h-0 self-stretch">
+          <AdminOrgUnitPicker
+            items={resolvedItems}
+            loading={loading}
+            error={error}
+            onRetry={onRetry}
+            selectedId={unitId}
+            hint={resolvedPickerHint}
+            subtitleFn={resolvedSubtitleFn}
+            badgeFn={resolvedBadgeFn}
+          />
+        </div>
+        <div className="min-h-0 min-w-0 space-y-4 overflow-y-auto">
+          <AdminHubTablist
+            idPrefix={tabIdPrefix}
+            label={title}
+            tabs={tabs}
+            activeTab={activeTab}
+            onSelect={setTab}
+          />
+          <AdminHubTabPanel idPrefix={tabIdPrefix} tabs={tabs} activeTab={activeTab} className="min-h-0">
+            {children({ activeTab, unitId })}
+          </AdminHubTabPanel>
+        </div>
+      </div>
+    </AdminUserPanelShell>
+  );
+}
+

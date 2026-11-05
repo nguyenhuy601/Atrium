@@ -3,23 +3,24 @@
 # ========================
 node_modules/
 */node_modules/
-package-lock.json
+# Giữ package-lock.json trong git — cài đặt tái lập được sau pull / npm ci trong Docker.
 yarn.lock
 pnpm-lock.yaml
 
 # ========================
 # Environment Variables
 # ========================
+# Không commit secret
 .env
-.env.local
-.env.*.local
-.env.development
-.env.production
-*.env
-client/.env
-client/.env.local
-services/**/.env
-services/**/.env.local
+.env.*
+
+# Thư mục nội bộ — không đưa vào source public
+/docs/
+/devops/
+/scripts/
+
+# Local analysis cache (false-positive noise for secret scanners)
+.grapuco/
 
 # ========================
 # Build Outputs
@@ -82,6 +83,19 @@ coverage/
 ehthumbs.db
 Thumbs.db
 Desktop.ini
+# Windows reserved device names (cannot be indexed by Git)
+/nul
+/NUL
+/con
+/CON
+/prn
+/PRN
+
+# ========================
+# Python Cache
+# ========================
+__pycache__/
+*.pyc
 
 # ========================
 # Temporary Files
@@ -92,6 +106,13 @@ Desktop.ini
 *.backup
 .cache
 .temp/
+# Client local build/debug dumps (redirected npm/vite/lint output)
+/client/build-error.txt
+/client/build-npm-*.txt
+/client/lint-error.txt
+/client/npm-build-verbose*.txt
+/client/vite-debug.txt
+/client/vite.log
 
 # ========================
 # MongoDB
@@ -112,3 +133,13 @@ docker-compose.override.yml
 *.pem
 .vercel
 *.tsbuildinfo
+
+# ========================
+# Local scratch / agent noise (không commit)
+# ========================
+/tmp/
+/deep-research-report.md
+/summary 1.md
+# Plan Mode local drafts (repo chỉ track vài plan đã chốt)
+.cursor/plans/*.plan.md
+!.cursor/plans/.gitkeep

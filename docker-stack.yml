@@ -1,0 +1,966 @@
+services:
+  api-gateway:
+    image: ${API_GATEWAY_IMAGE}
+    ports:
+      - target: 3000
+        published: 3000
+        protocol: tcp
+        mode: ingress
+    env_file:
+      - .env
+      - ./api-gateway/.env
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_URL=${REDIS_URL:-}
+      - REDIS_SENTINELS=${REDIS_SENTINELS:-}
+      - REDIS_SENTINEL_NAME=${REDIS_SENTINEL_NAME:-mymaster}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_USE_AUTH=${REDIS_USE_AUTH:-false}
+      - PROJECT_SERVICE_URL=http://project-service:3009
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${API_GATEWAY_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      update_config:
+        parallelism: 1
+        order: start-first
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 320M
+        reservations:
+          cpus: "0.15"
+          memory: 80M
+
+  auth-service:
+    image: ${AUTH_SERVICE_IMAGE}
+    env_file:
+      - .env
+      - ./services/auth-service/.env
+    environment:
+      - USER_SERVICE_INTERNAL_TOKEN=${USER_SERVICE_INTERNAL_TOKEN}
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${AUTH_SERVICE_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          cpus: "0.10"
+          memory: 80M
+
+  user-service:
+    image: ${USER_SERVICE_IMAGE}
+    env_file:
+      - .env
+      - ./services/user-service/.env
+    environment:
+      - USER_SERVICE_INTERNAL_TOKEN=${USER_SERVICE_INTERNAL_TOKEN}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_BUCKET=${MINIO_BUCKET}
+      - MINIO_REGION=${MINIO_REGION}
+      - MINIO_USE_SSL=${MINIO_USE_SSL}
+    volumes:
+      # Persist avatar uploads across service recreate (tránh DB có path nhưng file mất).
+      - user_service_uploads:/app/uploads
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${USER_SERVICE_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          cpus: "0.10"
+          memory: 80M
+
+  organization-service:
+    image: ${ORGANIZATION_SERVICE_IMAGE}
+    env_file:
+      - .env
+      - ./services/organization-service/.env
+    environment:
+      - NOTIFICATION_INTERNAL_TOKEN=${NOTIFICATION_INTERNAL_TOKEN}
+      - NOTIFICATION_SERVICE_URL=${NOTIFICATION_SERVICE_URL}
+      - FRIEND_SERVICE_URL=${FRIEND_SERVICE_URL}
+      - GATEWAY_INTERNAL_TOKEN=${GATEWAY_INTERNAL_TOKEN}
+      - PROJECT_SERVICE_URL=http://project-service:3009
+      - USER_SERVICE_URL=${USER_SERVICE_URL}
+      - USER_SERVICE_INTERNAL_TOKEN=${USER_SERVICE_INTERNAL_TOKEN}
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${ORGANIZATION_SERVICE_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          cpus: "0.10"
+          memory: 80M
+
+  # Graph retired — traffic on ORGANIZATION_SERVICE_URL via FRIEND_SERVICE_URL remap.
+  # Keep service definition + friend_db; default replicas 0 until Step 7 delete.
+  role-permission-service:
+    image: ${ROLE_PERMISSION_SERVICE_IMAGE}
+    env_file:
+      - .env
+      - ./services/role-permission-service/.env
+    environment:
+      - NOTIFICATION_SERVICE_URL=${NOTIFICATION_SERVICE_URL}
+      - NOTIFICATION_INTERNAL_TOKEN=${NOTIFICATION_INTERNAL_TOKEN}
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${ROLE_PERMISSION_SERVICE_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          cpus: "0.10"
+          memory: 80M
+
+  chat-service:
+    image: ${CHAT_SERVICE_IMAGE}
+    env_file:
+      - .env
+      - ./services/chat-service/.env
+    environment:
+      - CHAT_INTERNAL_TOKEN=${CHAT_INTERNAL_TOKEN}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - FRIEND_DM_USE_QUEUE=${FRIEND_DM_USE_QUEUE}
+      - REALTIME_INTERNAL_TOKEN=${REALTIME_INTERNAL_TOKEN}
+      - NOTIFICATION_INTERNAL_TOKEN=${NOTIFICATION_INTERNAL_TOKEN}
+      - NOTIFICATION_SERVICE_URL=${NOTIFICATION_SERVICE_URL}
+      - ORGANIZATION_SERVICE_URL=${ORGANIZATION_SERVICE_URL}
+      - CHAT_UPLOAD_STORAGE=${CHAT_UPLOAD_STORAGE:-auto}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_BUCKET=${MINIO_BUCKET}
+      - MINIO_REGION=${MINIO_REGION}
+      - MINIO_USE_SSL=${MINIO_USE_SSL}
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${CHAT_SERVICE_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      update_config:
+        parallelism: 1
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 384M
+        reservations:
+          cpus: "0.20"
+          memory: 96M
+
+  project-service:
+    image: ${PROJECT_SERVICE_IMAGE}
+    env_file:
+      - .env
+      - ./services/project-service/.env
+    environment:
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - CHAT_SERVICE_URL=${CHAT_SERVICE_URL}
+      - CHAT_INTERNAL_TOKEN=${CHAT_INTERNAL_TOKEN}
+      - TASK_FROM_FILE_WORKER=false
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3.8-max}
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_CHAT_FALLBACK_MODELS=${LLM_CHAT_FALLBACK_MODELS:-}
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${PROJECT_SERVICE_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 384M
+        reservations:
+          cpus: "0.20"
+          memory: 96M
+
+  project-worker:
+    image: ${PROJECT_SERVICE_IMAGE}
+    command: ["node", "src/worker.js"]
+    env_file:
+      - .env
+      - ./services/project-service/.env
+    environment:
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - CHAT_SERVICE_URL=${CHAT_SERVICE_URL}
+      - CHAT_INTERNAL_TOKEN=${CHAT_INTERNAL_TOKEN}
+      - TASK_FROM_FILE_WORKER=true
+      - EXECUTION_CONTROL=${EXECUTION_CONTROL:-1}
+      - EXECUTION_CONTROL_WORKER=${EXECUTION_CONTROL_WORKER:-1}
+      - EXECUTION_CONTROL_POLL_MS=${EXECUTION_CONTROL_POLL_MS:-2000}
+      - EXECUTION_CONTROL_SCHEDULER_MS=${EXECUTION_CONTROL_SCHEDULER_MS:-300000}
+      - EXECUTION_CONTROL_DEBOUNCE_MS=${EXECUTION_CONTROL_DEBOUNCE_MS:-30000}
+      - EXECUTION_CONTROL_SCHEDULER_BATCH=${EXECUTION_CONTROL_SCHEDULER_BATCH:-50}
+      - EXECUTION_CONTROL_DEFAULT_CAPACITY_TO_DUE=${EXECUTION_CONTROL_DEFAULT_CAPACITY_TO_DUE:-8}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3.8-max}
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_CHAT_FALLBACK_MODELS=${LLM_CHAT_FALLBACK_MODELS:-}
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${TASK_WORKER_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 384M
+        reservations:
+          cpus: "0.20"
+          memory: 96M
+
+  ai-project-planning-service:
+    image: ${AI_PROJECT_PLANNING_SERVICE_IMAGE}
+    env_file:
+      - .env
+      - ./services/ai-project-planning-service/.env
+    environment:
+      # LangGraph WHAT + FR pack (~65) needs >512M; OOM → exit 139 mid-run
+      - NODE_OPTIONS=--max-old-space-size=1280
+      - PROJECT_SERVICE_URL=http://project-service:3009
+      - GATEWAY_INTERNAL_TOKEN=${GATEWAY_INTERNAL_TOKEN}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai_compatible}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_CHAT_FALLBACK_MODELS=${LLM_CHAT_FALLBACK_MODELS:-}
+      # DashScope free embed when LLM_PROVIDER=openai_compatible|dashscope; Ollama tags ignored in code
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-text-embedding-v4}
+      - RAG_EMBEDDING_VERSION=${RAG_EMBEDDING_VERSION:-dashscope-text-embedding-v4}
+      - RAG_EMBED_DIMENSIONS=${RAG_EMBED_DIMENSIONS:-1024}
+      - RAG_MODE=${RAG_MODE:-hybrid}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - QDRANT_COLLECTION=${QDRANT_COLLECTION:-vh_ai_plan_g7}
+      # In-run HITL only (clarify/edit_draft). Gate 1/2 stay HTTP on project-service.
+      # Requires Redis+RedisJSON when =1 — MemorySaver fail-fast (no Postgres).
+      - AGENT_CORE_HITL_INTERRUPT=${AGENT_CORE_HITL_INTERRUPT:-0}
+      - JEV_CONTROL=${JEV_CONTROL:-0}
+      # 0 = try RedisSaver (RedisJSON); 1 = force MemorySaver (incompatible with HITL interrupt=1)
+      - AGENT_CORE_LG_MEMORY=${AGENT_CORE_LG_MEMORY:-0}
+      # HOW semantic LLM (Arch/Dep/Risk/Quality/WBS) — DashScope via generateJson
+      - HOW_SEMANTIC_LLM=${HOW_SEMANTIC_LLM:-1}
+      - HOW_ARCH_LLM=${HOW_ARCH_LLM:-1}
+      - HOW_DEP_LLM=${HOW_DEP_LLM:-1}
+      - HOW_RISK_LLM=${HOW_RISK_LLM:-1}
+      - HOW_QUALITY_LLM=${HOW_QUALITY_LLM:-1}
+      - HOW_SEC_TOOL_LLM_SPRINT=${HOW_SEC_TOOL_LLM_SPRINT:-1}
+      - HOW_WBS_LLM=${HOW_WBS_LLM:-1}
+      - HOW_WBS_LLM_QUEUE=${HOW_WBS_LLM_QUEUE:-0}
+      - HOW_WBS_CHUNK_ORCHESTRATOR=${HOW_WBS_CHUNK_ORCHESTRATOR:-1}
+      - ARTIFACT_STORE=${ARTIFACT_STORE:-0}
+      - HOW_WBS_CHUNK_TRANSPORT=${HOW_WBS_CHUNK_TRANSPORT:-memory}
+      - HOW_WBS_CHUNK_CONCURRENCY=${HOW_WBS_CHUNK_CONCURRENCY:-2}
+      - HOW_WBS_CHUNK_MEMORY=${HOW_WBS_CHUNK_MEMORY:-0}
+      - HOW_WBS_CHUNK_MAX_ATTEMPTS=${HOW_WBS_CHUNK_MAX_ATTEMPTS:-3}
+      - HOW_WBS_LLM_TIMEOUT_MS=${HOW_WBS_LLM_TIMEOUT_MS:-240000}
+      - HOW_WBS_LLM_MAX_LEAVES_PER_FR=${HOW_WBS_LLM_MAX_LEAVES_PER_FR:-4}
+      - HOW_WBS_LLM_MAX_CHUNKS=${HOW_WBS_LLM_MAX_CHUNKS:-16}
+      - HOW_WBS_LLM_CACHE=${HOW_WBS_LLM_CACHE:-1}
+      - HOW_WBS_LLM_CACHE_TTL_SEC=${HOW_WBS_LLM_CACHE_TTL_SEC:-604800}
+      - HOW_WBS_TOOL_TIMEOUT_MS=${HOW_WBS_TOOL_TIMEOUT_MS:-900000}
+      - HOW_SCHEDULE_TOOL_TIMEOUT_MS=${HOW_SCHEDULE_TOOL_TIMEOUT_MS:-600000}
+      - SPRINT_LLM_TIMEOUT_MS=${SPRINT_LLM_TIMEOUT_MS:-180000}
+      - SPRINT_LLM_DEADLINE_MS=${SPRINT_LLM_DEADLINE_MS:-600000}
+      - HOW_WBS_LLM_JOB_TIMEOUT_MS=${HOW_WBS_LLM_JOB_TIMEOUT_MS:-1800000}
+      - HOW_WBS_LLM_JOB_STALE_MS=${HOW_WBS_LLM_JOB_STALE_MS:-1900000}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - RABBITMQ_WBS_LLM_QUEUE=${RABBITMQ_WBS_LLM_QUEUE:-ai.planning.wbs_llm}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_URL=${REDIS_URL:-}
+      # Optional Redis Stack (RedisJSON) for LangGraph checkpointer — see devops/swarm/redis-stack-lg/
+      - LG_REDIS_URL=${LG_REDIS_URL:-}
+      - REDIS_SENTINELS=${REDIS_SENTINELS:-}
+      - REDIS_SENTINEL_NAME=${REDIS_SENTINEL_NAME:-mymaster}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_USE_AUTH=${REDIS_USE_AUTH:-false}
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${AI_PROJECT_PLANNING_SERVICE_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 1536M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  # WBS chunks: ai-project-planning-llm-jobs-worker (LLM_JOBS_WBS=1 → ai.planning.llm_jobs).
+  # Legacy wbsChunk.worker / ai.planning.wbs_chunk removed from Swarm.
+
+  ai-project-planning-llm-jobs-worker:
+    image: ${AI_PROJECT_PLANNING_SERVICE_IMAGE}
+    command: ["node", "src/workers/llmJobs.worker.js"]
+    env_file:
+      - .env
+      - ./services/ai-project-planning-service/.env
+    environment:
+      - WORKER_ROLE=llm_jobs
+      - LLM_JOBS_ENABLED=${LLM_JOBS_ENABLED:-0}
+      - LLM_JOBS_INLINE=0
+      - LLM_JOBS_TRANSPORT=rabbit
+      - LLM_JOBS_MEMORY=0
+      - LLM_JOBS_WBS=${LLM_JOBS_WBS:-1}
+      - LLM_JOBS_TYPES=${LLM_JOBS_TYPES:-*}
+      - LLM_JOBS_QUEUE=${LLM_JOBS_QUEUE:-ai.planning.llm_jobs}
+      - LLM_JOBS_DLQ=${LLM_JOBS_DLQ:-ai.planning.llm_jobs.dlq}
+      - LLM_JOBS_PREFETCH=${LLM_JOBS_PREFETCH:-1}
+      - ARTIFACT_STORE=${ARTIFACT_STORE:-0}
+      - AI_PLANNING_LLM=${AI_PLANNING_LLM:-1}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai_compatible}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_CHAT_FALLBACK_MODELS=${LLM_CHAT_FALLBACK_MODELS:-}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - RABBITMQ_QUORUM_QUEUES=${RABBITMQ_QUORUM_QUEUES:-true}
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${AI_PROJECT_PLANNING_LLM_JOBS_WORKER_REPLICAS:-0}
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  # Documents retired into organization-service — traffic via DOCUMENT_SERVICE_URL remap.
+  # Keep service definition + document_db; default replicas 0 until folder delete approval.
+  voice-service:
+    image: ${VOICE_SERVICE_IMAGE}
+    ports:
+      - target: 3005
+        published: 3005
+        protocol: tcp
+        mode: ingress
+      - target: 40000
+        published: 40000
+        protocol: udp
+        mode: host
+      - target: 40001
+        published: 40001
+        protocol: udp
+        mode: host
+      - target: 40002
+        published: 40002
+        protocol: udp
+        mode: host
+      - target: 40003
+        published: 40003
+        protocol: udp
+        mode: host
+      - target: 40004
+        published: 40004
+        protocol: udp
+        mode: host
+      - target: 40005
+        published: 40005
+        protocol: udp
+        mode: host
+      - target: 40006
+        published: 40006
+        protocol: udp
+        mode: host
+      - target: 40007
+        published: 40007
+        protocol: udp
+        mode: host
+      - target: 40008
+        published: 40008
+        protocol: udp
+        mode: host
+      - target: 40009
+        published: 40009
+        protocol: udp
+        mode: host
+      - target: 40010
+        published: 40010
+        protocol: udp
+        mode: host
+      - target: 40011
+        published: 40011
+        protocol: udp
+        mode: host
+      - target: 40012
+        published: 40012
+        protocol: udp
+        mode: host
+      - target: 40013
+        published: 40013
+        protocol: udp
+        mode: host
+      - target: 40014
+        published: 40014
+        protocol: udp
+        mode: host
+      - target: 40015
+        published: 40015
+        protocol: udp
+        mode: host
+      - target: 40016
+        published: 40016
+        protocol: udp
+        mode: host
+      - target: 40017
+        published: 40017
+        protocol: udp
+        mode: host
+      - target: 40018
+        published: 40018
+        protocol: udp
+        mode: host
+      - target: 40019
+        published: 40019
+        protocol: udp
+        mode: host
+      - target: 40020
+        published: 40020
+        protocol: udp
+        mode: host
+      - target: 40021
+        published: 40021
+        protocol: udp
+        mode: host
+      - target: 40022
+        published: 40022
+        protocol: udp
+        mode: host
+      - target: 40023
+        published: 40023
+        protocol: udp
+        mode: host
+      - target: 40024
+        published: 40024
+        protocol: udp
+        mode: host
+      - target: 40025
+        published: 40025
+        protocol: udp
+        mode: host
+      - target: 40026
+        published: 40026
+        protocol: udp
+        mode: host
+      - target: 40027
+        published: 40027
+        protocol: udp
+        mode: host
+      - target: 40028
+        published: 40028
+        protocol: udp
+        mode: host
+      - target: 40029
+        published: 40029
+        protocol: udp
+        mode: host
+      - target: 40030
+        published: 40030
+        protocol: udp
+        mode: host
+      - target: 40031
+        published: 40031
+        protocol: udp
+        mode: host
+      - target: 40032
+        published: 40032
+        protocol: udp
+        mode: host
+      - target: 40033
+        published: 40033
+        protocol: udp
+        mode: host
+      - target: 40034
+        published: 40034
+        protocol: udp
+        mode: host
+      - target: 40035
+        published: 40035
+        protocol: udp
+        mode: host
+      - target: 40036
+        published: 40036
+        protocol: udp
+        mode: host
+      - target: 40037
+        published: 40037
+        protocol: udp
+        mode: host
+      - target: 40038
+        published: 40038
+        protocol: udp
+        mode: host
+      - target: 40039
+        published: 40039
+        protocol: udp
+        mode: host
+      - target: 40040
+        published: 40040
+        protocol: udp
+        mode: host
+      - target: 40041
+        published: 40041
+        protocol: udp
+        mode: host
+      - target: 40042
+        published: 40042
+        protocol: udp
+        mode: host
+      - target: 40043
+        published: 40043
+        protocol: udp
+        mode: host
+      - target: 40044
+        published: 40044
+        protocol: udp
+        mode: host
+      - target: 40045
+        published: 40045
+        protocol: udp
+        mode: host
+      - target: 40046
+        published: 40046
+        protocol: udp
+        mode: host
+      - target: 40047
+        published: 40047
+        protocol: udp
+        mode: host
+      - target: 40048
+        published: 40048
+        protocol: udp
+        mode: host
+      - target: 40049
+        published: 40049
+        protocol: udp
+        mode: host
+      - target: 40050
+        published: 40050
+        protocol: udp
+        mode: host
+      - target: 40051
+        published: 40051
+        protocol: udp
+        mode: host
+      - target: 40052
+        published: 40052
+        protocol: udp
+        mode: host
+      - target: 40053
+        published: 40053
+        protocol: udp
+        mode: host
+      - target: 40054
+        published: 40054
+        protocol: udp
+        mode: host
+      - target: 40055
+        published: 40055
+        protocol: udp
+        mode: host
+      - target: 40056
+        published: 40056
+        protocol: udp
+        mode: host
+      - target: 40057
+        published: 40057
+        protocol: udp
+        mode: host
+      - target: 40058
+        published: 40058
+        protocol: udp
+        mode: host
+      - target: 40059
+        published: 40059
+        protocol: udp
+        mode: host
+      - target: 40060
+        published: 40060
+        protocol: udp
+        mode: host
+      - target: 40061
+        published: 40061
+        protocol: udp
+        mode: host
+      - target: 40062
+        published: 40062
+        protocol: udp
+        mode: host
+      - target: 40063
+        published: 40063
+        protocol: udp
+        mode: host
+      - target: 40064
+        published: 40064
+        protocol: udp
+        mode: host
+      - target: 40065
+        published: 40065
+        protocol: udp
+        mode: host
+    env_file:
+      - .env
+      - ./services/voice-service/.env
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-3005}
+      # docker stack deploy hiểu nhầm "voice-" trong message :? thành toán tử :-, rồi ghi đè URI/secret bằng đuôi câu lỗi.
+      # Bắt buộc có giá trị: deploy-stack.sh kiểm tra sau khi source services/voice-service/.env.
+      JWT_SECRET: ${JWT_SECRET}
+      MONGODB_URI: ${MONGODB_URI}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_USE_AUTH: ${REDIS_USE_AUTH:-false}
+      ORGANIZATION_SERVICE_URL: ${ORGANIZATION_SERVICE_URL}
+      USER_SERVICE_URL: ${USER_SERVICE_URL}
+      CHAT_SERVICE_URL: ${CHAT_SERVICE_URL}
+      CHAT_SERVICE_DIRECT_URL: ${CHAT_SERVICE_DIRECT_URL}
+      FRIEND_SERVICE_URL: ${FRIEND_SERVICE_URL}
+      SOCKET_SERVICE_URL: ${SOCKET_SERVICE_URL}
+      NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://atrium.dev}
+      VOICE_SIGNAL_PATH: /voice-socket
+      MEDIASOUP_LISTEN_IP: ${MEDIASOUP_LISTEN_IP:-0.0.0.0}
+      MEDIASOUP_ANNOUNCED_IP: ${MEDIASOUP_ANNOUNCED_IP}
+      MEDIASOUP_PREFER_TCP: ${MEDIASOUP_PREFER_TCP:-true}
+      MEDIASOUP_LOG_LEVEL: ${MEDIASOUP_LOG_LEVEL:-warn}
+      MEDIASOUP_INITIAL_OUTGOING_BITRATE: ${MEDIASOUP_INITIAL_OUTGOING_BITRATE:-1000000}
+      MEDIASOUP_IN_DOCKER: ${MEDIASOUP_IN_DOCKER:-true}
+      RTC_MIN_PORT: ${RTC_MIN_PORT:-40000}
+      RTC_MAX_PORT: ${RTC_MAX_PORT:-40065}
+      REALTIME_INTERNAL_TOKEN: ${REALTIME_INTERNAL_TOKEN}
+      CHAT_INTERNAL_TOKEN: ${CHAT_INTERNAL_TOKEN}
+      USER_SERVICE_INTERNAL_TOKEN: ${USER_SERVICE_INTERNAL_TOKEN}
+      NOTIFICATION_INTERNAL_TOKEN: ${NOTIFICATION_INTERNAL_TOKEN}
+      GATEWAY_INTERNAL_TOKEN: ${GATEWAY_INTERNAL_TOKEN}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      RABBITMQ_QUORUM_QUEUES: ${RABBITMQ_QUORUM_QUEUES:-true}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      MINIO_REGION: ${MINIO_REGION}
+      MINIO_USE_SSL: ${MINIO_USE_SSL}
+      VOICE_MEETING_MIN_PERSIST_SEC: ${VOICE_MEETING_MIN_PERSIST_SEC:-60}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${VOICE_SERVICE_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.labels.voice == true
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 384M
+        reservations:
+          cpus: "0.50"
+          memory: 128M
+
+  notification-service:
+    image: ${NOTIFICATION_SERVICE_IMAGE}
+    env_file:
+      - .env
+      - ./services/notification-service/.env
+    environment:
+      - NOTIFICATION_INTERNAL_TOKEN=${NOTIFICATION_INTERNAL_TOKEN}
+      - NOTIFICATION_ASYNC_DISPATCH=${NOTIFICATION_ASYNC_DISPATCH:-false}
+      - NOTIFICATION_DISPATCH_WORKER=false
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${NOTIFICATION_SERVICE_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          cpus: "0.10"
+          memory: 80M
+
+  notification-dispatch-worker:
+    image: ${NOTIFICATION_SERVICE_IMAGE}
+    command: ["node", "src/worker.js"]
+    env_file:
+      - .env
+      - ./services/notification-service/.env
+    environment:
+      - NOTIFICATION_INTERNAL_TOKEN=${NOTIFICATION_INTERNAL_TOKEN}
+      - NOTIFICATION_ASYNC_DISPATCH=true
+      - NOTIFICATION_DISPATCH_WORKER=true
+      - RABBITMQ_URL=${RABBITMQ_URL}
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${NOTIFICATION_DISPATCH_WORKER_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 320M
+        reservations:
+          cpus: "0.20"
+          memory: 96M
+
+  # Host Nginx → :3017 vào đây (sticky). socket-service chỉ overlay; S2S dùng DNS VIP.
+  socket-edge:
+    image: haproxy:2.9.14-alpine
+    configs:
+      - source: socket_edge_haproxy
+        target: /usr/local/etc/haproxy/haproxy.cfg
+    ports:
+      - target: 3017
+        published: 3017
+        protocol: tcp
+        mode: ingress
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+
+  socket-service:
+    image: ${SOCKET_SERVICE_IMAGE}
+    # Không publish host — host Nginx qua socket-edge :3017 (sticky sid / X-Real-IP).
+    # Overlay: socket-service:3017 (VIP S2S) và tasks.socket-service (edge template).
+    expose:
+      - "3017"
+    env_file:
+      - .env
+      - ./services/socket-service/.env
+    environment:
+      - USER_SERVICE_URL=${USER_SERVICE_URL}
+      - USER_SERVICE_INTERNAL_TOKEN=${USER_SERVICE_INTERNAL_TOKEN}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_URL=${REDIS_URL:-}
+      - REDIS_SENTINELS=${REDIS_SENTINELS:-}
+      - REDIS_SENTINEL_NAME=${REDIS_SENTINEL_NAME:-mymaster}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_USE_AUTH=${REDIS_USE_AUTH:-false}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - FRIEND_DM_USE_QUEUE=${FRIEND_DM_USE_QUEUE}
+      - REALTIME_INTERNAL_TOKEN=${REALTIME_INTERNAL_TOKEN}
+      - SOCKET_IO_REDIS_ADAPTER=${SOCKET_IO_REDIS_ADAPTER:-true}
+    networks:
+      - enterprise-network
+    deploy:
+      # Scale >=2 cần SOCKET_IO_REDIS_ADAPTER=true + socket-edge sticky (host :3017).
+      replicas: ${SOCKET_SERVICE_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 320M
+        reservations:
+          cpus: "0.20"
+          memory: 96M
+
+  # --- Infra / AI (trước đây Compose extra) — DNS: ollama, minio, qdrant ---
+  # Ollama local — mặc định tắt (OLLAMA_REPLICAS=0). Bật lại: OLLAMA_REPLICAS=1 + OLLAMA_BASE_URL.
+  ollama:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - enterprise-network
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 45s
+    deploy:
+      replicas: ${OLLAMA_REPLICAS:-0}
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "4.00"
+          memory: 3072M
+        reservations:
+          cpus: "1.00"
+          memory: 1024M
+      placement:
+        constraints:
+          - node.labels.ai == true
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.2
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - enterprise-network
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+
+  # Docker Hub minio/* community images removed (2025-10); use Quay mirrors.
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - enterprise-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+
+  minio-init:
+    image: quay.io/minio/mc:latest
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET:-meeting-recordings}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in $$(seq 1 40); do
+          mc alias set local http://minio:9000 "$$MINIO_ACCESS_KEY" "$$MINIO_SECRET_KEY" && break
+          sleep 2
+        done
+        mc mb --ignore-existing "local/$$MINIO_BUCKET"
+        exit 0
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 15
+
+configs:
+  socket_edge_haproxy:
+    file: ./devops/swarm/socket-edge-haproxy.cfg
+
+networks:
+  enterprise-network:
+    driver: overlay
+    attachable: true
+
+volumes:
+  user_service_uploads:
+  # Reuse Compose-extra volume names so existing models/objects survive cutover.
+  ollama_data:
+    external: true
+    name: atrium-extra_ollama_data
+  minio_data:
+    external: true
+    name: atrium-extra_minio_data
+  qdrant_data:
+    external: true
+    name: atrium-extra_qdrant_data

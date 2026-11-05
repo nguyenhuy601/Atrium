@@ -1,0 +1,95 @@
+import { useMemo } from 'react';
+import { Link } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
+import { useAppStrings } from '../../locales/appStrings';
+import AdminConfigTabsHubShell from '../../components/Admin/AdminConfigTabsHubShell';
+import { adminSecondaryBtnClass } from '../../components/adminUsers/adminUserPanelUi';
+import OrganizationSettingsPanel from '../../components/Organization/OrganizationSettingsPanel';
+import RetentionPolicyPanel from '../adminTasks/RetentionPolicyPanel';
+import EffortEstimationSettingsPanel from './EffortEstimationSettingsPanel';
+import { useCompanyAdminContext } from '../../pages/Admin/CompanyAdminLayout';
+import { useGrantScopes } from '../../hooks/useGrantScopes';
+
+const TAB_COMPANY = 'company';
+const TAB_RETENTION = 'retention';
+const TAB_STRUCTURE = 'structure';
+const TAB_EFFORT = 'effort';
+
+function SettingsEmbed({ organization, lockTab, onUpdated }) {
+  if (!organization) return null;
+  return (
+    <OrganizationSettingsPanel
+      organization={organization}
+      initialTab={lockTab}
+      lockTab={lockTab}
+      hideChrome
+      hideBranchUi
+      suiteLayout={false}
+      onOrganizationUpdated={onUpdated}
+    />
+  );
+}
+
+function NoAccessState() {
+  const { t } = useAppStrings();
+  return (
+    <div role="status" className="space-y-3 rounded-xl border border-border bg-card px-4 py-4">
+      <p className="text-sm text-muted-foreground">{t('adminDomains.noPermission')}</p>
+      <Link to="/app/admin" className={adminSecondaryBtnClass('focus-visible:ring-offset-2')}>
+        <ArrowLeft size={16} aria-hidden />
+        {t('adminDomains.backToHub')}
+      </Link>
+    </div>
+  );
+}
+
+export default function SystemConfigHubPanel({ orgId }) {
+  const { t } = useAppStrings();
+  const {
+    organization,
+    organizationLoading,
+    refreshOrganization,
+    orgId: ctxOrgId,
+  } = useCompanyAdminContext();
+  const { hasGrant } = useGrantScopes(orgId || ctxOrgId);
+  const canConfigure = hasGrant('organization.structure.update') || hasGrant('organization.policy.update');
+
+  const tabs = useMemo(
+    () => [
+      { id: TAB_COMPANY, label: t('adminDomains.systemConfig.company') },
+      { id: TAB_RETENTION, label: t('adminDomains.systemConfig.retention') },
+      { id: TAB_STRUCTURE, label: t('adminDomains.systemConfig.structure') },
+      {
+        id: TAB_EFFORT,
+        label: t('adminDomains.systemConfig.effortEstimation'),
+      },
+    ],
+    [t]
+  );
+
+  return (
+    <AdminConfigTabsHubShell
+      title={t('adminDomains.systemConfig.configHub')}
+      hint={t('adminSystemConfig.configHubHint')}
+      tabs={tabs}
+      defaultTab={TAB_COMPANY}
+    >
+      {({ activeTab }) => {
+        if (activeTab === TAB_RETENTION) {
+          if (!canConfigure) return <NoAccessState />;
+          return <RetentionPolicyPanel orgId={orgId} embedded />;
+        }
+        if (activeTab === TAB_EFFORT) {
+          if (!canConfigure) return <NoAccessState />;
+          return <EffortEstimationSettingsPanel organizationId={orgId} />;
+        }
+        if (!canConfigure) return <NoAccessState />;
+        if (organizationLoading || !organization) {
+          return <p className="text-sm text-muted-foreground">{t('common.loading')}</p>;
+        }
+        const lockTab = activeTab === TAB_STRUCTURE ? 'structure' : 'general';
+        return <SettingsEmbed organization={organization} lockTab={lockTab} onUpdated={refreshOrganization} />;
+      }}
+    </AdminConfigTabsHubShell>
+  );
+}

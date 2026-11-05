@@ -1,0 +1,546 @@
+const Task = require('../models/Task');
+const { fetchUserProfileByIdInternal } = require('../clients/userService.client');
+const { notifyTaskAssigned } = require('../clients/notification.client');
+const { emitTaskFactBestEffort, emitStatusTransitionFactBestEffort } = require('../clients/analyticsPublisher.client');
+const {
+  isDoneLikeStatus,
+  isInProgressLikeStatus,
+  maybeFirstInProgressPatch,
+} = require('../utils/task/taskCycleTime');
+const { getRedisClient, logger } = require('@enterprise/shared');
+const { buildTrustedGatewayHeaders } = require('@enterprise/shared/middleware/gatewayTrust');
+const {
+  fetchTaskWorkspaceScope,
+  userCanAccessTask,
+} = require('./taskWorkspaceScope');
+const axios = require('axios');
+const { writeTaskPayload, encryptTextIfEnabled } = require('../utils/task/taskPii');
+const { toClientTask, toClientTaskList } = require('../utils/task/taskDto');
+const {
+  CALENDAR_TASK_SELECT,
+  pickCalendarTaskFields,
+  toDateKeyUTC,
+} = require('../utils/task/taskCalendarQuery');
+const {
+  taskCalendarFeedCacheKey,
+  DEFAULT_TASK_CALENDAR_CACHE_TTL_SEC,
+} = require('@enterprise/shared/cache/taskCalendarCacheKeys');
+
+const ORGANIZATION_SERVICE_URL = String(process.env.ORGANIZATION_SERVICE_URL || '').trim().replace(/\/+$/, '');
+if (!ORGANIZATION_SERVICE_URL) throw new Error('Thiếu biến môi trường: ORGANIZATION_SERVICE_URL');
+
+async function enrichTasksWithUserLabels(tasks) {
+  const list = Array.isArray(tasks) ? tasks : [];
+  if (!list.length) return list;
+
+  const userIds = new Set();
+  for (const task of list) {
+    if (task?.assigneeId) userIds.add(String(task.assigneeId));
+    if (task?.createdBy) userIds.add(String(task.createdBy));
+  }
+
+  const profileById = new Map();
+  await Promise.all(
+    [...userIds].map(async (uid) => {
+      try {
+        const res = await fetchUserProfileByIdInternal(uid);
+        const body = res?.data ?? {};
+        const user = body?.data?.user ?? body?.user ?? body?.data ?? body;
+        const displayName =
+          user?.displayName ||
+          user?.fullName ||
+          user?.username ||
+          (user?.email ? String(user.email).split('@')[0] : '') ||
+          uid.slice(-6);
+        profileById.set(uid, {
+          _id: uid,
+          displayName,
+          username: user?.username || null,
+          avatar: user?.avatar || null,
+        });
+      } catch {
+        profileById.set(uid, { _id: uid, displayName: uid.slice(-6), username: null, avatar: null });
+      }
+    })
+  );
+
+  return list.map((task) => {
+    const assigneeId = task?.assigneeId ? String(task.assigneeId) : '';
+    const createdById = task?.createdBy ? String(task.createdBy) : '';
+    return {
+      ...task,
+      assignee: assigneeId ? profileById.get(assigneeId) || null : null,
+      createdByUser: createdById ? profileById.get(createdById) || null : null,
+    };
+  });
+}
+
+class TaskService {
+  // Tạo task mới
+  async createTask(taskData) {
+    try {
+      const {
+        title,
+        summary,
+        description,
+        assigneeId,
+        createdBy,
+        serverId,
+        organizationId,
+        priority,
+        dueDate,
+        tags,
+        departmentId,
+        teamId,
+        departmentName,
+        aiGenerated,
+        sourceMessageId,
+      } = taskData;
+
+      // Kiểm tra organization — organization-service yêu cầu x-user-id (protect) + membership
+      if (organizationId) {
+        const orgRes = await axios.get(`${ORGANIZATION_SERVICE_URL}/api/organizations/${organizationId}`, {
+          headers: buildTrustedGatewayHeaders(createdBy),
+          timeout: 15000,
+          validateStatus: () => true,
+        });
+        if (orgRes.status === 401) {
+          throw new Error('Cannot verify organization (missing or invalid user context)');
+        }
+        if (orgRes.status === 403) {
+          throw new Error('You are not a member of this organization');
+        }
+        if (orgRes.status === 404) {
+          throw new Error('Organization not found');
+        }
+        if (orgRes.status !== 200) {
+          throw new Error('Cannot verify organization');
+        }
+      }
+
+      // Kiểm tra assigneeId nếu có
+      if (assigneeId) {
+        const userRes = await fetchUserProfileByIdInternal(assigneeId);
+        if (userRes.status !== 200 || !userRes.data?.success) {
+          throw new Error('Assignee user not found');
+        }
+      }
+
+      const task = new Task(
+        writeTaskPayload({
+          title,
+          summary: summary ? String(summary).trim() : '',
+          description,
+          assigneeId,
+          createdBy,
+          serverId,
+          organizationId,
+          departmentId: departmentId || null,
+          teamId: teamId || null,
+          departmentName: departmentName ? String(departmentName).trim() : '',
+          priority: priority || 'medium',
+          dueDate,
+          tags: tags || [],
+          aiGenerated: Boolean(aiGenerated),
+          sourceMessageId: sourceMessageId || null,
+        })
+      );
+
+      await task.save();
+
+      const clientTask = await toClientTask(task);
+
+      emitTaskFactBestEffort({
+        taskId: task._id,
+        organizationId,
+        createdBy,
+        assigneeId,
+        status: task.status,
+      });
+
+      // Báo người được giao việc — dùng clientTask vì title trong doc đã mã hoá at-rest
+      if (assigneeId) {
+        await notifyTaskAssigned({
+          actorId: createdBy?.toString(),
+          assigneeId: assigneeId.toString(),
+          task: clientTask,
+        });
+      }
+
+      logger.info(`Task created: ${task._id}`);
+      return clientTask;
+    } catch (error) {
+      logger.error('Error creating task:', error);
+      throw error;
+    }
+  }
+
+  // Lấy task theo ID
+  async getTaskById(taskId) {
+    try {
+      // Không populate User (không có model User đăng ký trong task-service).
+      const task = await Task.findById(taskId);
+
+      return await toClientTask(task);
+    } catch (error) {
+      logger.error('Error getting task:', error);
+      throw error;
+    }
+  }
+
+  // Lấy danh sách tasks
+  async getTasks(filter, options = {}) {
+    try {
+      const { page = 1, limit = 50, sort: sortOption } = options;
+      const sort = sortOption || { createdAt: -1 };
+      const safeLimit = Math.min(200, Math.max(1, Number(limit) || 50));
+      const safePage = Math.max(1, Number(page) || 1);
+
+      // Không populate User: task-service không đăng ký model User — populate gây MissingSchemaError → 500
+      // (dashboard, lịch, danh sách task chỉ cần id + title + dueDate + status).
+      const tasks = await Task.find(filter)
+        .sort(sort)
+        .limit(safeLimit)
+        .skip((safePage - 1) * safeLimit)
+        .lean();
+
+      const total = await Task.countDocuments(filter);
+      const decrypted = await toClientTaskList(tasks);
+      const enriched = await enrichTasksWithUserLabels(decrypted);
+
+      return {
+        tasks: enriched,
+        totalPages: Math.ceil(total / safeLimit),
+        currentPage: safePage,
+        total,
+      };
+    } catch (error) {
+      logger.error('Error getting tasks:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Calendar feed: lean projection, no user-label enrich, Redis TTL cache (fail-open).
+   * @param {object} filter
+   * @param {{ userId: string, from: Date, to: Date, organizationId?: string|null, page?: number, limit?: number }} options
+   */
+  async getCalendarTasks(filter, options = {}) {
+    const userId = String(options.userId || '').trim();
+    const from = options.from;
+    const to = options.to;
+    const organizationId = options.organizationId ? String(options.organizationId) : '';
+    const page = Math.max(1, parseInt(options.page, 10) || 1);
+    const limit = Math.min(500, Math.max(1, parseInt(options.limit, 10) || 200));
+    const fromDay = toDateKeyUTC(from);
+    const toDay = toDateKeyUTC(to);
+    const cacheKey = taskCalendarFeedCacheKey({
+      userId,
+      fromDay,
+      toDay,
+      orgScope: organizationId || 'me',
+    });
+
+    try {
+      const redis = getRedisClient();
+      if (redis) {
+        const hit = await redis.get(cacheKey);
+        if (hit) {
+          const parsed = JSON.parse(hit);
+          if (parsed && Array.isArray(parsed.tasks)) {
+            return parsed;
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn('[getCalendarTasks] Redis get failed (fail-open):', err?.message || err);
+    }
+
+    try {
+      const tasks = await Task.find(filter)
+        .select(CALENDAR_TASK_SELECT)
+        .sort({ dueDate: 1, startDate: 1 })
+        .limit(limit)
+        .skip((page - 1) * limit)
+        .lean();
+
+      const total = await Task.countDocuments(filter);
+      const decrypted = await toClientTaskList(tasks);
+      const slim = decrypted.map(pickCalendarTaskFields);
+
+      const result = {
+        tasks: slim,
+        totalPages: Math.ceil(total / Math.max(limit, 1)) || 1,
+        currentPage: page,
+        total,
+        view: 'calendar',
+      };
+
+      try {
+        const redis = getRedisClient();
+        if (redis) {
+          await redis.set(
+            cacheKey,
+            JSON.stringify(result),
+            'EX',
+            DEFAULT_TASK_CALENDAR_CACHE_TTL_SEC
+          );
+        }
+      } catch (err) {
+        logger.warn('[getCalendarTasks] Redis set failed (fail-open):', err?.message || err);
+      }
+
+      return result;
+    } catch (error) {
+      logger.error('Error getting calendar tasks:', error);
+      throw error;
+    }
+  }
+
+  // Cập nhật task
+  async updateTask(taskId, updateData, userId) {
+    try {
+      const task = await Task.findById(taskId);
+
+      if (!task) {
+        throw new Error('Task not found');
+      }
+
+      let scope = null;
+      if (task.organizationId) {
+        scope = await fetchTaskWorkspaceScope(userId, task.organizationId);
+      }
+      if (!userCanAccessTask(task, userId, scope)) {
+        const err = new Error('Bạn không có quyền cập nhật task này');
+        err.statusCode = 403;
+        err.errorCode = 'TASK_UPDATE_FORBIDDEN';
+        throw err;
+      }
+
+      const allowedFields = [
+        'title',
+        'description',
+        'assigneeId',
+        'status',
+        'priority',
+        'dueDate',
+        'tags',
+        'attachments',
+        'estimateHours',
+      ];
+      const updateFields = {};
+
+      for (const field of allowedFields) {
+        if (updateData[field] !== undefined) {
+          updateFields[field] = updateData[field];
+        }
+      }
+
+      if (
+        updateFields.assigneeId !== undefined &&
+        task.organizationId &&
+        scope &&
+        String(updateFields.assigneeId || '') !== String(task.assigneeId || '')
+      ) {
+        const { canAssignUser } = require('./taskWorkspaceScope');
+        if (!canAssignUser(scope, updateFields.assigneeId)) {
+          const err = new Error('Không thể gán task cho thành viên ngoài phạm vi quản lý');
+          err.statusCode = 403;
+          err.errorCode = 'TASK_ASSIGN_FORBIDDEN';
+          throw err;
+        }
+      }
+
+      const prevEstimateHours =
+        task.estimateHours === undefined || task.estimateHours === null
+          ? null
+          : Number(task.estimateHours);
+
+      if (updateFields.estimateHours !== undefined) {
+        const { normalizeEstimateHours } = require('../utils/task/timeTracking');
+        updateFields.estimateHours = normalizeEstimateHours(updateFields.estimateHours);
+      }
+
+      if (updateFields.attachments !== undefined) {
+        const arr = Array.isArray(updateFields.attachments) ? updateFields.attachments : [];
+        updateFields.attachments = arr.map((a) => ({
+          name: a?.name != null ? String(a.name).slice(0, 500) : 'file',
+          url: a?.url != null ? String(a.url) : '',
+          ...(a?.documentId ? { documentId: a.documentId } : {}),
+        }));
+      }
+
+      // Nếu status là done, set completedAt
+      if (updateFields.status === 'done' && task.status !== 'done') {
+        updateFields.completedAt = new Date();
+      } else if (updateFields.status !== 'done' && task.status === 'done') {
+        updateFields.completedAt = null;
+      }
+
+      if (updateFields.status !== undefined && updateFields.status !== task.status) {
+        const cyclePatch = maybeFirstInProgressPatch(task, updateFields.status);
+        if (cyclePatch) {
+          Object.assign(updateFields, cyclePatch);
+        }
+      }
+
+      const becameDone = updateFields.status === 'done' && task.status !== 'done';
+      const leftDone = updateFields.status && updateFields.status !== 'done' && task.status === 'done';
+      const statusChanged =
+        updateFields.status !== undefined && String(updateFields.status) !== String(task.status);
+
+      const encryptedUpdate = writeTaskPayload(updateFields);
+      const updated = await Task.findByIdAndUpdate(
+        taskId,
+        { $set: encryptedUpdate },
+        { returnDocument: 'after', runValidators: true }
+      );
+
+      if (becameDone || leftDone) {
+        emitTaskFactBestEffort({
+          taskId,
+          organizationId: task.organizationId,
+          projectId: task.projectId,
+          createdBy: task.createdBy,
+          assigneeId: updated?.assigneeId || task.assigneeId,
+          status: updated?.status || updateFields.status,
+          doneDelta: becameDone ? 1 : -1,
+          estimateHours: updated?.estimateHours ?? task.estimateHours,
+          issueType: updated?.issueType || task.issueType,
+          completedAt: updated?.completedAt,
+          firstInProgressAt: updated?.firstInProgressAt || task.firstInProgressAt,
+        });
+      }
+
+      if (statusChanged) {
+        const from = String(task.status || '');
+        const to = String(updateFields.status || '');
+        const isReopen = isDoneLikeStatus(from) && !isDoneLikeStatus(to);
+        const isRework =
+          /review/i.test(from) && isInProgressLikeStatus(to) && !isDoneLikeStatus(to);
+        emitStatusTransitionFactBestEffort({
+          taskId,
+          organizationId: task.organizationId,
+          projectId: task.projectId,
+          assigneeId: updated?.assigneeId || task.assigneeId,
+          fromStatus: from,
+          toStatus: to,
+          isRework,
+          isReopen,
+          firstInProgressAt: updated?.firstInProgressAt || task.firstInProgressAt,
+        });
+      }
+
+      if (
+        updateFields.estimateHours !== undefined &&
+        task.projectId &&
+        updateFields.estimateHours !== prevEstimateHours
+      ) {
+        const { logActivity } = require('./project.service');
+        await logActivity({
+          organizationId: task.organizationId,
+          projectId: task.projectId,
+          boardId: task.boardId || null,
+          taskId,
+          actorId: userId,
+          type: 'estimate_updated',
+          title: `Estimate ${updateFields.estimateHours ?? '—'}h`,
+          payload: {
+            before: prevEstimateHours,
+            after: updateFields.estimateHours,
+          },
+        });
+      }
+
+      // Execution Control: task mutate → outbox
+      if (task.projectId && task.organizationId) {
+        try {
+          const {
+            shouldEnqueueFromPatch,
+            enqueueTaskScanTriggerBestEffort,
+          } = require('./executionControl/triggers');
+          const keys = Object.keys(updateFields);
+          if (shouldEnqueueFromPatch(keys)) {
+            enqueueTaskScanTriggerBestEffort({
+              organizationId: task.organizationId,
+              projectId: task.projectId,
+              taskId,
+              origin: 'board',
+              reason: `updateTask:${keys.slice(0, 6).join(',')}`,
+            });
+          }
+        } catch {
+          /* EC optional */
+        }
+      }
+
+      logger.info(`Task updated: ${taskId}`);
+      return await toClientTask(updated);
+    } catch (error) {
+      logger.error('Error updating task:', error);
+      throw error;
+    }
+  }
+
+  // Xóa task
+  async deleteTask(taskId, userId) {
+    try {
+      const task = await Task.findById(taskId);
+
+      if (!task) {
+        throw new Error('Task not found');
+      }
+
+      // Chỉ creator mới được xóa
+      if (task.createdBy.toString() !== userId.toString()) {
+        throw new Error('Only creator can delete task');
+      }
+
+      // Soft delete
+      task.isActive = false;
+      await task.save();
+
+      logger.info(`Task deleted: ${taskId}`);
+      return await toClientTask(task);
+    } catch (error) {
+      logger.error('Error deleting task:', error);
+      throw error;
+    }
+  }
+
+  // Thêm comment
+  async addComment(taskId, userId, content) {
+    try {
+      const task = await Task.findById(taskId);
+
+      if (!task) {
+        throw new Error('Task not found');
+      }
+
+      let scope = null;
+      if (task.organizationId) {
+        scope = await fetchTaskWorkspaceScope(userId, task.organizationId);
+      }
+      if (!userCanAccessTask(task, userId, scope)) {
+        throw new Error('Bạn không có quyền bình luận task này');
+      }
+
+      task.comments.push({
+        userId,
+        content: encryptTextIfEnabled(content),
+        createdAt: new Date(),
+      });
+
+      await task.save();
+
+      logger.info(`Comment added to task: ${taskId}`);
+      return await toClientTask(task);
+    } catch (error) {
+      logger.error('Error adding comment:', error);
+      throw error;
+    }
+  }
+}
+
+module.exports = new TaskService();
+

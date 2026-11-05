@@ -1,0 +1,2266 @@
+/**
+ * AI Analysis facade (schema v2) — pack/Gate/snapshot + phase-run S2S to APS.
+ * Phase LLM/tools live on ai-project-planning-service (LangGraph). Per-job run removed.
+ */
+
+const RequirementPack = require('../models/RequirementPack');
+const aiProjectPlanningClient = require('../clients/aiProjectPlanning.client');
+const { AI_PLANNING_ALLOWED_STATUSES } = require('../constants/requirementLifecycle');
+const { assertPackReadyForAiAnalysis } = require('../utils/requirement/requirementPlanningReadiness');
+const {
+  createEmptyAiAnalysisContainer,
+  ensureAiAnalysisContainer,
+  assertSchemaVersionPresent,
+  assertPreviousJobConfirmed,
+  assertJobNotConfirmedForRerun,
+  summarizeAiAnalysis,
+  markJobReadyStub,
+  markJobConfirmed,
+  markJobsStaleAfter,
+  applyJobEdits,
+  getJobStatus,
+  assertCapabilityConfirmable,
+} = require('../utils/aiAnalysis/aiAnalysisContainer');
+const { parseJobId } = require('../constants/aiAnalysisJobs.constants');
+const { ensureHierarchyDecompositionMigrated } = require('../utils/aiAnalysis/aiAnalysisMigrateJobs');
+const { buildAiAnalysisSheet11Buffer } = require('../utils/aiAnalysis/aiAnalysisSheet11Export');
+const {
+  mergeHierarchyProposalsIntoFrList,
+} = require('../utils/aiAnalysis/aiAnalysisHierarchyMerge');
+const { assertRequirementPermission } = require('./requirementAccess.service');
+const {
+  failStalePendingAiAnalysisJobs,
+  shouldSkipRerunBecauseReady,
+} = require('../utils/aiAnalysis/aiAnalysisStaleGc');
+const {
+  loadActiveSnapshotDocument,
+  assertSnapshotRequired,
+  ensureActiveAiAnalysisSnapshot,
+  isSnapshotPipelineEnabled,
+} = require('./aiAnalysisSnapshot.service');
+const { buildJobInputFromSnapshot, buildPackObjectFromSnapshot } = require('../utils/aiAnalysis/pipeline/buildPipeline');
+
+const ALLOWED_STATUS_SET = new Set(AI_PLANNING_ALLOWED_STATUSES);
+
+async function loadPackForAiAnalysis({ packId, organizationId }) {
+  const pack = await RequirementPack.findOne({
+    _id: packId,
+    organizationId,
+    isActive: true,
+  });
+  if (!pack) {
+    const err = new Error('Requirement pack không tồn tại');
+    err.statusCode = 404;
+    throw err;
+  }
+  return pack;
+}
+
+function assertPackStatusAllowsAi(pack, job = null) {
+  const status = String(pack.status || '');
+  if (ALLOWED_STATUS_SET.has(status)) return;
+  // Draft project HITL: WHAT jobs may run on intake draft (fill Scope/FR from docs).
+  if (status === 'draft' && job) {
+    const { isAiAnalysisWhatJob } = require('../constants/aiAnalysisJobs.constants');
+    if (isAiAnalysisWhatJob(job)) return;
+  }
+  const err = new Error(
+    `Không chạy AI Analysis ở trạng thái ${status} (cần under_review|approved|project_linked)`
+  );
+  err.statusCode = 422;
+  err.errorCode = 'AI_ANALYSIS_STATUS_NOT_ALLOWED';
+  err.details = { status, job: job || undefined };
+  throw err;
+}
+
+/**
+ * ADR 0003 RULE-04 — HOW/Planning jobs only after Requirement pack approved
+ * + backlog Story SoT (approvedBacklogStructure.stories) so WBS is not empty.
+ * @returns {{ structure: object|null, stories: object[], rematerialized: boolean }|undefined}
+ */
+function assertHowJobsRequireApprovedPack(pack, job) {
+  const { isAiAnalysisHowJob } = require('../constants/aiAnalysisJobs.constants');
+  if (!isAiAnalysisHowJob(job)) return undefined;
+  const {
+    assertHowPackApprovedWithBacklogStories,
+  } = require('../utils/srsProposal/assertHowApprovedBacklogStories');
+  return assertHowPackApprovedWithBacklogStories(pack, { job });
+}
+
+function ensurePackContainer(pack) {
+  const raw = pack.aiAnalysis;
+  const rawCapStatus =
+    raw && typeof raw === 'object'
+      ? String(raw.jobs?.capabilityAnalysis?.status || '')
+      : '';
+  const jobWasMissing =
+    !raw ||
+    typeof raw !== 'object' ||
+    !raw.jobs ||
+    typeof raw.jobs !== 'object' ||
+    !Object.prototype.hasOwnProperty.call(raw.jobs, 'hierarchyDecomposition');
+
+  if (!raw || typeof raw !== 'object') {
+    pack.aiAnalysis = createEmptyAiAnalysisContainer();
+  } else {
+    pack.aiAnalysis = ensureAiAnalysisContainer(pack.aiAnalysis);
+  }
+
+  if (
+    rawCapStatus === 'ready' &&
+    getJobStatus(pack.aiAnalysis, 'capabilityAnalysis') === 'stale'
+  ) {
+    pack.markModified('aiAnalysis');
+  }
+
+  const migrated = ensureHierarchyDecompositionMigrated(
+    pack.aiAnalysis,
+    pack.functionalRequirements,
+    { jobWasMissing }
+  );
+  if (migrated.changed) {
+    pack.aiAnalysis = migrated.container;
+    pack.markModified('aiAnalysis');
+  }
+
+  assertSchemaVersionPresent(pack.aiAnalysis);
+  return pack.aiAnalysis;
+}
+
+function beginJobPending(pack, container, job) {
+  pack.aiAnalysisStatus = 'pending';
+  let next = markJobReadyStub(container, job);
+  next.jobs[job] = {
+    ...next.jobs[job],
+    status: 'pending',
+    error: null,
+  };
+  pack.aiAnalysis = next;
+  pack.markModified('aiAnalysis');
+  return next;
+}
+
+async function getAiAnalysisSummary({ userId, organizationId, packId }) {
+  await assertRequirementPermission({
+    userId,
+    organizationId,
+    permission: 'requirement:view',
+  });
+  const pack = await loadPackForAiAnalysis({ packId, organizationId });
+  const rawCapStatus = String(pack.aiAnalysis?.jobs?.capabilityAnalysis?.status || '');
+  let container = ensureAiAnalysisContainer(pack.aiAnalysis);
+  let needsSave =
+    rawCapStatus === 'ready' && getJobStatus(container, 'capabilityAnalysis') === 'stale';
+  const gc = failStalePendingAiAnalysisJobs(container);
+  if (gc.changed) {
+    container = gc.container;
+    needsSave = true;
+  }
+  if (needsSave) {
+    pack.aiAnalysis = container;
+    pack.markModified('aiAnalysis');
+    await pack.save();
+  }
+  const { attachLiveRunToPackAiAnalysis } = require('../utils/aiAnalysis/attachLiveRun');
+  const enriched = await attachLiveRunToPackAiAnalysis({
+    aiAnalysis: container,
+    aiAnalysisActiveSnapshotId: pack.aiAnalysisActiveSnapshotId,
+  });
+  return {
+    ...summarizeAiAnalysis(enriched.aiAnalysis || container),
+    snapshot: pack.aiAnalysisSnapshotMeta || null,
+    liveRun: enriched.liveRun || null,
+  };
+}
+
+async function confirmAiAnalysisJob({
+  userId,
+  organizationId,
+  packId,
+  job: jobRaw,
+  phase: phaseRaw,
+  action: actionRaw = '',
+  note = '',
+  reviewDecisions = null,
+  edits = null,
+  track = '',
+  proposal = null,
+  proposalId = '',
+  decision = '',
+  conflictId = '',
+  chosenRoleKey = '',
+  forceApprove = false,
+  overrideReason = '',
+}) {
+  void edits;
+  const phaseHint = String(phaseRaw || '').trim().toLowerCase();
+  const jobHint = String(jobRaw || '').trim();
+  if (jobHint) {
+    const err = new Error(
+      `Confirm uses phase=how only — job="${jobHint}" is not allowed`
+    );
+    err.statusCode = 409;
+    err.errorCode = 'CONFIRM_ONLY_PROJECT_PLAN';
+    err.details = { job: jobHint, allowed: ['phase=how'] };
+    throw err;
+  }
+  if (phaseHint !== 'how' && phaseHint !== 'phase_how') {
+    const err = new Error(
+      `Confirm requires phase=how — got phase="${phaseHint || ''}"`
+    );
+    err.statusCode = 409;
+    err.errorCode = 'CONFIRM_ONLY_PROJECT_PLAN';
+    err.details = { phase: phaseHint || null, allowed: ['how'] };
+    throw err;
+  }
+
+  const packForAuthz = await loadPackForAiAnalysis({ packId, organizationId });
+  const projectId = packForAuthz?.projectId ? String(packForAuthz.projectId) : null;
+
+  const {
+    assertPhaseHowReadyForConfirm,
+    markPhaseHowConfirmed,
+    migrateJobsProjectionToPhaseRuns,
+  } = require('../utils/aiAnalysis/phaseGate2');
+  const {
+    REVIEW_LANE,
+    resolveGate2ReviewLane,
+    assertActorMayActOnLane,
+    stampGate2ReviewLane,
+  } = require('../utils/aiAnalysis/gate2ReviewLane');
+  const { assertGateStampSoD } = require('../utils/phase1GatePolicy');
+
+  const pack = packForAuthz;
+  let container = migrateJobsProjectionToPhaseRuns(ensurePackContainer(pack));
+  assertPhaseHowReadyForConfirm(container);
+
+  const lane = resolveGate2ReviewLane({ ...(pack.toObject?.() || pack), aiAnalysis: container });
+  const action = String(actionRaw || '').trim().toLowerCase();
+
+  if (!action && lane === REVIEW_LANE.DONE) {
+    return {
+      phase: 'how',
+      job: 'phase_how',
+      status: 'confirmed',
+      reviewLane: REVIEW_LANE.DONE,
+      schemaVersion: pack.aiAnalysis?.schemaVersion,
+    };
+  }
+
+  // Legacy one-shot confirm (no action) while still on PM lane — wizard / older clients.
+  // Explicit HITL always sends action=pm_submit | po_approve | po_reject.
+  const effectiveAction =
+    action || (lane === REVIEW_LANE.PO_FINAL ? 'po_approve' : '');
+
+  if (!action && lane === REVIEW_LANE.PM) {
+    const { enforceGateFinalApprover } = require('./gateReviewApproval.service');
+    const gateFinal = await enforceGateFinalApprover({ userId, projectId, gate: 'how' });
+    if (!gateFinal.enforced) {
+      try {
+        await assertPlanningGate2Permission({
+          userId,
+          projectId,
+          permission: 'planning:po_review',
+        });
+      } catch (poErr) {
+        if (poErr?.statusCode === 403) {
+          await assertRequirementPermission({
+            userId,
+            organizationId,
+            permission: 'requirement:run-ai-planning',
+            projectId,
+          });
+        } else {
+          throw poErr;
+        }
+      }
+    }
+    container = markPhaseHowConfirmed(container);
+    container = stampGate2ReviewLane(container, REVIEW_LANE.DONE, {
+      confirmedBy: String(userId),
+      confirmedAt: new Date().toISOString(),
+    });
+    pack.aiAnalysis = container;
+    pack.aiAnalysisStatus = 'ready';
+    pack.markModified('aiAnalysis');
+    await pack.save();
+    return {
+      phase: 'how',
+      job: 'phase_how',
+      status: 'confirmed',
+      reviewLane: REVIEW_LANE.DONE,
+      schemaVersion: pack.aiAnalysis.schemaVersion,
+    };
+  }
+
+  if (!effectiveAction) {
+    const err = new Error(
+      'Gate 2 confirm cần action=track_submit|propose_change|decide_change|resolve_line_conflict|pm_confirm_plan|po_approve|po_reject'
+    );
+    err.statusCode = 400;
+    err.errorCode = 'GATE2_ACTION_REQUIRED';
+    throw err;
+  }
+
+  const COLLAB_ACTIONS = new Set([
+    'track_submit',
+    'pm_submit',
+    'tech_submit',
+    'propose_change',
+    'decide_change',
+    'keep_original',
+    'escalate',
+    'resolve_escalation',
+    'resolve_line_conflict',
+    'pm_confirm_plan',
+  ]);
+  if (COLLAB_ACTIONS.has(effectiveAction)) {
+    return applyCollaborativeGate2({
+      userId,
+      organizationId,
+      pack,
+      packId,
+      projectId,
+      container,
+      action: effectiveAction,
+      note,
+      reviewDecisions,
+      track,
+      proposal,
+      proposalId,
+      decision,
+      conflictId,
+      chosenRoleKey,
+    });
+  }
+
+  assertActorMayActOnLane(effectiveAction, lane);
+
+  if (effectiveAction === 'po_reject') {
+    const { enforceGateFinalApprover } = require('./gateReviewApproval.service');
+    const gateFinal = await enforceGateFinalApprover({ userId, projectId, gate: 'how' });
+    if (!gateFinal.enforced) {
+      await assertPlanningGate2Permission({
+        userId,
+        projectId,
+        permission: 'planning:po_review',
+      });
+    }
+    const reason = String(note || '').trim().slice(0, 2000);
+    if (!reason) {
+      const err = new Error('Cần lý do khi từ chối Gate 2');
+      err.statusCode = 400;
+      err.errorCode = 'GATE2_REJECT_REASON_REQUIRED';
+      throw err;
+    }
+    const prior = pack.aiAnalysis?.gate2 || container.gate2 || {};
+    assertGateStampSoD({
+      actorUserId: userId,
+      priorStamps: [{ userId: prior.submittedBy }, { userId: prior.techSubmittedBy }],
+    });
+    container = stampGate2ReviewLane(container, REVIEW_LANE.CONSOLIDATION, {
+      lastRejectReason: reason,
+      rejectedBy: String(userId),
+      rejectedAt: new Date().toISOString(),
+      reviewComplete: false,
+    });
+
+    // Loop2 selective replan (HARD-01 no Gate bypass; HARD-02 one path)
+    const howRun =
+      container.phaseRuns?.phase_how ||
+      pack.aiAnalysis?.phaseRuns?.phase_how ||
+      {};
+    const remoteRunId = String(howRun.remoteRunId || howRun.runId || '').trim();
+    let loop2 = { triggered: false };
+    if (remoteRunId) {
+      try {
+        const fb = await aiProjectPlanningClient.submitFeedback(remoteRunId, {
+          kind: 'planning_feedback',
+          source: 'gate2',
+          text: reason,
+          note: reason,
+        });
+        loop2 = {
+          triggered: fb.status >= 200 && fb.status < 300,
+          httpStatus: fb.status,
+          selectiveReplanTools: fb.data?.data?.selectiveReplanTools || null,
+        };
+        if (loop2.triggered) {
+          container.phaseRuns = {
+            ...(container.phaseRuns || {}),
+            phase_how: {
+              ...(howRun || {}),
+              status: 'pending',
+              hitl: 'gate2',
+              loop2ReplanAt: new Date().toISOString(),
+            },
+          };
+        }
+      } catch (loopErr) {
+        console.warn(
+          '[gate2] Loop2 selective replan failed',
+          loopErr?.message || loopErr
+        );
+        loop2 = { triggered: false, error: String(loopErr?.message || loopErr) };
+      }
+    }
+
+    pack.aiAnalysis = container;
+    pack.markModified('aiAnalysis');
+    await pack.save();
+
+    // DEC D8 — PO reject Gate 2 → PM
+    if (projectId) {
+      const { notifyAiHitlGateReviewers } = require('../utils/phase1GatePolicy');
+      void notifyAiHitlGateReviewers({
+        projectId: String(projectId),
+        organizationId,
+        actorUserId: userId,
+        packId: String(packId),
+        nextPermission: 'planning:pm_review',
+        title: 'Gate 2 — PO từ chối bản tổng hợp, trả PM tổng hợp',
+        content: reason.slice(0, 500),
+        kind: 'ai_hitl_gate2_rejected',
+      });
+    }
+
+    return {
+      phase: 'how',
+      job: 'phase_how',
+      status: String(container.phaseRuns?.phase_how?.status || 'ready'),
+      reviewLane: REVIEW_LANE.CONSOLIDATION,
+      schemaVersion: pack.aiAnalysis.schemaVersion,
+      loop2,
+    };
+  }
+
+  // po_approve — Tổng duyệt của cổng HOW khi dự án có gateReviewPolicy
+  {
+    const { enforceGateFinalApprover } = require('./gateReviewApproval.service');
+    const gateFinal = await enforceGateFinalApprover({ userId, projectId, gate: 'how' });
+    if (!gateFinal.enforced) {
+      await assertPlanningGate2Permission({
+        userId,
+        projectId,
+        permission: 'planning:po_review',
+      });
+    }
+  }
+  const prior = pack.aiAnalysis?.gate2 || container.gate2 || {};
+  assertGateStampSoD({
+    actorUserId: userId,
+    priorStamps: [{ userId: prior.submittedBy }, { userId: prior.techSubmittedBy }],
+  });
+  const noteTrim = String(note || '').trim().slice(0, 2000);
+  // Hole #2: do not confirm Gate2 when feasibility / quality-deploy DoD fails (unless forceApprove+reason)
+  const {
+    assertGate2FeasibilityOrOverride,
+  } = require('../utils/tools/assertGate2FeasibilityOrOverride');
+  const g13BeforeConfirm = assertGate2FeasibilityOrOverride({
+    pack: { ...(pack.toObject?.() || pack), aiAnalysis: container },
+    forceApprove,
+    overrideReason: String(overrideReason || noteTrim || '').trim().slice(0, 2000),
+  });
+  if (g13BeforeConfirm.override) {
+    container = {
+      ...container,
+      gate2Override: {
+        forceApprove: true,
+        reason: g13BeforeConfirm.override.reason,
+        missingFeasibility: Boolean(g13BeforeConfirm.override.missingFeasibility),
+        failures: g13BeforeConfirm.override.failures || null,
+        by: userId,
+        at: new Date().toISOString(),
+        atStep: 'po_approve_confirm',
+      },
+    };
+  }
+  // Revision-tied approve: reject when planManifest tips drifted (legacy packs without ids pass)
+  const {
+    assertGate2PlanManifestOrThrow,
+  } = require('../utils/aiAnalysis/planManifestGuard');
+  assertGate2PlanManifestOrThrow(container);
+  container = markPhaseHowConfirmed(container);
+  container = stampGate2ReviewLane(container, REVIEW_LANE.DONE, {
+    confirmedBy: String(userId),
+    confirmedAt: new Date().toISOString(),
+    ...(noteTrim ? { confirmNote: noteTrim } : {}),
+  });
+  pack.aiAnalysis = container;
+  pack.aiAnalysisStatus = 'ready';
+  pack.markModified('aiAnalysis');
+  await pack.save();
+
+  // DEC D8 — PO approve Gate 2 → PM (phase HOW)
+  if (projectId) {
+    const { notifyAiHitlGateReviewers } = require('../utils/phase1GatePolicy');
+    void notifyAiHitlGateReviewers({
+      projectId: String(projectId),
+      organizationId,
+      actorUserId: userId,
+      packId: String(packId),
+      nextPermission: 'planning:pm_review',
+      title: 'Gate 2 — PO đã duyệt kế hoạch',
+      content: noteTrim
+        ? `PO đã chấp nhận kế hoạch. ${noteTrim}`
+        : 'PO đã chấp nhận kế hoạch HOW — chờ xác nhận Chuyển sang phase 2 (promote).',
+      kind: 'ai_hitl_gate2_approved',
+    });
+  }
+
+  // RULE-S1: approve ≠ promote. Delivery chạy qua create-project sau confirm HITL.
+  const {
+    buildGate2PoApproveConfirmResult,
+  } = require('../utils/aiAnalysis/gate2PoApproveConfirmResult');
+  return buildGate2PoApproveConfirmResult(pack, { reviewLaneDone: REVIEW_LANE.DONE });
+}
+
+const COLLAB_PERMISSION = Object.freeze({
+  track_submit: null,
+  pm_submit: 'planning:pm_review',
+  tech_submit: 'planning:tech_review',
+  propose_change: 'planning:pm_review',
+  keep_original: 'planning:pm_review',
+  escalate: 'planning:pm_review',
+  resolve_line_conflict: 'planning:pm_review',
+  pm_confirm_plan: 'planning:pm_review',
+  resolve_escalation: 'planning:po_review',
+});
+
+async function applyCollaborativeGate2({
+  userId,
+  organizationId,
+  pack,
+  packId,
+  projectId,
+  container,
+  action,
+  note,
+  reviewDecisions,
+  track,
+  proposal,
+  proposalId,
+  decision,
+  conflictId = '',
+  chosenRoleKey = '',
+}) {
+  const { applyGate2CollaborativeAction } = require('../utils/aiAnalysis/gate2ChangeProposals');
+  const { TRACK_PERMISSION } = require('../utils/aiAnalysis/gate2ReviewOwnership');
+  const { projectHasPlanningTechReviewer, notifyAiHitlGateReviewers } = require('../utils/phase1GatePolicy');
+  const techRequired = projectId ? await projectHasPlanningTechReviewer(projectId) : false;
+  const act = String(action || '').trim().toLowerCase();
+
+  if (act === 'decide_change') {
+    const rows = Array.isArray(container?.gate2?.changeProposals)
+      ? container.gate2.changeProposals
+      : [];
+    const row = rows.find((item) => String(item?.id) === String(proposalId || ''));
+    const owner = String(row?.owner || '').toLowerCase();
+    const perm = TRACK_PERMISSION[owner];
+    if (!perm) {
+      const err = new Error('Đề xuất không có chủ phần để xác nhận.');
+      err.statusCode = 409;
+      err.errorCode = 'GATE2_PROPOSAL_OWNER';
+      throw err;
+    }
+    await assertPlanningGate2Permission({ userId, projectId, permission: perm });
+  } else if (act === 'track_submit' || act === 'pm_submit' || act === 'tech_submit') {
+    let which = String(track || '').trim().toLowerCase();
+    if (!which && act === 'pm_submit') which = 'pm';
+    if (!which && act === 'tech_submit') which = 'tech';
+    const reviewPlan = container?.gate2?.reviewPlan;
+    if (reviewPlan?.finalRoleKey) {
+      await assertUserHoldsProjectRole({ userId, projectId, roleKey: which });
+    } else {
+      const perm = TRACK_PERMISSION[which];
+      if (!perm) {
+        const err = new Error('Thiếu track review (po, tech, pm).');
+        err.statusCode = 400;
+        err.errorCode = 'GATE2_TRACK_INVALID';
+        throw err;
+      }
+      await assertPlanningGate2Permission({ userId, projectId, permission: perm });
+    }
+  } else if (
+    container?.gate2?.reviewPlan?.finalRoleKey &&
+    (act === 'pm_confirm_plan' ||
+      act === 'propose_change' ||
+      act === 'keep_original' ||
+      act === 'escalate' ||
+      act === 'resolve_line_conflict')
+  ) {
+    const synthesis = String(container.gate2.reviewPlan.synthesisRoleKey || '').trim().toLowerCase();
+    if (synthesis) {
+      await assertUserHoldsProjectRole({ userId, projectId, roleKey: synthesis });
+    }
+  } else {
+    const perm = COLLAB_PERMISSION[act];
+    if (perm) {
+      await assertPlanningGate2Permission({ userId, projectId, permission: perm });
+    }
+  }
+
+  const applied = applyGate2CollaborativeAction({
+    gate2: container.gate2 || {},
+    action: act,
+    userId,
+    note,
+    reviewDecisions,
+    proposal,
+    proposalId,
+    decision,
+    track,
+    techRequired,
+    conflictId,
+    chosenRoleKey,
+  });
+  container.gate2 = applied.gate2;
+  if (act === 'track_submit' || act === 'pm_submit' || act === 'tech_submit') {
+    const {
+      listAssignmentEdits,
+      loadUsersByRoleForEdits,
+      applyAssignmentReviewEdits,
+    } = require('../utils/aiAnalysis/applyAssignmentReviewEdits');
+    const assignmentEdits = listAssignmentEdits(reviewDecisions, container);
+    if (assignmentEdits.length) {
+      const { fetchEnabledProjectRoleKeys } = require('../clients/orgMasterData.client');
+      const { listOrgRoleSuggestCandidates } = require('./projectMemberCandidate.service');
+      const roleKeys = await fetchEnabledProjectRoleKeys(organizationId);
+      const usersByRole = await loadUsersByRoleForEdits({
+        edits: assignmentEdits,
+        container,
+        lookupUser: async (roleKey, wantedUserId) => {
+          const page = await listOrgRoleSuggestCandidates({
+            organizationId,
+            actorUserId: userId,
+            projectId,
+            projectRoleKeys: roleKey,
+            assigneeUserId: wantedUserId,
+            allowDeliveryRole: true,
+            limit: 5,
+          });
+          const rows = page?.byRole?.[roleKey] || [];
+          return rows.some((row) => String(row?.userId || '') === String(wantedUserId));
+        },
+      });
+      const nextContainer = applyAssignmentReviewEdits(container, assignmentEdits, {
+        roleKeys,
+        usersByRole,
+      });
+      container.planning = nextContainer.planning;
+      container.resource = nextContainer.resource;
+    }
+  }
+  pack.aiAnalysis = container;
+  pack.markModified('aiAnalysis');
+  await pack.save();
+
+  if (applied.notify && projectId && applied.notify.permission) {
+    void notifyAiHitlGateReviewers({
+      projectId: String(projectId),
+      organizationId,
+      actorUserId: userId,
+      packId: String(packId),
+      nextPermission: applied.notify.permission,
+      title: applied.notify.title,
+      content: applied.notify.content,
+      kind: applied.notify.kind,
+    });
+  } else if (applied.notify?.roleKey && projectId) {
+    void notifyProjectRole({
+      projectId: String(projectId),
+      organizationId,
+      actorUserId: userId,
+      packId: String(packId),
+      roleKey: applied.notify.roleKey,
+      title: applied.notify.title,
+      content: applied.notify.content,
+      kind: applied.notify.kind,
+    });
+  }
+
+  if (Array.isArray(applied.notifyLineRejected) && applied.notifyLineRejected.length) {
+    void notifyGate2LineRejected({
+      projectId: String(projectId || ''),
+      organizationId,
+      actorUserId: userId,
+      packId: String(packId),
+      items: applied.notifyLineRejected,
+    });
+  }
+
+  return {
+    phase: 'how',
+    job: 'phase_how',
+    status: String(container.phaseRuns?.phase_how?.status || 'ready'),
+    reviewLane: applied.reviewLane,
+    schemaVersion: pack.aiAnalysis.schemaVersion,
+  };
+}
+
+async function notifyGate2LineRejected({
+  projectId,
+  organizationId,
+  actorUserId,
+  packId,
+  items = [],
+}) {
+  const { notifySystemKind, projectHubActionUrl } = require('../clients/notification.client');
+  const { AI_HITL_ACTION_PATH } = require('../utils/phase1GatePolicy');
+  for (const item of items) {
+    const uid = String(item?.userId || '').trim();
+    if (!uid) continue;
+    const logicalId = String(item?.data?.logicalId || '').trim();
+    const sectionKey = String(item?.data?.sectionKey || '').trim();
+    const qs = new URLSearchParams();
+    if (packId) qs.set('packId', String(packId));
+    qs.set('tab', 'review');
+    if (logicalId) qs.set('logicalId', logicalId);
+    if (sectionKey) qs.set('section', sectionKey);
+    const pathSuffix = `${AI_HITL_ACTION_PATH}?${qs.toString()}`;
+    const actionUrl = projectId
+      ? projectHubActionUrl({
+          projectId,
+          organizationId,
+          pathSuffix,
+        })
+      : undefined;
+    try {
+      await notifySystemKind({
+        userIds: [uid],
+        kind: String(item.kind || 'ai_hitl_gate2_line_rejected'),
+        title: item.title || 'Gate 2 — dòng bị từ chối khi tổng hợp',
+        content: item.content || '',
+        data: {
+          projectId: String(projectId || ''),
+          organizationId: String(organizationId || ''),
+          packId: String(packId || ''),
+          ...(item.data && typeof item.data === 'object' ? item.data : {}),
+        },
+        actionUrl,
+        excludeUserId: actorUserId,
+      });
+    } catch {
+      /* best-effort inbox */
+    }
+  }
+}
+
+/**
+ * Gate2 HITL — planning:pm_review / planning:tech_review / planning:po_review.
+ */
+async function assertUserHoldsProjectRole({ userId, projectId, roleKey }) {
+  const key = String(roleKey || '').trim().toLowerCase();
+  const { resolveUserProjectPermissions } = require('./projectAccess.service');
+  const { roleKeysMatch } = require('../utils/project/projectRoleKeyMatch');
+  const resolved = await resolveUserProjectPermissions({ userId, projectId });
+  if (resolved.isOrgAdmin) return resolved;
+  const keys = (Array.isArray(resolved.roles) ? resolved.roles : [])
+    .map((role) => String(role?.key || '').trim())
+    .filter(Boolean);
+  if (!key || !roleKeysMatch(keys, key)) {
+    const err = new Error('Bạn không giữ vai trò được chọn để duyệt bước này.');
+    err.statusCode = 403;
+    err.errorCode = 'GATE2_ROLE_REQUIRED';
+    err.details = { roleKey: key };
+    throw err;
+  }
+  return resolved;
+}
+
+async function notifyProjectRole({
+  projectId,
+  organizationId,
+  actorUserId,
+  packId,
+  roleKey,
+  title,
+  content,
+  kind,
+}) {
+  try {
+    const ProjectMembership = require('../models/ProjectMembership');
+    const ProjectRole = require('../models/ProjectRole');
+    const members = await ProjectMembership.find({ projectId }).select('userId projectRoleId').lean();
+    const roleIds = members.map((row) => row.projectRoleId).filter(Boolean);
+    const roles = roleIds.length
+      ? await ProjectRole.find({ _id: { $in: roleIds } }).select('_id key').lean()
+      : [];
+    const { roleKeysMatch } = require('../utils/project/projectRoleKeyMatch');
+    const matchIds = new Set(
+      roles
+        .filter((row) => roleKeysMatch([row.key], roleKey))
+        .map((row) => String(row._id))
+    );
+    const userIds = [...new Set(
+      members
+        .filter((row) => matchIds.has(String(row.projectRoleId)))
+        .map((row) => String(row.userId || ''))
+        .filter(Boolean)
+    )];
+    if (!userIds.length) return;
+    const { notifySystemKind, projectHubActionUrl } = require('../clients/notification.client');
+    const actionUrl = projectHubActionUrl({
+      projectId,
+      organizationId,
+      pathSuffix: `ai-hitl?packId=${encodeURIComponent(String(packId || ''))}&tab=review`,
+    });
+    await notifySystemKind({
+      userIds,
+      kind: kind || 'ai_hitl_gate2_role',
+      title: title || 'Có mục chờ duyệt',
+      content: content || 'Đến lượt vai trò của bạn duyệt Gate 2.',
+      data: { projectId: String(projectId), packId: String(packId || ''), roleKey },
+      actionUrl,
+      excludeUserId: actorUserId,
+    });
+  } catch {
+    /* non-blocking */
+  }
+}
+
+async function assertPlanningGate2Permission({ userId, projectId, permission }) {
+  const pid = String(projectId || '').trim();
+  const perm = String(permission || '').trim();
+  if (!pid) {
+    const err = new Error('Gate 2 cần pack gắn projectId');
+    err.statusCode = 409;
+    err.errorCode = 'GATE2_PROJECT_REQUIRED';
+    throw err;
+  }
+  const { resolveUserProjectPermissions } = require('./projectAccess.service');
+  const { hasPermission } = require('../utils/project/projectPermissionMatrix');
+  const resolved = await resolveUserProjectPermissions({ userId, projectId: pid });
+  const bypass = false;
+  if (!bypass && !hasPermission(resolved.permissions, perm)) {
+    const err = new Error(
+      perm === 'planning:pm_review'
+        ? 'Cần quyền Project Manager (planning:pm_review) cho bước Gate 2 này'
+        : perm === 'planning:tech_review'
+          ? 'Cần quyền Tech Lead (planning:tech_review) cho bước Gate 2 này'
+          : 'Cần quyền Product Owner (planning:po_review) cho bước Gate 2 này'
+    );
+    err.statusCode = 403;
+    err.errorCode = 'GATE2_PLANNING_FORBIDDEN';
+    err.details = { permission: perm };
+    throw err;
+  }
+  return resolved;
+}
+
+async function exportAiAnalysisSheet11({ userId, organizationId, packId }) {
+  await assertRequirementPermission({
+    userId,
+    organizationId,
+    permission: 'requirement:view',
+  });
+  const pack = await loadPackForAiAnalysis({ packId, organizationId });
+  const buffer = await buildAiAnalysisSheet11Buffer(
+    ensureAiAnalysisContainer(pack.aiAnalysis)
+  );
+  return {
+    buffer: Buffer.from(buffer),
+    fileName: `AI_Analysis_Output_${String(packId).slice(-6)}.xlsx`,
+  };
+}
+
+function mergeRemoteHowContainer(current, remote, job) {
+  const next = ensureAiAnalysisContainer(current);
+  if (job === 'effortRoleAnalysis') {
+    next.planning = {
+      ...next.planning,
+      roles: remote.planning?.roles || [],
+      skills: remote.planning?.skills || [],
+      tasks: remote.planning?.tasks || [],
+      effort: remote.planning?.effort || null,
+    };
+  } else if (job === 'sequencingCpm') {
+    next.planning = {
+      ...next.planning,
+      sequence: remote.planning?.sequence || { waves: [] },
+      theoreticalCpm: remote.planning?.theoreticalCpm || null,
+      criticalWorkIds: remote.planning?.criticalWorkIds || [],
+    };
+  } else if (job === 'employeeMatching') {
+    next.resource = {
+      ...next.resource,
+      fte: remote.resource?.fte || [],
+      recommendations: remote.resource?.recommendations || [],
+    };
+  } else if (job === 'scheduleCapacity') {
+    next.planning = {
+      ...next.planning,
+      tasks: remote.planning?.tasks || next.planning?.tasks || [],
+      completion: remote.planning?.completion || null,
+    };
+    next.resource = {
+      ...next.resource,
+      assignments: remote.resource?.assignments || [],
+      assignmentsMeta: {
+        ...(next.resource?.assignmentsMeta || {}),
+        ...(remote.resource?.assignmentsMeta || {}),
+      },
+      schedule: remote.resource?.schedule || [],
+    };
+  } else if (job === 'hierarchyDecomposition') {
+    next.analyses = {
+      ...next.analyses,
+      hierarchy: remote.analyses?.hierarchy || next.analyses?.hierarchy,
+    };
+  } else if (job === 'requirementAnalysis') {
+    next.analyses = {
+      ...next.analyses,
+      data: remote.analyses?.data || next.analyses?.data,
+      gap: remote.analyses?.gap || next.analyses?.gap,
+    };
+  } else if (job === 'capabilityAnalysis') {
+    next.analyses = {
+      ...next.analyses,
+      capability: remote.analyses?.capability || next.analyses?.capability,
+    };
+  } else if (job === 'requirementInsights') {
+    next.analyses = {
+      ...next.analyses,
+      requirementInsights:
+        remote.analyses?.requirementInsights || next.analyses?.requirementInsights,
+      proposedSrs: remote.analyses?.proposedSrs || next.analyses?.proposedSrs,
+      preApproval: remote.analyses?.preApproval || next.analyses?.preApproval,
+    };
+  } else if (job === 'wbsGeneration') {
+    next.planning = {
+      ...next.planning,
+      tasks: remote.planning?.tasks || [],
+      wbs: remote.planning?.wbs || null,
+    };
+  } else if (job === 'dependencyAnalysis') {
+    next.analyses = {
+      ...next.analyses,
+      dependency: remote.analyses?.dependency || next.analyses?.dependency,
+    };
+    if (Array.isArray(remote.planning?.tasks) && remote.planning.tasks.length) {
+      next.planning = {
+        ...next.planning,
+        tasks: remote.planning.tasks,
+      };
+    }
+  } else if (job === 'architectureRiskAnalysis') {
+    next.analyses = {
+      ...next.analyses,
+      architectureImpact:
+        remote.analyses?.architectureImpact || next.analyses?.architectureImpact,
+      risk: remote.analyses?.risk || next.analyses?.risk,
+    };
+  } else if (job === 'projectPlan') {
+    next.planning = {
+      ...next.planning,
+      executionPlan: remote.planning?.executionPlan || null,
+    };
+  }
+  next.jobs[job] = { ...next.jobs[job], ...remote.jobs?.[job] };
+  return next;
+}
+
+function isDuplicateRemoteRun(container, job, runId) {
+  const recorded =
+    container?.phaseRuns?.[job]?.remoteRunId ||
+    container?.resource?.assignmentsMeta?.remoteRunIds?.[job] ||
+    container?.jobs?.[job]?.remoteRunId;
+  return Boolean(runId) && String(recorded || '') === String(runId);
+}
+
+async function applyRemoteHowJobResult({
+  runId,
+  status,
+  job: jobRaw,
+  projectId,
+  packId,
+  organizationId,
+  snapshotId,
+  result,
+  error,
+  frUnderstanding = null,
+  proposalFragment = null,
+}) {
+  const jobKey = String(jobRaw || '').trim();
+  if (jobKey === 'phase_how' || jobKey === 'phase_what') {
+    const understanding =
+      frUnderstanding ||
+      result?.frUnderstanding ||
+      result?.result?.frUnderstanding ||
+      null;
+    return applyRemotePhaseRunResult({
+      runId,
+      status,
+      job: jobKey,
+      projectId,
+      packId,
+      organizationId,
+      snapshotId,
+      result: {
+        ...(result || {}),
+        frUnderstanding: understanding,
+        proposalFragment:
+          proposalFragment ||
+          result?.proposalFragment ||
+          result?.result?.proposalFragment ||
+          null,
+      },
+      error,
+    });
+  }
+  const err = new Error(
+    `Callback rejects per-job result "${jobKey}" — phase_what|phase_how only`
+  );
+  err.statusCode = 410;
+  err.errorCode = 'PHASE_ONLY_CALLBACK';
+  err.details = { job: jobKey };
+  throw err;
+}
+
+async function applyRemotePhaseRunResult({
+  runId,
+  status,
+  job,
+  projectId,
+  packId,
+  organizationId,
+  snapshotId,
+  result,
+  error,
+}) {
+  if (!runId || !packId || !organizationId || !snapshotId) {
+    const invalid = new Error('runId, packId, organizationId and snapshotId are required');
+    invalid.statusCode = 400;
+    invalid.errorCode = 'REMOTE_RESULT_IDENTIFIERS_REQUIRED';
+    throw invalid;
+  }
+  const pack = await loadPackForAiAnalysis({ packId, organizationId });
+  if (projectId && pack.projectId && String(pack.projectId) !== String(projectId)) {
+    const invalid = new Error('Remote result projectId does not match requirement pack');
+    invalid.statusCode = 409;
+    invalid.errorCode = 'REMOTE_RESULT_PROJECT_MISMATCH';
+    throw invalid;
+  }
+  if (String(pack.aiAnalysisActiveSnapshotId || '') !== String(snapshotId)) {
+    const stale = new Error(
+      'Remote result snapshotId does not match active analysis snapshot'
+    );
+    stale.statusCode = 409;
+    stale.errorCode = 'REMOTE_RESULT_SNAPSHOT_STALE';
+    stale.details = {
+      reason: 'snapshot_not_active',
+      snapshotId: String(snapshotId),
+      activeSnapshotId: String(pack.aiAnalysisActiveSnapshotId || ''),
+      job,
+      runId,
+    };
+    throw stale;
+  }
+  const phaseMeta = pack.aiAnalysis?.phaseRuns?.[job] || {};
+  if (String(phaseMeta.remoteRunId || '') === String(runId) && phaseMeta.status !== 'pending') {
+    return { applied: false, idempotent: true, job, runId };
+  }
+  let container = ensurePackContainer(pack);
+  if (status === 'completed') {
+    if (!result?.container) {
+      const invalid = new Error('Completed phase result must include container');
+      invalid.statusCode = 400;
+      invalid.errorCode = 'REMOTE_RESULT_INVALID';
+      throw invalid;
+    }
+    const {
+      applyRequirementProposalToContainer,
+    } = require('../utils/aiAnalysis/whatRequirementPolicy');
+    const incoming = result.container;
+    if (incoming.jobs != null) {
+      /* strip — RULE-PO-03 */
+    }
+    if (incoming.planning) container.planning = incoming.planning;
+    if (incoming.resource) container.resource = incoming.resource;
+    // WHAT FR checkpoint stamp — revisions/currentRevisionIds must reach Pack for confirm CTA.
+    if (incoming.requirements && typeof incoming.requirements === 'object') {
+      const prevReq =
+        container.requirements && typeof container.requirements === 'object'
+          ? container.requirements
+          : {};
+      const nextReq = incoming.requirements;
+      container.requirements = {
+        ...prevReq,
+        ...nextReq,
+        revisions: {
+          ...(prevReq.revisions || {}),
+          ...(nextReq.revisions || {}),
+        },
+        currentRevisionIds: {
+          ...(prevReq.currentRevisionIds || {}),
+          ...(nextReq.currentRevisionIds || {}),
+        },
+      };
+    }
+    if (incoming.analyses) {
+      const {
+        g4Understanding: _dropLegacyG4,
+        frUnderstanding: _dropFr,
+        ...restAnalyses
+      } = incoming.analyses;
+      void _dropLegacyG4;
+      void _dropFr;
+      container.analyses = { ...(container.analyses || {}), ...restAnalyses };
+      // Pack blobs retired — never persist engine understanding on analyses
+      delete container.analyses.frUnderstanding;
+      delete container.analyses.g4Understanding;
+    }
+    if (incoming.phaseRuns) {
+      container.phaseRuns = { ...(container.phaseRuns || {}), ...incoming.phaseRuns };
+    }
+    const proposalFragment =
+      result.proposalFragment || result.result?.proposalFragment || null;
+    const understanding =
+      result.frUnderstanding ||
+      result.result?.frUnderstanding ||
+      null;
+    const fullSrsProposal =
+      result.srsProposal ||
+      result.result?.srsProposal ||
+      incoming.analyses?.srsProposal ||
+      null;
+    const legacyPopulate =
+      String(process.env.PHASE1_LEGACY_POPULATE_NON_FR || '').trim() === '1';
+    if (job === 'phase_what' && (fullSrsProposal || proposalFragment || understanding)) {
+      try {
+        container = applyRequirementProposalToContainer(
+          container,
+          fullSrsProposal || proposalFragment || understanding,
+          {
+            remoteRunId: String(runId),
+            snapshotId: String(snapshotId),
+            status: 'ready',
+            mode: 'requirement',
+            generationId: String(runId),
+            durationMs: result?.meta?.durationMs || result?.result?.durationMs || null,
+            expectedReviewVersion: container.analyses?.srsProposal?.reviewVersion,
+            pack,
+            snapshot: pack.aiAnalysis?.intakeSnapshot || null,
+            rawRecord: pack.aiAnalysis?.analyses?.customerRawRecord || null,
+            // Hot path: APS delivers full srsProposal; populateNonFr only via legacy flag
+            populateNonFr: legacyPopulate && !fullSrsProposal,
+          }
+        );
+      } catch (casErr) {
+        if (
+          casErr.errorCode === 'STALE_GENERATION' ||
+          casErr.errorCode === 'STALE_PROPOSAL_VERSION'
+        ) {
+          return { applied: false, stale: true, errorCode: casErr.errorCode, job, runId };
+        }
+        throw casErr;
+      }
+      // PLAN B: durable Loop1 reuse (survives parent checkpoint delete)
+      const {
+        attachLoop1ReuseToContainer,
+      } = require('../utils/aiAnalysis/loop1ReuseArtifact');
+      const loop1Reuse =
+        result.loop1Reuse ||
+        result.result?.loop1Reuse ||
+        incoming.phaseRuns?.phase_what?.loop1Reuse ||
+        null;
+      container = attachLoop1ReuseToContainer(
+        container,
+        loop1Reuse,
+        String(snapshotId)
+      );
+    } else {
+      const feas =
+        result?.feasibility ||
+        result?.result?.feasibility ||
+        incoming.analyses?.g13Feasibility ||
+        null;
+      const {
+        resolvePhaseRunStampFromIncoming,
+      } = require('../utils/aiAnalysis/resolvePhaseRunStampFromIncoming');
+      // Prefer phase meta already merged from incoming.phaseRuns; fall back to raw incoming.
+      const incomingPhase =
+        (container.phaseRuns && container.phaseRuns[job]) ||
+        (incoming.phaseRuns && incoming.phaseRuns[job]) ||
+        {};
+      container.phaseRuns = {
+        ...(container.phaseRuns || {}),
+        [job]: resolvePhaseRunStampFromIncoming(incomingPhase, {
+          job,
+          runId,
+          snapshotId,
+          durationMsFallback: result?.meta?.durationMs || result?.result?.durationMs || null,
+          feasibility: feas && typeof feas === 'object' ? feas : null,
+        }),
+      };
+      if (job === 'phase_how' && feas && typeof feas === 'object') {
+        container.analyses = {
+          ...(container.analyses || {}),
+          g13Feasibility: feas,
+        };
+      }
+    }
+    pack.aiAnalysisStatus = 'ready';
+  } else if (status === 'failed') {
+    container.phaseRuns = {
+      ...(container.phaseRuns || {}),
+      [job]: {
+        status: 'failed',
+        remoteRunId: String(runId),
+        snapshotId: String(snapshotId),
+        error: error || { code: 'AGENT_PHASE_FAILED' },
+      },
+    };
+    pack.aiAnalysisStatus = 'failed';
+    if (pack.projectId) {
+      const { notifyAiHitlGateReviewers } = require('../utils/phase1GatePolicy');
+      const how = job === 'phase_how';
+      void notifyAiHitlGateReviewers({
+        projectId: String(pack.projectId),
+        organizationId: pack.organizationId,
+        actorUserId: null,
+        packId: String(packId),
+        nextPermission: how ? 'planning:pm_review' : 'analysis:submit_ba_review',
+        title: how ? 'Phase HOW đã dừng vì lỗi' : 'Phase WHAT đã dừng vì lỗi',
+        content: String(error?.message || 'Lượt AI đã dừng. Mở Monitor để xem lỗi và chạy lại.').slice(0, 500),
+        kind: 'ai_hitl_run_failed',
+      });
+    }
+  } else {
+    const invalid = new Error(`Invalid remote result status: ${status}`);
+    invalid.statusCode = 400;
+    invalid.errorCode = 'REMOTE_RESULT_STATUS_INVALID';
+    throw invalid;
+  }
+  if (container.jobs != null) delete container.jobs;
+  pack.aiAnalysis = container;
+  pack.markModified('aiAnalysis');
+  await pack.save();
+
+  // WHAT done: write proposal sheets onto pack BEFORE Gate A (requirementTools) scoring
+  if (status === 'completed' && job === 'phase_what') {
+    try {
+      const {
+        materializeWhatToArtifacts,
+        rebuildRequirementToolsAfterMaterialize,
+      } = require('./whatRequirementPhase.service');
+      await materializeWhatToArtifacts({ userId: null, pack });
+      await rebuildRequirementToolsAfterMaterialize(pack);
+    } catch (matErr) {
+      // eslint-disable-next-line no-console
+      console.warn('[phase_what] materialize/rebuild Gate A soft-fail', {
+        packId: String(packId),
+        message: matErr.message,
+      });
+    }
+    // Sequential Gate1: AI ready → BA review lane
+    try {
+      const { ensureAiAnalysisContainer } = require('../utils/aiAnalysis/aiAnalysisContainer');
+      const {
+        REVIEW_LANE,
+        stampGate1ReviewLane,
+      } = require('../utils/srsProposal/gate1ReviewLane');
+      let shell = ensureAiAnalysisContainer(pack.aiAnalysis);
+      shell = stampGate1ReviewLane(shell, REVIEW_LANE.BA);
+      pack.aiAnalysis = shell;
+      pack.markModified('aiAnalysis');
+      await pack.save();
+    } catch (laneErr) {
+      // eslint-disable-next-line no-console
+      console.warn('[phase_what] stamp reviewLane=ba soft-fail', {
+        packId: String(packId),
+        message: laneErr.message,
+      });
+    }
+  }
+
+  if (status === 'completed' && pack.projectId) {
+    const { notifyAiHitlGateReviewers } = require('../utils/phase1GatePolicy');
+    if (job === 'phase_what') {
+      void notifyAiHitlGateReviewers({
+        projectId: String(pack.projectId),
+        organizationId: pack.organizationId,
+        actorUserId: null,
+        packId: String(packId),
+        // Matrix: BA — alias requirement:submit → analysis:submit_ba_review
+        nextPermission: 'analysis:submit_ba_review',
+        title: 'Gate 1 — AI đã xong, chờ BA xác nhận duyệt',
+        content: 'Output sẵn trên Monitor; mở tab Duyệt để BA xác nhận.',
+        kind: 'ai_hitl_gate1_ba',
+      });
+    } else if (job === 'phase_how') {
+      let howPlan = null;
+      try {
+        const { ensureAiAnalysisContainer } = require('../utils/aiAnalysis/aiAnalysisContainer');
+        const { stampGate2ReviewLane, REVIEW_LANE: GATE2_LANE } = require('../utils/aiAnalysis/gate2ReviewLane');
+        const { emptyTracks } = require('../utils/aiAnalysis/gate2ChangeProposals');
+        const { readHowReviewPlan, tracksFromHowPlan } = require('../utils/aiAnalysis/gate2RolePlan');
+        const { projectHasPlanningTechReviewer } = require('../utils/phase1GatePolicy');
+        const Project = require('../models/Project');
+        const project = await Project.findById(pack.projectId).select('gateReviewPolicy').lean();
+        howPlan = readHowReviewPlan(project);
+        const techRequired = await projectHasPlanningTechReviewer(pack.projectId);
+        let shell = ensureAiAnalysisContainer(pack.aiAnalysis);
+        const initialLane = howPlan?.mode === 'single' ? GATE2_LANE.PO_FINAL : GATE2_LANE.PARALLEL;
+        shell = stampGate2ReviewLane(shell, initialLane, {
+          tracks: howPlan ? tracksFromHowPlan(howPlan) : emptyTracks({ techRequired }),
+          reviewPlan: howPlan || undefined,
+          changeProposals: [],
+        });
+        pack.aiAnalysis = shell;
+        pack.markModified('aiAnalysis');
+        await pack.save();
+      } catch (laneErr) {
+        console.warn('[phase_how] stamp reviewLane=parallel soft-fail', {
+          packId: String(packId),
+          message: laneErr.message,
+        });
+      }
+      if (howPlan?.finalRoleKey) {
+        const firstRoles = howPlan.mode === 'single'
+          ? [howPlan.finalRoleKey]
+          : howPlan.mode === 'sequential'
+            ? [howPlan.order.find((key) => key !== howPlan.finalRoleKey)].filter(Boolean)
+            : howPlan.parallelRoleKeys;
+        for (const roleKey of firstRoles) {
+          void notifyProjectRole({
+            projectId: String(pack.projectId),
+            organizationId: pack.organizationId,
+            actorUserId: null,
+            packId: String(packId),
+            roleKey,
+            title: 'Gate 2 — kế hoạch AI sẵn sàng',
+            content: 'HOW đã xong. Vai trò của bạn review toàn bộ kế hoạch.',
+            kind: 'ai_hitl_gate2',
+          });
+        }
+      } else {
+        const parallelNotice = [
+          ['planning:po_review', 'PO review toàn bộ kế hoạch'],
+          ['planning:tech_review', 'Tech Lead review toàn bộ kế hoạch'],
+          ['planning:pm_review', 'PM review toàn bộ kế hoạch'],
+        ];
+        for (const [nextPermission, focus] of parallelNotice) {
+          void notifyAiHitlGateReviewers({
+            projectId: String(pack.projectId),
+            organizationId: pack.organizationId,
+            actorUserId: null,
+            packId: String(packId),
+            nextPermission,
+            title: 'Gate 2 — kế hoạch AI sẵn sàng, review song song',
+            content: `HOW đã xong. ${focus}.`,
+            kind: 'ai_hitl_gate2',
+          });
+        }
+      }
+    }
+  }
+
+  return { applied: true, idempotent: false, job, runId, status, phase: true };
+}
+
+/**
+ * Start agentic HOW / WHAT phase run.
+ * WHAT: remote requirement phase on ai-project-planning-service (202).
+ * prepare_only stays local Stage1.
+ */
+/**
+ * Hybrid HITL — in-run resume (clarify / edit_draft) via S2S only.
+ * Does **not** stamp Gate 1/2 (RULE-H1). Governance stays on Pack HTTP approve/confirm.
+ */
+async function resumeInRunHitl({
+  userId,
+  organizationId,
+  packId,
+  runId,
+  kind,
+  resume = null,
+  projectId = null,
+}) {
+  const {
+    normalizeInRunKind,
+    isInRunHitlKind,
+  } = require('../utils/aiAnalysis/inRunHitlKinds');
+  const kindNorm = normalizeInRunKind(kind || 'clarify');
+  if (!isInRunHitlKind(kindNorm)) {
+    const err = new Error('kind must be clarify, edit_draft, or wbs_confirm');
+    err.statusCode = 400;
+    err.errorCode = 'IN_RUN_HITL_KIND_INVALID';
+    throw err;
+  }
+  const pack = await loadPackForAiAnalysis({ packId, organizationId });
+  let authzProjectId = projectId || pack.projectId || null;
+  if (authzProjectId && typeof authzProjectId === 'object') {
+    authzProjectId = String(authzProjectId._id || authzProjectId);
+  }
+  await assertRequirementPermission({
+    userId,
+    organizationId,
+    permission: 'requirement:run-ai-planning',
+    projectId: authzProjectId ? String(authzProjectId) : null,
+  });
+
+  const container = ensurePackContainer(pack);
+  const phaseWhat = container.phaseRuns?.phase_what || {};
+  const phaseHow = container.phaseRuns?.phase_how || {};
+  const boundWhat = String(phaseWhat.remoteRunId || '');
+  const boundHow = String(phaseHow.remoteRunId || '');
+  const bound = String(runId || '').trim();
+  if (!bound || (bound !== boundWhat && bound !== boundHow)) {
+    const err = new Error('runId does not belong to this pack');
+    err.statusCode = 409;
+    err.errorCode = 'RUN_PACK_MISMATCH';
+    throw err;
+  }
+
+  const resumeBody = resume && typeof resume === 'object' ? { ...resume } : {};
+  let packPin = null;
+
+  // wbs_confirm: pin baseline on Pack SoT (idempotent) before/alongside graph resume
+  if (kindNorm === 'wbs_confirm') {
+    const action = String(resumeBody.action || resumeBody.decision || 'confirm')
+      .trim()
+      .toLowerCase();
+    if (action === 'confirm' || action === 'wbs_confirm' || action === 'approve') {
+      const { pinWbsBaselineOnContainer } = require('../utils/aiAnalysis/wbsBaselinePin');
+      const pinned = pinWbsBaselineOnContainer(container, {
+        revisionId: resumeBody.wbsRevisionId || resumeBody.revisionId || null,
+        actorUserId: String(userId),
+        requestId: resumeBody.requestId || resumeBody.idempotencyKey || null,
+      });
+      pack.aiAnalysis = pinned.container;
+      pack.markModified('aiAnalysis');
+      await pack.save();
+      packPin = {
+        revisionId: pinned.revisionId,
+        duplicated: pinned.duplicated,
+      };
+      resumeBody.action = 'confirm';
+      resumeBody.wbsRevisionId = pinned.revisionId;
+      resumeBody.actorUserId = String(userId);
+    } else if (action === 'save_edit' || action === 'edit') {
+      const { appendPackChangeEvent } = require('../utils/aiAnalysis/wbsBaselinePin');
+      const { getCurrentWbsRevisionId } = require('../utils/aiAnalysis/wbsBaselinePin');
+      const baseRevisionId =
+        resumeBody.baseRevisionId || getCurrentWbsRevisionId(container);
+      if (
+        resumeBody.baseRevisionId &&
+        getCurrentWbsRevisionId(container) &&
+        String(resumeBody.baseRevisionId) !== String(getCurrentWbsRevisionId(container))
+      ) {
+        const err = new Error('baseRevisionId does not match current WBS revision');
+        err.statusCode = 409;
+        err.errorCode = 'REVISION_CONFLICT';
+        throw err;
+      }
+      const appended = appendPackChangeEvent(container, {
+        action: 'human_edit',
+        artifactKind: 'wbs',
+        baseRevisionId,
+        newRevisionId: resumeBody.newRevisionId || null,
+        actor: { userId: String(userId), role: resumeBody.role || 'PM' },
+        reason: resumeBody.reason || '',
+        changes: Array.isArray(resumeBody.changes) ? resumeBody.changes : [],
+        impactAssessmentId: resumeBody.impactAssessmentId || null,
+        requestId: resumeBody.requestId || resumeBody.idempotencyKey || null,
+      });
+      pack.aiAnalysis = appended.container;
+      pack.markModified('aiAnalysis');
+      await pack.save();
+      return {
+        accepted: true,
+        remote: false,
+        action: 'wbs_save_edit',
+        kind: kindNorm,
+        runId: bound,
+        requestId: appended.requestId,
+        duplicated: appended.duplicated,
+        governanceGate: false,
+        note: 'WBS edit recorded on Pack — confirm separately to resume downstream',
+      };
+    }
+  }
+
+  const s2s = await aiProjectPlanningClient.resumeRun(bound, {
+    action: 'in_run_hitl',
+    kind: kindNorm,
+    resume: resumeBody,
+  });
+  if (s2s.status < 200 || s2s.status >= 300) {
+    const err = new Error(s2s.data?.message || 'In-run HITL resume rejected');
+    err.statusCode = s2s.status >= 400 ? s2s.status : 502;
+    err.errorCode = s2s.data?.errorCode || 'IN_RUN_HITL_RESUME_FAILED';
+    throw err;
+  }
+
+  return {
+    accepted: true,
+    remote: true,
+    action: 'resume_in_run',
+    kind: kindNorm,
+    runId: bound,
+    status: s2s.data?.data?.status || s2s.data?.status || 'accepted',
+    httpStatus: s2s.status === 202 ? 202 : 200,
+    governanceGate: false,
+    wbsBaseline: packPin,
+    note: 'In-run HITL only — Gate 1/2 remain Pack HTTP stamps',
+  };
+}
+
+/**
+ * RULE-R07: Data Gate HITL removed.
+ * resume_data_gate (pass|reject) cancels legacy waiting_human:data_review and releases activeKey.
+ * Caller should start a new WHAT phase-run afterward.
+ */
+async function resumeWhatDataGate({
+  organizationId,
+  packId,
+  decision,
+  runId,
+}) {
+  const decisionNorm = String(decision || '').trim().toLowerCase();
+  if (decisionNorm !== 'pass' && decisionNorm !== 'reject') {
+    const err = new Error('decision must be pass or reject');
+    err.statusCode = 400;
+    err.errorCode = 'DATA_GATE_DECISION_INVALID';
+    throw err;
+  }
+  const pack = await loadPackForAiAnalysis({ packId, organizationId });
+  const container = ensurePackContainer(pack);
+  const phaseWhat = container.phaseRuns?.phase_what || {};
+  const bound = String(phaseWhat.remoteRunId || '');
+  if (!bound || bound !== String(runId || '').trim()) {
+    const err = new Error('runId does not belong to this pack');
+    err.statusCode = 409;
+    err.errorCode = 'RUN_PACK_MISMATCH';
+    throw err;
+  }
+
+  // Prefer cancel endpoint; fall back to resume decision that APS maps to cancel.
+  let s2s = await aiProjectPlanningClient.cancelRun(bound);
+  if (s2s.status < 200 || s2s.status >= 300) {
+    s2s = await aiProjectPlanningClient.resumeRun(bound, { decision: decisionNorm });
+  }
+  if (s2s.status < 200 || s2s.status >= 300) {
+    const err = new Error(s2s.data?.message || 'Legacy data-gate cleanup rejected');
+    err.statusCode = s2s.status >= 400 ? s2s.status : 502;
+    err.errorCode = s2s.data?.errorCode || 'DATA_GATE_CLEANUP_FAILED';
+    throw err;
+  }
+
+  container.phaseRuns = {
+    ...(container.phaseRuns || {}),
+    phase_what: {
+      ...phaseWhat,
+      status: 'cancelled',
+      error: {
+        code: 'data_gate_removed',
+        message: 'Data Gate removed — start a new WHAT run',
+      },
+    },
+  };
+  pack.aiAnalysis = container;
+  pack.aiAnalysisStatus = 'idle';
+  pack.markModified('aiAnalysis');
+  await pack.save();
+
+  return {
+    accepted: true,
+    remote: true,
+    job: 'phase_what',
+    status: 'cancelled',
+    runId: bound,
+    decision: decisionNorm,
+    legacyDataGateCleanup: true,
+    httpStatus: 200,
+    mode: 'requirement',
+  };
+}
+
+async function startPhaseAiPlanningRun({
+  userId,
+  organizationId,
+  packId,
+  phase = 'how',
+  force = false,
+  mode = '',
+  feedback = '',
+  impactScope = [],
+  rerunTools = [],
+  action = '',
+  decision = '',
+  runId = '',
+  kind = '',
+  resume = null,
+  idempotencyKey = '',
+  parentRunId: parentRunIdHint = '',
+  contextProjectId = null,
+  locale = '',
+  snapshotPolicy = 'reuse_if_valid',
+}) {
+  const RequirementPack = require('../models/RequirementPack');
+  const packMeta = await RequirementPack.findOne({
+    _id: packId,
+    organizationId,
+    isActive: true,
+  })
+    .select('projectId')
+    .lean();
+  const rawPid = contextProjectId || packMeta?.projectId || null;
+  let authzProjectId = null;
+  if (rawPid != null && rawPid !== '') {
+    if (typeof rawPid === 'object' && typeof rawPid.toHexString === 'function') {
+      authzProjectId = rawPid.toHexString();
+    } else if (typeof rawPid === 'object' && rawPid._id) {
+      authzProjectId = String(rawPid._id);
+    } else {
+      const s = String(rawPid).trim();
+      authzProjectId = s && s !== '[object Object]' ? s : null;
+    }
+  }
+
+  await assertRequirementPermission({
+    userId,
+    organizationId,
+    permission: 'requirement:run-ai-planning',
+    projectId: authzProjectId,
+  });
+
+  const actionNorm = String(action || '').trim().toLowerCase();
+  if (actionNorm === 'resume_data_gate') {
+    return resumeWhatDataGate({
+      organizationId,
+      packId,
+      decision,
+      runId,
+    });
+  }
+  if (actionNorm === 'resume_in_run' || actionNorm === 'resume_in_run_hitl') {
+    return resumeInRunHitl({
+      userId,
+      organizationId,
+      packId,
+      runId,
+      kind,
+      resume,
+      projectId: contextProjectId,
+    });
+  }
+
+  const phaseJob = String(phase || 'how').trim().toLowerCase() === 'what' ? 'phase_what' : 'phase_how';
+  const modeNorm = String(mode || '').trim().toLowerCase();
+
+  // Phase 1 Stage 1 — input readiness (no FR LLM).
+  if (phaseJob === 'phase_what' && modeNorm === 'prepare_only') {
+    const {
+      runPhase1Stage1PrepareInput,
+    } = require('./requirementPhase1Pipeline.service');
+    return runPhase1Stage1PrepareInput({
+      userId,
+      organizationId,
+      packId,
+    });
+  }
+
+  // RULE-11: Phase1 intelligence always remote APS (no in-process Ollama / local WHAT jobs).
+  const pack = await loadPackForAiAnalysis({ packId, organizationId });
+  let howBacklogGate = null;
+  if (phaseJob === 'phase_how') {
+    howBacklogGate = assertHowJobsRequireApprovedPack(pack, 'effortRoleAnalysis');
+  }
+  if (phaseJob === 'phase_what') {
+    const st = String(pack.status || '');
+    if (st !== 'draft' && st !== 'waiting_review') {
+      assertPackReadyForAiAnalysis(pack.toObject());
+    }
+  } else {
+    assertPackReadyForAiAnalysis(pack.toObject());
+  }
+
+  if (phaseJob === 'phase_how') {
+    let howDirty = false;
+    if (howBacklogGate?.rematerialized && howBacklogGate.structure) {
+      const {
+        stampApprovedBacklogStructureOnPack,
+      } = require('../utils/srsProposal/assertHowApprovedBacklogStories');
+      stampApprovedBacklogStructureOnPack(pack, howBacklogGate.structure);
+      howDirty = true;
+      console.info('[phase_how] rematerialized approvedBacklogStructure', {
+        packId: String(packId),
+        storyCount: howBacklogGate.stories.length,
+      });
+    }
+    const { overlayConfirmedWhatForHow } = require('../utils/aiAnalysis/overlayConfirmedWhatForHow');
+    const overlaid = overlayConfirmedWhatForHow(pack);
+    if (overlaid.changed) {
+      howDirty = true;
+      console.info('[phase_how] overlay confirmed WHAT', {
+        packId: String(packId),
+        counts: overlaid.counts,
+      });
+    }
+    if (howDirty) {
+      await pack.save();
+    }
+  }
+
+  let snapshotId = pack.aiAnalysisActiveSnapshotId
+    ? String(pack.aiAnalysisActiveSnapshotId)
+    : null;
+  let snapshotDoc = null;
+  let packForPhase = pack;
+  let preparationState = 'READY';
+  let reusedSnapshot = false;
+  let preflightPackContentHash = null;
+
+  const policyNorm = String(snapshotPolicy || 'reuse_if_valid').trim().toLowerCase() || 'reuse_if_valid';
+
+  if (phaseJob === 'phase_what') {
+    const { ensureFormValidationOnPack } = require('./whatRequirementPhase.service');
+    await ensureFormValidationOnPack(packForPhase);
+    if (typeof packForPhase.isModified === 'function' && packForPhase.isModified('aiAnalysis')) {
+      await packForPhase.save();
+    }
+  }
+
+  // Fast Start: preflight READY/STALE/MISSING — prepare only when needed.
+  {
+    const { ensurePhaseRunPrepared } = require('./phaseRunPreflight.service');
+    const preflight = await ensurePhaseRunPrepared({
+      userId,
+      organizationId,
+      packId,
+      pack: packForPhase,
+      phaseJob,
+      snapshotPolicy: policyNorm,
+    });
+    packForPhase = preflight.pack || packForPhase;
+    snapshotDoc = preflight.snapshotDoc;
+    snapshotId = preflight.snapshotId || snapshotId;
+    preparationState = preflight.preparationState || 'READY';
+    reusedSnapshot = Boolean(preflight.reusedSnapshot);
+    preflightPackContentHash = preflight.packContentHash || null;
+  }
+
+  if (!snapshotId) {
+    const err = new Error('Active AI snapshot required for phase planning run');
+    err.statusCode = 400;
+    err.errorCode = 'SNAPSHOT_REQUIRED';
+    throw err;
+  }
+
+  if (phaseJob === 'phase_what') {
+    const {
+      ensurePreparedIntakeForWhat,
+    } = require('./whatRequirementPhase.service');
+    const { assertRequirementPhaseCanStart, countValidFr } = require('../utils/requirement/workbookDiagnostic');
+
+    // Self-heal only when still missing FR/canonicalRaw after preflight.
+    const prepared = await ensurePreparedIntakeForWhat({
+      pack: packForPhase,
+      organizationId,
+      packId,
+    });
+    if (prepared.didPrepare) {
+      const reloaded = await RequirementPack.findOne({ _id: packId, organizationId });
+      if (!reloaded) {
+        const err = new Error('RequirementPack không tồn tại');
+        err.statusCode = 404;
+        err.errorCode = 'PACK_NOT_FOUND';
+        throw err;
+      }
+      packForPhase = reloaded;
+      if (isSnapshotPipelineEnabled()) {
+        const refreshed = await ensureActiveAiAnalysisSnapshot({
+          userId,
+          organizationId,
+          packId,
+          pack: packForPhase,
+          refreshOnFrDrift: true,
+        });
+        packForPhase = refreshed.pack || packForPhase;
+        snapshotDoc = refreshed.snapshotDoc;
+        assertSnapshotRequired(snapshotDoc);
+        if (snapshotDoc) snapshotId = String(snapshotDoc._id);
+        preparationState = 'STALE';
+        reusedSnapshot = false;
+      }
+      // eslint-disable-next-line no-console
+      console.info('[phase_what] post-prepare intake', {
+        packId: String(packId),
+        validFr: countValidFr(packForPhase),
+        snapshotId: snapshotId || null,
+      });
+    }
+
+    assertRequirementPhaseCanStart(packForPhase, snapshotDoc);
+  }
+
+  let container = ensurePackContainer(packForPhase);
+  const existing = container.phaseRuns?.[phaseJob];
+  const clientKey = String(idempotencyKey || '').trim().slice(0, 256);
+
+  // Loop State S7: Idempotency-Key is authoritative even when force=true (double-click revise).
+  if (
+    clientKey &&
+    String(existing?.clientIdempotencyKey || '') === clientKey &&
+    String(existing?.remoteRunId || '')
+  ) {
+    return {
+      accepted: true,
+      remote: true,
+      job: phaseJob,
+      status: existing.status || 'pending',
+      runId: existing.remoteRunId,
+      parentRunId: existing.parentRunId || null,
+      snapshotId: existing.snapshotId || snapshotId,
+      schemaVersion: container.schemaVersion,
+      mode: phaseJob === 'phase_what' ? 'requirement' : undefined,
+      preparationState,
+      reusedSnapshot,
+      packContentHash: preflightPackContentHash || undefined,
+      idempotentReplay: true,
+      httpStatus: 202,
+    };
+  }
+
+  // Authority: current phase_what remoteRunId (FE parentRunId is hint only).
+  const authorityParent = String(
+    container.phaseRuns?.phase_what?.remoteRunId ||
+      container.phaseRuns?.phase_what?.runId ||
+      ''
+  ).trim();
+  const hintParent = String(parentRunIdHint || '').trim();
+  if (hintParent && authorityParent && hintParent !== authorityParent) {
+    const err = new Error(
+      'parentRunId does not match current phase_what run for this pack'
+    );
+    err.statusCode = 409;
+    err.errorCode = 'PARENT_RUN_MISMATCH';
+    throw err;
+  }
+  const resolvedParentRunId =
+    phaseJob === 'phase_what' && (force || feedback)
+      ? authorityParent || hintParent || null
+      : null;
+
+  if (
+    !force &&
+    existing?.status === 'pending' &&
+    String(existing.remoteRunId || '')
+  ) {
+    return {
+      accepted: true,
+      remote: true,
+      job: phaseJob,
+      status: 'pending',
+      runId: existing.remoteRunId,
+      snapshotId,
+      schemaVersion: container.schemaVersion,
+      mode: phaseJob === 'phase_what' ? 'requirement' : undefined,
+      preparationState,
+      reusedSnapshot,
+      packContentHash: preflightPackContentHash || undefined,
+      idempotentReplay: true,
+      httpStatus: 202,
+    };
+  }
+
+  // HOW force / selective re-run BEFORE pending stamp so we can supersede prior toolExecutions.
+  let howForceRerunSet = [];
+  if (phaseJob === 'phase_how' && force) {
+    const {
+      resolveForceRerunSet,
+    } = require('../utils/aiAnalysis/howRerunClosure');
+    const { invalidateHowArtifacts } = require('../utils/aiAnalysis/invalidateHowArtifacts');
+    const seedTools = Array.isArray(rerunTools)
+      ? rerunTools.map((s) => String(s || '').trim()).filter(Boolean)
+      : [];
+    howForceRerunSet = resolveForceRerunSet({ force: true, rerunTools: seedTools });
+    const fullHowRerun = seedTools.length === 0;
+    const needsGate2Reset = fullHowRerun || howForceRerunSet.includes('WbsTool');
+    if (needsGate2Reset) {
+      const prevGate2 =
+        container.gate2 && typeof container.gate2 === 'object' ? { ...container.gate2 } : {};
+      container.gate2 = {
+        ...prevGate2,
+        reviewLane: 'pm',
+        reviewLaneUpdatedAt: new Date().toISOString(),
+        reviewDecisions: {},
+        reviewComplete: false,
+        submittedBy: null,
+        submittedAt: null,
+        resetAt: new Date().toISOString(),
+        resetReason: fullHowRerun ? 'phase_how_force_rerun' : 'phase_how_selective_rerun',
+        resetBy: userId != null ? String(userId) : null,
+      };
+      // eslint-disable-next-line no-console
+      console.info('[phase_how] reset Gate2 review state on force re-run', {
+        packId: String(packId),
+        fullHowRerun,
+      });
+    }
+
+    const invalidated = invalidateHowArtifacts(container, howForceRerunSet);
+    container = invalidated.container;
+    // eslint-disable-next-line no-console
+    console.info(
+      `[phase_how] packId=${packId} rerunSet=${seedTools.join(',') || '(full)'} expanded=${howForceRerunSet.join(',')} cleared=${invalidated.cleared.join('|') || '-'}`
+    );
+
+    const forceScopes = Array.isArray(impactScope)
+      ? impactScope.map((s) => String(s || '').trim()).filter(Boolean)
+      : [];
+    if (
+      seedTools.length === 0 &&
+      forceScopes.length &&
+      !howForceRerunSet.includes('DependencyTool') &&
+      forceScopes.some((s) =>
+        ['WBS', 'wbs', 'structure', 'backlog', 'requirement', 'dependency', 'dependencies'].includes(
+          String(s)
+        )
+      )
+    ) {
+      const analyses = { ...(container.analyses || {}) };
+      delete analyses.dependency;
+      container.analyses = analyses;
+    }
+  }
+
+  const expectedRunId = new RequirementPack.db.base.Types.ObjectId().toString();
+  container.phaseRuns = {
+    ...(container.phaseRuns || {}),
+    [phaseJob]: {
+      status: 'pending',
+      mode: phaseJob === 'phase_what' ? 'requirement' : existing?.mode || undefined,
+      remoteRunId: expectedRunId,
+      snapshotId: String(snapshotId),
+      startedAt: new Date().toISOString(),
+      error: null,
+      ...(resolvedParentRunId ? { parentRunId: resolvedParentRunId } : {}),
+      ...(clientKey ? { clientIdempotencyKey: clientKey } : {}),
+    },
+  };
+
+  // WHAT re-run: drop prior Gate1 proposal so Review UI cannot show stale Duyệt data
+  if (phaseJob === 'phase_what') {
+    const analyses = { ...(container.analyses || {}) };
+    delete analyses.frUnderstanding;
+    delete analyses.g4Understanding;
+    delete analyses.srsProposal;
+    container.analyses = analyses;
+
+    // Reset sequential Gate1 so BA must confirm again after AI completes (PO-triggered re-run)
+    const prevStatus = String(packForPhase.status || '').trim().toLowerCase();
+    if (prevStatus === 'under_review' || prevStatus === 'rejected') {
+      packForPhase.status = 'draft';
+    }
+    packForPhase.submittedBy = undefined;
+    packForPhase.submittedAt = undefined;
+    if (prevStatus === 'under_review') {
+      packForPhase.approvedBy = undefined;
+      packForPhase.approvedAt = undefined;
+    }
+
+    const prevGate1 = container.gate1 && typeof container.gate1 === 'object' ? { ...container.gate1 } : {};
+    const withdrawId = prevGate1.activeSubmissionId || null;
+    delete prevGate1.reviewLane;
+    delete prevGate1.reviewLaneUpdatedAt;
+    delete prevGate1.approvedAgainstSubmissionId;
+    delete prevGate1.approvedManifestHash;
+    delete prevGate1.poReapprovalRequired;
+    delete prevGate1.poApprovedAt;
+    delete prevGate1.poApprovedBy;
+    container.gate1 = {
+      ...prevGate1,
+      activeSubmissionId: null,
+      activeReviewId: null,
+      resetAt: new Date().toISOString(),
+      resetReason: force ? 'phase_what_force_rerun' : 'phase_what_rerun',
+      resetBy: userId != null ? String(userId) : null,
+    };
+
+    if (withdrawId) {
+      try {
+        const { withdrawActiveSubmission } = require('../utils/srsProposal/gate1SubmitTrust');
+        await withdrawActiveSubmission({
+          pack: {
+            _id: packForPhase._id,
+            aiAnalysis: { gate1: { activeSubmissionId: withdrawId } },
+          },
+          organizationId,
+          userId,
+          withdrawSubmissionId: withdrawId,
+        });
+      } catch (withdrawErr) {
+        // eslint-disable-next-line no-console
+        console.warn('[phase_what] withdraw GateSubmission on re-run soft-fail', {
+          packId: String(packId),
+          message: withdrawErr.message,
+        });
+      }
+    }
+
+    // eslint-disable-next-line no-console
+    console.info('[phase_what] reset Gate1 review state on re-run', {
+      packId: String(packId),
+      prevStatus,
+      nextStatus: packForPhase.status,
+      withdrewSubmission: Boolean(withdrawId),
+    });
+  }
+  packForPhase.aiAnalysis = container;
+  packForPhase.aiAnalysisStatus = 'pending';
+  packForPhase.markModified('aiAnalysis');
+  await packForPhase.save();
+
+  const snapshotObject = snapshotDoc
+    ? snapshotDoc.toObject
+      ? snapshotDoc.toObject()
+      : snapshotDoc
+    : null;
+  const packForJob = snapshotObject
+    ? buildPackObjectFromSnapshot(packForPhase, snapshotObject, {})
+    : packForPhase.toObject();
+
+  const snapFr = Array.isArray(snapshotObject?.projected?.srs?.functionalRequirements)
+    ? snapshotObject.projected.srs.functionalRequirements.length
+    : 0;
+  const snapNfr = Array.isArray(snapshotObject?.projected?.srs?.nonFunctionalRequirements)
+    ? snapshotObject.projected.srs.nonFunctionalRequirements.length
+    : 0;
+  const liveFr = Array.isArray(packForPhase.functionalRequirements)
+    ? packForPhase.functionalRequirements.length
+    : 0;
+  const liveNfr = Array.isArray(packForPhase.nonFunctionalRequirements)
+    ? packForPhase.nonFunctionalRequirements.length
+    : 0;
+  const jobFr = Array.isArray(packForJob.functionalRequirements)
+    ? packForJob.functionalRequirements.length
+    : 0;
+  const jobNfr = Array.isArray(packForJob.nonFunctionalRequirements)
+    ? packForJob.nonFunctionalRequirements.length
+    : 0;
+  // eslint-disable-next-line no-console
+  console.info(
+    '[phase_what] intake counts fr=%d nfr=%d snapFr=%d snapNfr=%d jobFr=%d jobNfr=%d',
+    liveFr,
+    liveNfr,
+    snapFr,
+    snapNfr,
+    jobFr,
+    jobNfr
+  );
+
+  const { buildPhaseToolData } = require('../utils/aiAnalysis/pipeline/buildPhaseToolData');
+  const { PIPELINE_VERSION } = require('../utils/aiAnalysis/pipeline/pipelineConstants');
+  // HOW: still pin toolData employees at start for observability; APS can also hydrate from snapshot.
+  const toolData = buildPhaseToolData(snapshotObject, phaseJob);
+  if (phaseJob === 'phase_how') {
+    const n = Array.isArray(toolData.employees) ? toolData.employees.length : 0;
+    console.info(`[phase_how] toolData employees=${n} snapshotId=${snapshotId}`);
+  }
+
+  const { sanitizePhase1Feedback } = require('../utils/aiAnalysis/phase1KnowledgeContext');
+  const feedbackClean = sanitizePhase1Feedback(feedback);
+  const rejectReason = String(packForPhase.rejectionReason || '').trim();
+  const loop1Text =
+    feedbackClean ||
+    (phaseJob === 'phase_what' && force && rejectReason ? rejectReason.slice(0, 2000) : '');
+  const howImpactScope = Array.isArray(impactScope)
+    ? impactScope.map((s) => String(s || '').trim()).filter(Boolean)
+    : [];
+  const howScheduleRefresh =
+    phaseJob === 'phase_how' &&
+    (howImpactScope.includes('resource') || howImpactScope.includes('schedule'));
+
+  // RULE-DL-07: new runs forbid embedded input.snapshot / input.pack — APS hydrates via S2S
+  const deriveLocale = String(locale || '').trim().toLowerCase() === 'en' ? 'en' : 'vi';
+  const slimInput = {
+    container,
+    toolData: phaseJob === 'phase_how' ? toolData : {},
+    locale: deriveLocale,
+    packContentHash:
+      preflightPackContentHash ||
+      snapshotObject?.packContentHash ||
+      packForPhase.aiAnalysisSnapshotMeta?.packContentHash ||
+      null,
+    pipelineVersion: snapshotObject?.pipelineVersion ?? PIPELINE_VERSION,
+    inputFingerprint:
+      toolData.inputFingerprint || `${phaseJob}:${snapshotId}`,
+    ...(phaseJob === 'phase_how' && howForceRerunSet.length
+      ? {
+          rerunTools: Array.isArray(rerunTools)
+            ? rerunTools.map((s) => String(s || '').trim()).filter(Boolean)
+            : [],
+          forceRerunSet: howForceRerunSet,
+        }
+      : {}),
+    ...(howScheduleRefresh
+      ? {
+          feedback:
+            feedbackClean ||
+            'Refresh schedule after Gate2 assignment edits (impactScope resource/schedule)',
+          humanFeedback: {
+            kind: 'planning_feedback',
+            source: 'gate2',
+            text:
+              feedbackClean ||
+              'Refresh schedule after Gate2 assignment edits (impactScope resource/schedule)',
+            impactScope: howImpactScope.length ? howImpactScope : ['resource', 'schedule'],
+          },
+          frOpts: { locale: deriveLocale },
+        }
+      : loop1Text
+        ? (() => {
+            const {
+              readLoop1ReuseFromPack,
+              toLoop1G4OptsSeed,
+            } = require('../utils/aiAnalysis/loop1ReuseArtifact');
+            const reuse = readLoop1ReuseFromPack(
+              packForPhase.aiAnalysis,
+              snapshotId
+            );
+            const reuseSeed = toLoop1G4OptsSeed(reuse) || {};
+            return {
+              feedback: loop1Text,
+              humanFeedback: {
+                kind: 'requirement_feedback',
+                source: 'gate1',
+                text: loop1Text,
+              },
+              frOpts: {
+                loop1Reenter: true,
+                locale: deriveLocale,
+                ...reuseSeed,
+              },
+            };
+          })()
+        : { frOpts: { locale: deriveLocale } }),
+  };
+  if (slimInput.snapshot != null || slimInput.pack != null) {
+    delete slimInput.snapshot;
+    delete slimInput.pack;
+  }
+
+  let s2s;
+  try {
+    s2s = await aiProjectPlanningClient.startRun({
+      runId: expectedRunId,
+      projectId: packForPhase.projectId ? String(packForPhase.projectId) : null,
+      packId: String(packId),
+      organizationId: String(organizationId),
+      snapshotId,
+      parentRunId: resolvedParentRunId || undefined,
+      approvedSrsVersion: packForPhase.approvedSrsVersion || packForPhase.version || null,
+      snapshotPayloadRef: snapshotId,
+      trigger: force ? 'force_rerun' : 'phase_run',
+      initiatedBy: userId != null ? String(userId) : null,
+      job: phaseJob,
+      requestKey:
+        clientKey ||
+        (resolvedParentRunId
+          ? `${String(packId)}:${phaseJob}:loop1_revise:${resolvedParentRunId}`
+          : `${String(packId)}:${phaseJob}:${snapshotId}`),
+      idempotencyKey:
+        clientKey ||
+        (resolvedParentRunId
+          ? `${String(packId)}:${phaseJob}:loop1_revise:${resolvedParentRunId}`
+          : undefined),
+      input: slimInput,
+    });
+  } catch (err) {
+    container.phaseRuns[phaseJob] = {
+      ...container.phaseRuns[phaseJob],
+      status: 'failed',
+      error: { code: err.code || 'S2S_START_FAILED', message: err.message },
+    };
+    packForPhase.aiAnalysis = container;
+    packForPhase.aiAnalysisStatus = 'failed';
+    packForPhase.markModified('aiAnalysis');
+    await packForPhase.save();
+    throw err;
+  }
+
+  if (s2s.status !== 202) {
+    const err = new Error(s2s.data?.message || 'Phase planning start rejected');
+    err.statusCode = s2s.status >= 400 ? s2s.status : 502;
+    err.errorCode = s2s.data?.errorCode || 'PHASE_PLANNING_START_FAILED';
+    throw err;
+  }
+
+  // Guard: APS must echo the pre-allocated runId. A stale activeKey "replay" of an
+  // older terminal run used to 202 with a different id → pack pending forever, no graph.
+  const remoteEcho = String(s2s.data?.runId || s2s.data?.data?.runId || '').trim();
+  if (remoteEcho && remoteEcho !== String(expectedRunId)) {
+    container.phaseRuns[phaseJob] = {
+      ...container.phaseRuns[phaseJob],
+      status: 'failed',
+      error: {
+        code: 'REMOTE_RUN_ID_MISMATCH',
+        message: `APS returned runId=${remoteEcho} but facade allocated ${expectedRunId}`,
+        remoteRunId: remoteEcho,
+      },
+    };
+    packForPhase.aiAnalysis = container;
+    packForPhase.aiAnalysisStatus = 'failed';
+    packForPhase.markModified('aiAnalysis');
+    await packForPhase.save();
+    const err = new Error(
+      'Planning start returned a different runId (stale active run / idempotent replay)'
+    );
+    err.statusCode = 409;
+    err.errorCode = 'REMOTE_RUN_ID_MISMATCH';
+    throw err;
+  }
+
+  return {
+    accepted: true,
+    remote: true,
+    job: phaseJob,
+    status: 'pending',
+    runId: expectedRunId,
+    parentRunId: resolvedParentRunId || null,
+    generationId: expectedRunId,
+    snapshotId,
+    schemaVersion: container.schemaVersion,
+    httpStatus: 202,
+    mode: phaseJob === 'phase_what' ? 'requirement' : undefined,
+    preparationState,
+    reusedSnapshot,
+    packContentHash: preflightPackContentHash || undefined,
+    ...(loop1Text ? { feedbackApplied: true } : {}),
+  };
+}
+
+module.exports = {
+  getAiAnalysisSummary,
+  startPhaseAiPlanningRun,
+  resumeInRunHitl,
+  isDuplicateRemoteRun,
+  applyRemoteHowJobResult,
+  confirmAiAnalysisJob,
+  buildGate2PoApproveConfirmResult: (...args) =>
+    require('../utils/aiAnalysis/gate2PoApproveConfirmResult').buildGate2PoApproveConfirmResult(
+      ...args
+    ),
+  exportAiAnalysisSheet11,
+  assertHowJobsRequireApprovedPack,
+  assertBlueprintReadyForProjectCreate: (...args) =>
+    require('../utils/aiAnalysis/aiAnalysisBlueprintImport').assertBlueprintReadyForProjectCreate(
+      ...args
+    ),
+  mapBlueprintTasksToImportPlan: (...args) =>
+    require('../utils/aiAnalysis/aiAnalysisBlueprintImport').mapBlueprintTasksToImportPlan(
+      ...args
+    ),
+  // WHAT FR policy helpers (tests / Gate1)
+  ...(() => {
+    try {
+      return require('../utils/aiAnalysis/whatRequirementPolicy');
+    } catch {
+      return {};
+    }
+  })(),
+};
+

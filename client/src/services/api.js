@@ -15,24 +15,68 @@
 
 // Import axios - HTTP client library
 import axios from 'axios';
+import { applyAuthHeader, removeToken } from '../utils/tokenStorage';
+import { isAuthRefreshDisabled, tryRefreshAndRetry } from '../utils/authRefresh';
+import { mapAuthSessionMessageForLogout } from '../utils/authErrorMessages';
+import { extractApiErrorMeta, resolveApiErrorMessage } from '../utils/resolveApiErrorMessage';
+import { createTranslator } from '../locales/buildStrings.js';
+import { readStoredLocale } from '../utils/localeFormat.js';
+import { isAutoLogoutDisabled } from '../utils/devAuth';
+import {
+  isLandingEmbedWriteGuardActive,
+  isWriteHttpMethod,
+} from '../utils/landingEmbedMode';
+import { getBrowserFrontendOrigin, resolveApiBaseUrl } from '../utils/browserOrigin';
+import {
+  ensureNetworkControllerStarted,
+  networkController,
+} from '../lib/network/networkController.js';
+import {
+  attachOfflineRequestGate,
+  attachSuccessReporter,
+  tryTransportRetry,
+} from '../lib/network/attachRetryInterceptors.js';
+import { toastNetworkAware } from '../lib/network/toastNetworkAware.js';
 
 // Import toast để show error notifications
 import toast from 'react-hot-toast';
 
+ensureNetworkControllerStarted();
+
+function apiT() {
+  return createTranslator(readStoredLocale());
+}
+
+function buildRejectedError(errorLike, fallbackKey = 'errors.generic') {
+  const t = apiT();
+  const userMessage = resolveApiErrorMessage(errorLike, { t, fallback: t(fallbackKey) });
+  const meta = extractApiErrorMeta(errorLike);
+  return {
+    message: userMessage,
+    userMessage,
+    status: meta.status,
+    data: meta.data,
+    code: meta.code,
+    errorCode: meta.errorCode,
+  };
+}
+
 /* ========================================
    API BASE URL
    - Production: lấy từ .env → VITE_API_URL
-   - Development: http://localhost:8000/api
+   - Development: http://localhost:3000/api (API Gateway port 3000)
    
    API Gateway sẽ route:
-   /api/auth/* → auth-service (port 4000)
-   /api/users/* → user-service (port 4001)
-   /api/chat/* → chat-system-service (port 4002)
-   /api/organizations/* → organization-service (port 4003)
-   /api/tasks/* → task-service (port 4004)
-   /api/friends/* → friend-service (port 4005)
+   /api/auth/* → auth-service (port 3001)
+   /api/users/* → user-service (port 3004)
+   /api/messages/* → chat-service (port 3006, REST only — WebSocket qua socket-service :3017 / gateway)
+   /api/organizations/* → organization-service (port 3013)
+   /api/tasks/* → task-service (port 3009)
+   /api/friends/* → organization-service (derived roster)
 ======================================== */
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+
+// Same-origin /api qua Nginx (https://atrium.dev) hoặc Vite proxy — không hardcode :3000.
+const API_URL = resolveApiBaseUrl();
 
 /* ========================================
    TẠO AXIOS INSTANCE
@@ -44,14 +88,20 @@ const api = axios.create({
   // VD: api.get('/auth/me') → GET http://localhost:8000/api/auth/me
   baseURL: API_URL,
   
-  // Timeout: 30 giây (30000ms)
-  // Request quá 30s → throw timeout error
-  timeout: 30000,
+  // Timeout: 60 giây (60000ms) - match với proxy timeout trong API Gateway
+  // Nếu request mất quá 60s → có thể backend đang gặp vấn đề
+  // Tránh request treo vô hạn như trước (timeout: 0)
+  timeout: 60000,
+
+  // HttpOnly refresh cookie (login/refresh/logout) — cùng origin /api qua Nginx.
+  withCredentials: true,
   
   // Default headers cho mọi request
   headers: {
     // Content-Type: JSON (mọi request gửi JSON)
     'Content-Type': 'application/json',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
   },
 });
 
@@ -73,13 +123,42 @@ const api = axios.create({
 api.interceptors.request.use(
   // Success handler: modify config trước khi gửi
   (config) => {
-    // Lấy token từ localStorage (được lưu khi login)
-    const token = localStorage.getItem('token');
-    
-    // Nếu có token → thêm vào Authorization header
-    if (token) {
-      // Format: "Bearer <token>" (JWT standard)
-      config.headers.Authorization = `Bearer ${token}`;
+    if (isLandingEmbedWriteGuardActive() && isWriteHttpMethod(config.method)) {
+      const block = new Error('LANDING_EMBED_WRITE_BLOCKED');
+      block.code = 'LANDING_EMBED_WRITE_BLOCKED';
+      block.isLandingEmbedBlock = true;
+      return Promise.reject(block);
+    }
+
+    const publicRoutes = [
+      '/auth/register',
+      '/auth/login',
+      '/auth/refresh-token',
+      '/auth/forgot-password',
+      '/auth/resend-verification',
+      '/auth/reset-password',
+      '/auth/verify-email',
+    ];
+    const isPublicRoute = publicRoutes.some((route) => config.url?.includes(route));
+    if (!isPublicRoute) {
+      applyAuthHeader(config);
+    }
+
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    }
+
+    const frontendOrigin = getBrowserFrontendOrigin();
+    const authPathsWithEmailLinks = [
+      '/auth/register',
+      '/auth/forgot-password',
+      '/auth/resend-verification',
+    ];
+    if (
+      frontendOrigin &&
+      authPathsWithEmailLinks.some((p) => String(config.url || '').includes(p))
+    ) {
+      config.headers['X-Frontend-Url'] = frontendOrigin;
     }
     
     // Return config để request được gửi đi
@@ -92,6 +171,9 @@ api.interceptors.request.use(
     return Promise.reject(error);
   }
 );
+
+attachOfflineRequestGate(api, { networkController });
+attachSuccessReporter(api, networkController);
 
 /* ========================================
    RESPONSE INTERCEPTOR
@@ -123,46 +205,192 @@ api.interceptors.response.use(
   
   /* ----- ERROR HANDLER -----
      Response lỗi (status 400+, 500+, network error) */
-  (error) => {
-    // Lấy error message từ response hoặc dùng default
-    // Priority: server message > axios message > default
-    const message = error.response?.data?.message || error.message || 'Đã xảy ra lỗi';
-    
+  async (error) => {
+    if (error?.code === 'LANDING_EMBED_WRITE_BLOCKED' || error?.isLandingEmbedBlock) {
+      return Promise.reject(error);
+    }
+
+    if (error?.code === 'NETWORK_OFFLINE' || error?.isNetworkOffline) {
+      const t = apiT();
+      const message = t('api.networkOffline') || t('api.networkError');
+      toastNetworkAware(toast, message, networkController);
+      return Promise.reject(
+        buildRejectedError({ message, code: 'NETWORK_OFFLINE' }, 'errors.generic')
+      );
+    }
+
+    try {
+      const retried = await tryTransportRetry(error, api, { networkController });
+      if (retried !== null && retried !== undefined) {
+        return retried;
+      }
+    } catch (retryErr) {
+      error = retryErr;
+    }
+
+    const config = error?.config;
+
+    const requestUrlEarly = error.config?.url || '';
+    const isOptionalProfileMiss =
+      error.config?.skipGlobalAuthFailure &&
+      requestUrlEarly.includes('/users/me') &&
+      error.response?.status === 404;
+    const skipOptionalErrorLog = Boolean(error.config?.skipGlobalErrorHandling);
+    if (!isOptionalProfileMiss && !skipOptionalErrorLog) {
+      console.error('[API] Request error:', {
+        message: error.message,
+        code: error.code,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        config: {
+          url: error.config?.url,
+          method: error.config?.method,
+          baseURL: error.config?.baseURL,
+        },
+      });
+    }
+
+    // Xử lý ERR_EMPTY_RESPONSE - server không trả về response
+    // Thường xảy ra khi: backend crash, không chạy, hoặc connection bị đứt
+    if (error.code === 'ERR_EMPTY_RESPONSE' || error.message?.includes('EMPTY_RESPONSE')) {
+      const t = apiT();
+      const message = t('api.emptyResponse');
+      console.error('[API] ❌ Empty response error - server may be down or crashed');
+      console.error('[API] Request details:', {
+        url: error.config?.url,
+        method: error.config?.method,
+        baseURL: error.config?.baseURL,
+        timeout: error.config?.timeout,
+      });
+      toastNetworkAware(toast, message, networkController);
+      return Promise.reject(buildRejectedError({ message, code: 'ERR_EMPTY_RESPONSE' }, 'errors.generic'));
+    }
+
+    // Xử lý network errors
+    if (error.code === 'ERR_NETWORK' || error.message?.includes('Network Error')) {
+      const t = apiT();
+      const message = t('api.networkError');
+      console.error('[API] ❌ Network error');
+      toastNetworkAware(toast, message, networkController);
+      return Promise.reject(buildRejectedError({ message, code: 'ERR_NETWORK' }, 'errors.generic'));
+    }
+
+    if (config?.skipGlobalErrorHandling) {
+      return Promise.reject(buildRejectedError(error, 'errors.generic'));
+    }
+
+    const t = apiT();
+    const message = resolveApiErrorMessage(error, { t });
+    const errorCode = error.response?.data?.errorCode || error.response?.data?.code || '';
+
+    // Thông tin URL request để phân biệt auth routes
+    const requestUrl = error.config?.url || '';
+    const isAuthLoginRoute = requestUrl.includes('/auth/login');
+    const isAuthRegisterRoute = requestUrl.includes('/auth/register');
+    const isAuthPublicRoute =
+      isAuthLoginRoute ||
+      isAuthRegisterRoute ||
+      requestUrl.includes('/auth/forgot-password') ||
+      requestUrl.includes('/auth/resend-verification') ||
+      requestUrl.includes('/auth/reset-password') ||
+      requestUrl.includes('/auth/verify-email');
+
     /* ===== XỬ LÝ THEO STATUS CODE ===== */
-    
+
     // 401 Unauthorized: Token invalid hoặc expired
     if (error.response?.status === 401) {
-      // Xóa token lỗi khỏi localStorage
-      localStorage.removeItem('token');
-      
-      // Redirect về trang login
-      // window.location.href: hard redirect (reload page)
-      window.location.href = '/login';
-      
-      // Show notification
-      toast.error('Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.');
-    } 
-    // 403 Forbidden: Không có quyền
+      // Nếu là các auth public route (login/register/forgot/reset/verify)
+      // → KHÔNG auto redirect, để component tự xử lý (hiển thị lỗi đăng nhập, đăng ký, ...)
+      if (isAuthPublicRoute) {
+        return Promise.reject(buildRejectedError(error, 'errors.generic'));
+      }
+
+      // Request tùy chọn (vd: enrich profile sau khi đã xác thực bằng /auth/me) — không xóa token / redirect
+      if (error.config?.skipGlobalAuthFailure) {
+        return Promise.reject(buildRejectedError(error, 'errors.generic'));
+      }
+
+      if (!isAuthRefreshDisabled() && !error.config?.skipAuthRefresh) {
+        try {
+          const retried = await tryRefreshAndRetry(error, api);
+          if (retried !== null && retried !== undefined) {
+            return retried;
+          }
+        } catch (refreshErr) {
+          console.warn('[API] Auto refresh failed:', refreshErr?.message || refreshErr);
+        }
+      }
+
+      // Hiển thị lỗi chi tiết từ server để debug (trước khi redirect)
+      console.error('[API] 401 Unauthorized:', { message, url: error.config?.url, data: error.response?.data });
+      const userFacing401 = mapAuthSessionMessageForLogout(errorCode || message, readStoredLocale());
+      toast.error(userFacing401, { duration: 4000 });
+
+      if (isAutoLogoutDisabled()) {
+        console.warn('[API] VITE_DISABLE_AUTO_LOGOUT: bỏ qua xóa token và redirect /login (chỉ debug).');
+        return Promise.reject(buildRejectedError(error, 'authSession.sessionExpired'));
+      }
+
+      // Trì hoãn redirect 2s để user đọc được toast và có thể mở console xem chi tiết
+      setTimeout(() => {
+        removeToken();
+        window.location.href = '/login';
+      }, 2000);
+
+      return Promise.reject(buildRejectedError(error, 'authSession.sessionExpired'));
+    }
+    // 403 Forbidden: Không có quyền (caller có thể skip toast qua skipPermissionDeniedToast)
     else if (error.response?.status === 403) {
-      toast.error('Bạn không có quyền thực hiện hành động này');
+      if (!error.config?.skipPermissionDeniedToast) {
+        toast.error(message || t('errors.forbidden'));
+      }
     } 
     // 404 Not Found: Resource không tồn tại
+    // Với /friends/search: không hiển thị toast ở đây, để trang Bạn bè tự hiển thị "Không tìm thấy người dùng"
     else if (error.response?.status === 404) {
-      toast.error('Không tìm thấy dữ liệu');
+      const isFriendSearch = requestUrl.includes('/friends/search');
+      const silentOptional = error.config?.skipGlobalAuthFailure;
+      if (!isFriendSearch && !silentOptional) {
+        toast.error(message || t('errors.notFound'));
+      }
     } 
-    // 500+ Server Error: Lỗi server
+    // 503 Service Unavailable: Auth/service tạm không dùng được (không thoát đăng nhập)
+    else if (error.response?.status === 503) {
+      const payload = error.response?.data || {};
+      const errCode = payload.code;
+      const isOrgSearchChannel =
+        requestUrl.includes('/messages/search') && errCode === 'CHANNEL_ACCESS_VERIFY_FAILED';
+      if (isOrgSearchChannel) {
+        toast.error(t('api.channelPermissionUnavailable'), { duration: 6000 });
+      } else {
+        toast.error(message || t('api.serviceUnavailable'));
+      }
+    }
+    // 504 Gateway Timeout: Backend không phản hồi trong thời gian cho phép
+    else if (error.response?.status === 504) {
+      toast.error(t('api.timeout'));
+      console.error('[API] ❌ Gateway Timeout (504) - Backend may be slow or unresponsive');
+    }
+    // 502 Bad Gateway: thường là upstream (vd organization-service lỗi khi chat verify kênh)
+    else if (error.response?.status === 502) {
+      const payload = error.response?.data || {};
+      const errCode = payload.code;
+      if (requestUrl.includes('/messages/search') && errCode === 'CHANNEL_ACCESS_ORG_ERROR') {
+        toast.error(t('api.orgVerifyFailed'), { duration: 5500 });
+      } else {
+        toast.error(message || t('api.gateway502'));
+      }
+    }
+    // 500+ Server Error: 502 đã xử lý riêng
     else if (error.response?.status >= 500) {
-      toast.error('Lỗi server. Vui lòng thử lại sau.');
+      toast.error(message || t('errors.server'));
     }
     // Các lỗi khác (400, 422, etc.) không show toast
     // Component tự handle (validation errors, etc.)
 
     // Reject với error object có cấu trúc nhất quán
-    return Promise.reject({
-      message,                        // Error message
-      status: error.response?.status, // HTTP status code
-      data: error.response?.data,     // Full error data từ server
-    });
+    return Promise.reject(buildRejectedError(error, 'errors.generic'));
   }
 );
 

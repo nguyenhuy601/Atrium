@@ -1,0 +1,111 @@
+/**
+ * Board RBAC capabilities + Kanban done-list policy (chuẩn vàng P0).
+ * canCreateTask (org scope) ≈ PM / TL / head / owner / admin.
+ */
+
+const DONE_LIST_TITLES = new Set([
+  'xong',
+  'done',
+  'completed',
+  'hoàn thành',
+  'hoan thanh',
+]);
+
+const READY_FOR_QA_TITLES = new Set([
+  'ready for qa',
+  'ready_for_qa',
+  'san sang qa',
+  'ready-for-qa',
+]);
+
+function normalizeListTitle(title) {
+  return String(title || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function isDoneListTitle(title) {
+  const n = normalizeListTitle(title);
+  if (!n) return false;
+  if (DONE_LIST_TITLES.has(n)) return true;
+  return n === 'xong' || n.endsWith(' xong') || n.startsWith('done');
+}
+
+function isReadyForQaListTitle(title) {
+  const normalized = normalizeListTitle(title);
+  if (!normalized) return false;
+  if (READY_FOR_QA_TITLES.has(normalized)) return true;
+  return normalized.includes('ready for qa') || normalized.includes('san sang qa');
+}
+
+/** List object: statusKey `qa` hoặc title Ready for QA. */
+function isReadyForQaList(list) {
+  if (!list) return false;
+  const statusKey = String(list.statusKey || '')
+    .trim()
+    .toLowerCase();
+  if (statusKey === 'qa') return true;
+  return isReadyForQaListTitle(list.title);
+}
+
+/**
+ * @param {object} opts
+ * @param {boolean} opts.isCreator
+ * @param {boolean} opts.isOrgAdmin
+ * @param {boolean} opts.canCreateTask
+ * @param {boolean} opts.inWorkspaceScope
+ * @param {boolean} opts.memberCanView
+ * @param {boolean} opts.memberCanEdit
+ */
+function buildBoardCapabilities({
+  isCreator = false,
+  isOrgAdmin = false,
+  canCreateTask = false,
+  inWorkspaceScope = false,
+  memberCanView = false,
+  memberCanEdit = false,
+} = {}) {
+  const elevated = Boolean(isCreator || isOrgAdmin || canCreateTask);
+  const canView = Boolean(elevated || inWorkspaceScope || memberCanView);
+  /** Quản lý board: đóng dự án, archive list */
+  const canManageBoard = Boolean(isCreator || isOrgAdmin);
+  /** Tạo/sửa list & cột — PM/TL/head + admin */
+  const canManageLists = elevated;
+  /** Tạo thẻ + gán — PM/TL (không phải mọi viewer) */
+  const canCreateCards = elevated;
+  const canAssign = elevated;
+  /** Sửa nội dung thẻ (title/due/assignee) */
+  const canEditCards = elevated || Boolean(memberCanEdit && canCreateTask);
+  /** Kéo thẻ / đổi cột — cần quyền change_status (P2.1); viewer-only không kéo */
+  const canMoveCards = elevated || Boolean(memberCanEdit);
+  const canMoveToDone = elevated;
+  const canUseAiConfirm = elevated;
+
+  return {
+    canView,
+    canManageBoard,
+    canManageLists,
+    canCreateCards,
+    canEditCards,
+    canAssign,
+    canMoveCards,
+    canMoveToDone,
+    canUseAiConfirm,
+    canManageMembers: canManageBoard,
+    canUpdateSettings: canManageBoard,
+    canViewFiles: canView,
+    canViewRepository: canManageBoard,
+  };
+}
+
+module.exports = {
+  DONE_LIST_TITLES,
+  READY_FOR_QA_TITLES,
+  normalizeListTitle,
+  isDoneListTitle,
+  isReadyForQaListTitle,
+  isReadyForQaList,
+  buildBoardCapabilities,
+};

@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+const { mongoose } = require('@enterprise/shared/config/mongo');
 
 const departmentSchema = new mongoose.Schema(
   {
@@ -13,6 +13,18 @@ const departmentSchema = new mongoose.Schema(
       ref: 'Organization',
       required: true,
     },
+    branch: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Branch',
+      default: null,
+      index: true,
+    },
+    division: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Division',
+      default: null,
+      index: true,
+    },
     head: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -22,10 +34,13 @@ const departmentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
     }],
+    isActive: { type: Boolean, default: true },
   },
   {
     timestamps: true,
   }
 );
+
+departmentSchema.index({ organization: 1, branch: 1, division: 1, name: 1 });
 
 module.exports = mongoose.model('Department', departmentSchema);

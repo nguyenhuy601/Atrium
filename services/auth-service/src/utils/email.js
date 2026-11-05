@@ -1,0 +1,499 @@
+const nodemailer = require('nodemailer');
+const { escapeHtml, maskEmailForLog } = require('./authInputSafety');
+
+/** Lỗi nodemailer có thể chứa địa chỉ email / nội dung SMTP — chỉ log mã lỗi. */
+function logMailError(label, error) {
+  console.error(`[EmailService] ${label}:`, {
+    code: error?.code || null,
+    responseCode: error?.responseCode || null,
+  });
+}
+
+/**
+ * Email Service - Gửi email verification và password reset
+ */
+class EmailService {
+  constructor() {
+    // Kiểm tra email config trước khi tạo transporter
+    const emailUser = process.env.EMAIL_USER;
+    const emailPassword = String(process.env.EMAIL_PASSWORD || '').replace(/\s+/g, '');
+    
+    if (emailUser && emailPassword) {
+      console.log('[EmailService] Initializing SMTP transporter');
+      // Tạo transporter với Gmail SMTP
+      this.transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: emailUser, // Gmail của bạn
+          pass: emailPassword, // App Password (bỏ khoảng trắng trong .env nếu có)
+        },
+        // Thêm timeout để tránh chờ SMTP quá lâu
+        connectionTimeout: 10000, // 10 seconds
+        greetingTimeout: 10000, // 10 seconds
+        socketTimeout: 10000, // 10 seconds
+      });
+      
+      // Verify connection khi khởi tạo
+      this.verifyConnection();
+    } else {
+      console.warn('[EmailService] EMAIL_USER or EMAIL_PASSWORD not set. Email service will not be available.');
+      this.transporter = null;
+    }
+  }
+
+  /**
+   * Verify SMTP connection
+   */
+  async verifyConnection() {
+    if (!this.transporter) {
+      return false;
+    }
+    
+    try {
+      await this.transporter.verify();
+      console.log('[EmailService] SMTP connection verified successfully');
+      return true;
+    } catch (error) {
+      logMailError('SMTP connection verification failed', error);
+      return false;
+    }
+  }
+
+  /**
+   * Gửi email verification
+   * @param {string} email - Email người nhận
+   * @param {string} verificationToken - Token để verify
+   */
+  async sendVerificationEmail(email, verificationToken, frontendUrl) {
+    console.log('[EmailService] 📨 sendVerificationEmail called');
+    console.log('[EmailService] Email:', maskEmailForLog(email));
+    
+    try {
+      // Kiểm tra email service có sẵn sàng không
+      console.log('[EmailService] Checking availability...');
+      const isAvail = this.isAvailable();
+      console.log('[EmailService] isAvailable():', isAvail);
+      
+      if (!isAvail) {
+        console.log('[EmailService] ❌ Email service not configured, skipping email send');
+        console.log('[EmailService] EMAIL_USER:', process.env.EMAIL_USER ? 'SET' : 'NOT SET');
+        console.log('[EmailService] EMAIL_PASSWORD:', process.env.EMAIL_PASSWORD ? 'SET' : 'NOT SET');
+        console.log('[EmailService] transporter:', this.transporter ? 'EXISTS' : 'NULL');
+        return null;
+      }
+
+      console.log(`[EmailService] ✅ Service available, sending verification email to: ${maskEmailForLog(email)}`);
+      const base =
+        (frontendUrl && String(frontendUrl).trim()) ||
+        process.env.FRONTEND_URL ||
+        'http://localhost:5173';
+      const baseNormalized = String(base).replace(/\/+$/, '');
+      const verificationUrl = `${baseNormalized}/verify-email#token=${encodeURIComponent(verificationToken)}`;
+      const mailOptions = {
+        from: `"${process.env.EMAIL_FROM_NAME || 'Atrium'}" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: 'Xác thực email của bạn',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <style>
+              body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+              .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+              .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+              .button { display: inline-block; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+              .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <h1>Xác thực Email</h1>
+              </div>
+              <div class="content">
+                <p>Xin chào,</p>
+                <p>Cảm ơn bạn đã đăng ký tài khoản tại Atrium!</p>
+                <p>Vui lòng click vào nút bên dưới để xác thực email của bạn:</p>
+                <p style="text-align: center;">
+                  <a href="${verificationUrl}" class="button">Xác thực Email</a>
+                </p>
+                <p>Hoặc copy link sau vào trình duyệt:</p>
+                <p style="word-break: break-all; background: #fff; padding: 10px; border-radius: 5px;">
+                  ${verificationUrl}
+                </p>
+                <p><strong>Lưu ý:</strong> Link này sẽ hết hạn sau 24 giờ.</p>
+                <p>Nếu bạn không đăng ký tài khoản này, vui lòng bỏ qua email này.</p>
+              </div>
+              <div class="footer">
+                <p>© ${new Date().getFullYear()} Atrium. All rights reserved.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+        text: `
+          Xác thực Email
+          
+          Xin chào,
+          
+          Cảm ơn bạn đã đăng ký tài khoản tại Atrium!
+          
+          Vui lòng click vào link sau để xác thực email của bạn:
+          ${verificationUrl}
+          
+          Link này sẽ hết hạn sau 24 giờ.
+          
+          Nếu bạn không đăng ký tài khoản này, vui lòng bỏ qua email này.
+        `,
+      };
+
+      // Gửi email với timeout
+      console.log('[EmailService] 📤 Preparing to send email via transporter...');
+      console.log('[EmailService] Transporter exists:', !!this.transporter);
+      
+      const sendPromise = this.transporter.sendMail(mailOptions);
+      console.log('[EmailService] Send promise created, waiting for response...');
+      
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => {
+          console.warn('[EmailService] ⏱️ Email send timeout after 10 seconds');
+          reject(new Error('Email send timeout'));
+        }, 10000)
+      );
+      
+      console.log('[EmailService] Racing between send and timeout...');
+      const info = await Promise.race([sendPromise, timeoutPromise]);
+      
+      console.log('[EmailService] ✅ Email sent successfully!');
+      console.log('[EmailService] MessageId:', info.messageId);
+      
+      return info;
+    } catch (error) {
+      logMailError('Error sending verification email', error);
+      
+      // Nếu là lỗi authentication, log rõ ràng
+      if (error.code === 'EAUTH' || error.responseCode === 535) {
+        console.error('[EmailService] Authentication failed. Please check:');
+        console.error('[EmailService] 1. EMAIL_USER is correct');
+        console.error('[EmailService] 2. EMAIL_PASSWORD is an App Password (not regular password)');
+        console.error('[EmailService] 3. 2-Step Verification is enabled on Gmail account');
+      }
+      
+      // Không throw error để không block registration
+      // Chỉ log lỗi và return null
+      return null;
+    }
+  }
+
+  /**
+   * Gửi email reset password
+   * @param {string} email - Email người nhận
+   * @param {string} resetToken - Token để reset password
+   */
+  async sendPasswordResetEmail(email, resetToken, frontendUrl) {
+    try {
+      if (!this.isAvailable()) {
+        console.warn('[EmailService] Password reset email skipped: service not configured');
+        return null;
+      }
+
+      const base =
+        (frontendUrl && String(frontendUrl).trim()) ||
+        process.env.FRONTEND_URL ||
+        'http://localhost:5173';
+      const baseNormalized = String(base).replace(/\/+$/, '');
+      const resetUrl = `${baseNormalized}/reset-password#token=${encodeURIComponent(resetToken)}`;
+
+      const mailOptions = {
+        from: `"${process.env.EMAIL_FROM_NAME || 'Atrium'}" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: 'Đặt lại mật khẩu',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <style>
+              body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+              .header { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+              .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+              .button { display: inline-block; padding: 12px 30px; background: #f5576c; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+              .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+              .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <h1>Đặt lại Mật khẩu</h1>
+              </div>
+              <div class="content">
+                <p>Xin chào,</p>
+                <p>Bạn đã yêu cầu đặt lại mật khẩu cho tài khoản Atrium.</p>
+                <p>Click vào nút bên dưới để đặt lại mật khẩu:</p>
+                <p style="text-align: center;">
+                  <a href="${resetUrl}" class="button">Đặt lại Mật khẩu</a>
+                </p>
+                <p>Hoặc copy link sau vào trình duyệt:</p>
+                <p style="word-break: break-all; background: #fff; padding: 10px; border-radius: 5px;">
+                  ${resetUrl}
+                </p>
+                <div class="warning">
+                  <p><strong>⚠️ Lưu ý:</strong></p>
+                  <ul>
+                    <li>Link này sẽ hết hạn sau 1 giờ.</li>
+                    <li>Nếu bạn không yêu cầu đặt lại mật khẩu, vui lòng bỏ qua email này.</li>
+                    <li>Mật khẩu của bạn sẽ không thay đổi nếu bạn không click vào link trên.</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="footer">
+                <p>© ${new Date().getFullYear()} Atrium. All rights reserved.</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `,
+        text: `
+          Đặt lại Mật khẩu
+          
+          Xin chào,
+          
+          Bạn đã yêu cầu đặt lại mật khẩu cho tài khoản Atrium.
+          
+          Click vào link sau để đặt lại mật khẩu:
+          ${resetUrl}
+          
+          Link này sẽ hết hạn sau 1 giờ.
+          
+          Nếu bạn không yêu cầu đặt lại mật khẩu, vui lòng bỏ qua email này.
+        `,
+      };
+
+      const info = await this.transporter.sendMail(mailOptions);
+      console.log('Password reset email sent:', info.messageId);
+      return info;
+    } catch (error) {
+      logMailError('Error sending password reset email', error);
+      return null;
+    }
+  }
+
+  /**
+   * Gửi email xác thực thay đổi email.
+   */
+  async sendEmailChangeVerificationEmail(email, verificationToken, frontendUrl) {
+    try {
+      if (!this.isAvailable()) {
+        console.warn('[EmailService] Email change verification skipped: service not configured');
+        return null;
+      }
+      const base =
+        (frontendUrl && String(frontendUrl).trim()) ||
+        process.env.FRONTEND_URL ||
+        'http://localhost:5173';
+      const baseNormalized = String(base).replace(/\/+$/, '');
+      const verificationUrl = `${baseNormalized}/verify-email-change#token=${encodeURIComponent(verificationToken)}`;
+
+      const mailOptions = {
+        from: `"${process.env.EMAIL_FROM_NAME || 'Atrium'}" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: 'Xác thực email mới của bạn',
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="utf-8"></head>
+          <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
+            <p>Xin chào,</p>
+            <p>Bạn vừa yêu cầu đổi email đăng nhập cho tài khoản Atrium.</p>
+            <p>Vui lòng xác thực email mới bằng cách mở liên kết bên dưới:</p>
+            <p><a href="${verificationUrl}" style="display:inline-block;padding:10px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:8px;">Xác thực email mới</a></p>
+            <p>Hoặc mở trực tiếp: <br/><span style="word-break:break-all;">${verificationUrl}</span></p>
+            <p><strong>Lưu ý:</strong> Link này hết hạn sau 24 giờ.</p>
+            <p>Nếu bạn không yêu cầu đổi email, hãy bỏ qua email này.</p>
+          </body>
+          </html>
+        `,
+        text: `Xác thực email mới của bạn: ${verificationUrl}`,
+      };
+      return await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      logMailError('Error sending email-change verification email', error);
+      return null;
+    }
+  }
+
+  /**
+   * Email mời nhận tài khoản doanh nghiệp (company invite).
+   */
+  async sendCompanyInviteEmail(email, { inviteUrl, organizationName, firstName, lastName }) {
+    try {
+      if (!this.isAvailable()) {
+        console.warn('[EmailService] Company invite email skipped: service not configured');
+        return null;
+      }
+      const url = String(inviteUrl || '').trim();
+      if (!url) return null;
+      const orgLabel = String(organizationName || 'công ty').trim();
+      const nameParts = [firstName, lastName].map((s) => String(s || '').trim()).filter(Boolean);
+      const greet = nameParts.length ? nameParts.join(' ') : 'bạn';
+
+      const mailOptions = {
+        from: `"${process.env.EMAIL_FROM_NAME || 'Atrium'}" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: `Lời mời nhận tài khoản — ${orgLabel}`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="utf-8"></head>
+          <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
+            <div style="max-width:560px;margin:0 auto;padding:24px;">
+              <h2 style="margin:0 0 12px;">Xin chào ${escapeHtml(greet)},</h2>
+              <p>Bạn được mời nhận tài khoản doanh nghiệp trên <strong>Atrium</strong> cho <strong>${escapeHtml(orgLabel)}</strong>.</p>
+              <p>Nhấn nút bên dưới để xác nhận. Hệ thống sẽ tạo tài khoản bằng email này, sau đó chuyển bạn tới trang đăng nhập.</p>
+              <p style="margin:28px 0;">
+                <a href="${escapeHtml(url)}" style="display:inline-block;padding:14px 28px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;text-decoration:none;border-radius:10px;font-weight:700;">
+                  Xác nhận nhận tài khoản
+                </a>
+              </p>
+              <p style="font-size:13px;color:#666;word-break:break-all;">Hoặc mở link:<br/>${escapeHtml(url)}</p>
+              <p style="font-size:12px;color:#888;">Link có hiệu lực trong thời gian giới hạn. Nếu bạn không yêu cầu, hãy bỏ qua email này.</p>
+            </div>
+          </body>
+          </html>
+        `,
+        text: `Xin chào ${greet}, bạn được mời nhận tài khoản ${orgLabel} trên Atrium. Xác nhận tại: ${url}`,
+      };
+      return await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      logMailError('Error sending company invite email', error);
+      return null;
+    }
+  }
+
+  /**
+   * Email onboarding sau Excel/HR provision — link đặt mật khẩu (không gửi plaintext password).
+   */
+  async sendHrProvisionSetPasswordEmail(email, { resetUrl, organizationName, firstName, lastName }) {
+    try {
+      if (!this.isAvailable()) {
+        console.warn('[EmailService] HR set-password email skipped: service not configured');
+        return null;
+      }
+      const url = String(resetUrl || '').trim();
+      if (!url) return null;
+      const orgLabel = String(organizationName || 'công ty').trim();
+      const nameParts = [firstName, lastName].map((s) => String(s || '').trim()).filter(Boolean);
+      const greet = nameParts.length ? nameParts.join(' ') : 'bạn';
+
+      const mailOptions = {
+        from: `"${process.env.EMAIL_FROM_NAME || 'Atrium'}" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: `Đặt mật khẩu tài khoản — ${orgLabel}`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="utf-8"></head>
+          <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
+            <div style="max-width:560px;margin:0 auto;padding:24px;">
+              <h2 style="margin:0 0 12px;">Xin chào ${escapeHtml(greet)},</h2>
+              <p>Tài khoản <strong>Atrium</strong> của bạn tại <strong>${escapeHtml(orgLabel)}</strong> đã được tạo (HR import).</p>
+              <p>Nhấn nút bên dưới để <strong>đặt mật khẩu lần đầu</strong>, rồi đăng nhập. Không gửi mật khẩu tạm trong email này.</p>
+              <p style="margin:28px 0;">
+                <a href="${escapeHtml(url)}" style="display:inline-block;padding:14px 28px;background:linear-gradient(135deg,#ef4444,#b91c1c);color:#fff;text-decoration:none;border-radius:10px;font-weight:700;">
+                  Đặt mật khẩu
+                </a>
+              </p>
+              <p style="font-size:13px;color:#666;word-break:break-all;">Hoặc mở link:<br/>${escapeHtml(url)}</p>
+              <p style="font-size:12px;color:#888;">Link hết hạn sau 1 giờ. Nếu bạn không mong đợi email này, hãy bỏ qua.</p>
+            </div>
+          </body>
+          </html>
+        `,
+        text: `Xin chào ${greet}, tài khoản Atrium tại ${orgLabel} đã được tạo. Đặt mật khẩu tại: ${url}`,
+      };
+      return await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      logMailError('Error sending HR set-password email', error);
+      return null;
+    }
+  }
+
+  /**
+   * Gửi email mời vào phòng thoại (public room link).
+   */
+  async sendVoiceRoomInviteEmail(email, { inviteUrl, roomId, hostName }) {
+    try {
+      if (!this.isAvailable()) {
+        console.warn('[EmailService] Voice room invite email skipped: service not configured');
+        return null;
+      }
+      const url = String(inviteUrl || '').trim();
+      if (!url) return null;
+      const hostLabel = String(hostName || 'Một người dùng').trim();
+      const roomLabel = String(roomId || '').trim();
+
+      const mailOptions = {
+        from: `"${process.env.EMAIL_FROM_NAME || 'Atrium'}" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: `Lời mời vào phòng thoại${roomLabel ? ` — ${roomLabel}` : ''}`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+          <head><meta charset="utf-8"></head>
+          <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
+            <p>Xin chào,</p>
+            <p><strong>${escapeHtml(hostLabel)}</strong> mời bạn vào phòng thoại trên Atrium.</p>
+            <p>Mã phòng: <strong>${escapeHtml(roomLabel || '—')}</strong></p>
+            <p><a href="${escapeHtml(url)}" style="display:inline-block;padding:12px 24px;background:#0ea5e9;color:#fff;text-decoration:none;border-radius:8px;">Tham gia phòng</a></p>
+            <p>Hoặc mở link: <br/><span style="word-break:break-all;">${escapeHtml(url)}</span></p>
+            <p style="font-size:12px;color:#666;">Bạn cần đăng nhập (hoặc đăng ký) trước khi xin vào phòng. Chủ phòng sẽ duyệt yêu cầu của bạn.</p>
+          </body>
+          </html>
+        `,
+        text: `${hostLabel} mời bạn vào phòng ${roomLabel}. Mở link: ${url}`,
+      };
+      const info = await this.transporter.sendMail(mailOptions);
+      return info;
+    } catch (error) {
+      logMailError('Error sending voice room invite email', error);
+      return null;
+    }
+  }
+
+  /**
+   * Kiểm tra email service có sẵn sàng không
+   */
+  isAvailable() {
+    const hasUser = !!process.env.EMAIL_USER;
+    const hasPassword = !!process.env.EMAIL_PASSWORD;
+    const hasTransporter = !!this.transporter;
+    
+    if (!hasUser || !hasPassword || !hasTransporter) {
+      console.log('[EmailService] Service not available:', {
+        hasUser,
+        hasPassword,
+        hasTransporter,
+      });
+      return false;
+    }
+    
+    return true;
+  }
+}
+
+// Export singleton instance
+const emailService = new EmailService();
+
+module.exports = emailService;
+
+
+
+
+
+
+
+

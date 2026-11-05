@@ -1,0 +1,255 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { useAppStrings } from '../../locales/appStrings';
+import { useShellLayout } from '../../context/ShellLayoutContext';
+import ProjectsLandingGrid from '../../features/projects/landing/ProjectsLandingGrid';
+import { isProjectListableForUi } from '../../features/projects/landing/projectLandingActive';
+import {
+  boardQueryFromSearch,
+  buildCollaborateProjectHubPath,
+  buildCollaborateProjectsNewPath,
+  orgQueryFromSearch,
+  readStoredLastOrganizationId,
+} from '../../utils/suitePathUtils';
+import { resolveAiProjectEntryPath } from '../../features/projects/phase1/aiHitl/aiHitlNavState';
+import { loadLinkedPackForAiNav } from '../../features/projects/phase1/aiHitl/loadLinkedPackForAiNav';
+import {
+  buildBoardIdToProjectIndex,
+  projectRefFromBoardDetailPayload,
+} from '../../utils/mapBoardHealthToProject';
+import { taskAPI, unwrapTaskBoardDetailPayload } from '../../services/api/taskAPI';
+import useRequirementAccess from '../../hooks/useRequirementAccess';
+import useOrganizationDetail from '../../hooks/useOrganizationDetail';
+import useOrgProjectsList from '../../hooks/useOrgProjectsList';
+import useTaskWorkspaceScope from '../../hooks/useTaskWorkspaceScope';
+import { resolveLandingCreateActions } from '../../features/projects/landing/projectsLandingCreateActions';
+
+/**
+ * Projects Landing — A/B/C/D:
+ * A Bootstrap = App Shell only (auth restore), not page data.
+ * B = org detail + projects list + task scope + requirement access.
+ * C = organizationId from URL/storage (routing).
+ * D page BFF = not used here (Hub overview only).
+ */
+
+function isMyProject(project) {
+  const mb = project?.myMembership;
+  if (!mb) return true; // fallback for legacy payloads
+  if (typeof mb.isMember === 'boolean') return mb.isMember;
+  if (Array.isArray(mb.projectRoleKeys)) return mb.projectRoleKeys.length > 0;
+  return true;
+}
+
+export default function ProjectsLandingPage() {
+  const { t } = useAppStrings();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [enteringId, setEnteringId] = useState(null);
+  const enteringLockRef = useRef(false);
+  const { showHeaderLoading, hideHeaderLoading } = useShellLayout();
+  const orgId = orgQueryFromSearch(searchParams) || readStoredLastOrganizationId();
+  const boardIdFromQuery = boardQueryFromSearch(searchParams);
+  const boardRedirectTriedRef = useRef('');
+
+  const { organization } = useOrganizationDetail(orgId);
+  const {
+    projects: rawProjects,
+    loading: projectsLoading,
+    isError: projectsError,
+    reload: reloadProjects,
+  } = useOrgProjectsList(orgId, { excludeClosed: false });
+  const {
+    canCreateProjectCapability,
+    createProjectDeniedKey,
+    loading: scopeLoading,
+  } = useTaskWorkspaceScope(orgId);
+  const { access: requirementAccess, loading: requirementAccessLoading } =
+    useRequirementAccess(orgId);
+
+  const orgName = String(organization?.name || '').trim();
+  const canCreate = Boolean(canCreateProjectCapability);
+  const canCreateWithAi = canCreate && Boolean(requirementAccess?.canRunAiPlanning);
+
+  /** Grid waits only on projects list; create actions resolve progressively. */
+  const listLoading = Boolean(orgId) && projectsLoading;
+  const { showCreate, createDisabled, showCreateWithAi, createWithAiDisabled } =
+    resolveLandingCreateActions({
+      scopeLoading,
+      canCreate,
+      requirementAccessLoading,
+      canCreateWithAi,
+    });
+
+  const projects = useMemo(
+    () => rawProjects.filter(isMyProject).filter(isProjectListableForUi),
+    [rawProjects]
+  );
+
+  // Deep-link từ Overview board health: ?boardId= → Hub (tab overview).
+  useEffect(() => {
+    const boardId = String(boardIdFromQuery || '').trim();
+    if (!orgId || !boardId || listLoading || projectsError) return;
+    const attemptKey = `${orgId}:${boardId}`;
+    if (boardRedirectTriedRef.current === attemptKey) return;
+
+    const index = buildBoardIdToProjectIndex(rawProjects);
+    const hit = index.get(boardId);
+    if (hit?.projectId) {
+      boardRedirectTriedRef.current = attemptKey;
+      navigate(
+        buildCollaborateProjectHubPath(hit.projectId, {
+          organizationId: orgId,
+          boardId,
+          tab: 'overview',
+        }),
+        { replace: true }
+      );
+      return undefined;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await taskAPI.getBoardDetail(boardId, {
+          includeCards: false,
+          organizationId: orgId,
+        });
+        if (cancelled) return;
+        const ref = projectRefFromBoardDetailPayload(unwrapTaskBoardDetailPayload(res));
+        if (!ref?.projectId) {
+          boardRedirectTriedRef.current = attemptKey;
+          return;
+        }
+        boardRedirectTriedRef.current = attemptKey;
+        navigate(
+          buildCollaborateProjectHubPath(ref.projectId, {
+            organizationId: orgId || ref.organizationId,
+            boardId,
+            tab: 'overview',
+          }),
+          { replace: true }
+        );
+      } catch {
+        if (!cancelled) boardRedirectTriedRef.current = attemptKey;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    orgId,
+    boardIdFromQuery,
+    listLoading,
+    projectsError,
+    rawProjects,
+    navigate,
+  ]);
+
+  const handleCreate = useCallback(() => {
+    if (!orgId) {
+      toast.error(t('organizations.selectOrgFirst'));
+      return;
+    }
+    if (!canCreate) {
+      toast.error(t(createProjectDeniedKey));
+      return;
+    }
+    navigate(buildCollaborateProjectsNewPath(orgId));
+  }, [canCreate, createProjectDeniedKey, navigate, orgId, t]);
+
+  const handleCreateWithAi = useCallback(() => {
+    if (!orgId) {
+      toast.error(t('organizations.selectOrgFirst'));
+      return;
+    }
+    if (!canCreateWithAi) {
+      toast.error(t(createProjectDeniedKey));
+      return;
+    }
+    navigate(buildCollaborateProjectsNewPath(orgId, { analysisMode: 'ai' }));
+  }, [canCreateWithAi, createProjectDeniedKey, navigate, orgId, t]);
+
+  const handleSelect = useCallback(
+    async (project) => {
+      const projectId = String(project?._id || project?.projectId || '').trim();
+      if (!projectId || enteringLockRef.current) return;
+      enteringLockRef.current = true;
+      setEnteringId(projectId);
+      showHeaderLoading(t('nav.projectsEntering'));
+      try {
+        const boardId = String(project?.defaultBoardId || project?.boards?.[0]?._id || '').trim();
+        const phase = String(project?.deliveryPhase || '').trim().toLowerCase();
+        let pack = null;
+        if (!phase || phase === 'requirement_analysis') {
+          try {
+            pack = await loadLinkedPackForAiNav(orgId, projectId);
+          } catch {
+            pack = null;
+          }
+        }
+        navigate(
+          resolveAiProjectEntryPath({
+            projectId,
+            project,
+            pack,
+            boardId,
+            organizationId: orgId,
+          })
+        );
+      } finally {
+        enteringLockRef.current = false;
+        setEnteringId(null);
+        hideHeaderLoading();
+      }
+    },
+    [hideHeaderLoading, navigate, orgId, showHeaderLoading, t]
+  );
+
+  if (!orgId) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
+        {t('organizations.selectOrgFirst')}
+      </div>
+    );
+  }
+
+  if (listLoading) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        {t('common.loading')}
+      </div>
+    );
+  }
+
+  if (projectsError) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <p className="text-sm text-muted-foreground">{t('nav.projectsLoadFail')}</p>
+        <button
+          type="button"
+          className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"
+          onClick={() => reloadProjects()}
+        >
+          {t('workspace.projectHubTimelineRetry')}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full min-h-0">
+      <ProjectsLandingGrid
+        organizationName={orgName}
+        projects={projects}
+        onCreateProject={showCreate ? handleCreate : undefined}
+        onCreateProjectWithAi={showCreateWithAi ? handleCreateWithAi : undefined}
+        createProjectDisabled={createDisabled}
+        createProjectWithAiDisabled={createWithAiDisabled}
+        onSelectProject={handleSelect}
+        enteringProjectId={enteringId}
+      />
+    </div>
+  );
+}

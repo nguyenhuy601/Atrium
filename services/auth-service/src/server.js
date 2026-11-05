@@ -1,50 +1,51 @@
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
 require('dotenv').config();
 
-const authRoutes = require('./routes/authRoutes');
-const errorHandler = require('./middleware/errorHandler');
+if (process.env.NODE_ENV === 'production') {
+  const jwt = String(process.env.JWT_SECRET || '').trim();
+  if (!jwt || jwt === 'your-secret-key' || jwt === 'your-secret-key-change-in-production') {
+    console.error('[auth-service] FATAL: set JWT_SECRET to a strong non-default value in production.');
+    process.exit(1);
+  }
+}
 
-const app = express();
+const app = require('./app');
+// Sử dụng hàm connectDB / disconnectDB / connectRedis chung từ /shared
+const { connectDB, disconnectDB, connectRedis } = require('@enterprise/shared');
+
 const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(helmet());
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(morgan('dev'));
+// Kết nối MongoDB (dùng shared connectDB)
+connectDB()
+  .then(async () => {
+    // Kết nối Redis (dùng shared connectRedis)
+    connectRedis();
 
-// Database connection
-mongoose
-  .connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/voice-chat-auth', {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
+    // Khởi động server
+    app.listen(PORT, () => {
+      console.log(`Auth Service đang chạy trên cổng ${PORT}`);
+      console.log('[AuthService] ✅ Server ready to accept requests');
+      try {
+        const { getSecurityFeatureFlags } = require('./config/securityFeatureFlags');
+        const flags = getSecurityFeatureFlags();
+        console.log(
+          '[AuthService] Wave C security flags (stubs, no auth flow change):',
+          JSON.stringify(flags)
+        );
+      } catch (err) {
+        console.warn('[AuthService] securityFeatureFlags load skipped:', err.message);
+      }
+    });
   })
-  .then(() => console.log('✅ MongoDB connected'))
-  .catch((err) => console.error('❌ MongoDB connection error:', err));
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ 
-    service: 'auth-service',
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+  .catch((error) => {
+    console.error('Failed to start server:', error);
+    process.exit(1);
   });
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  await disconnectDB();
+  process.exit(0);
 });
 
-// Routes
-app.use('/api/auth', authRoutes);
 
-// Error handler
-app.use(errorHandler);
-
-app.listen(PORT, () => {
-  console.log(`🔐 Auth Service running on port ${PORT}`);
-});
-
-module.exports = app;

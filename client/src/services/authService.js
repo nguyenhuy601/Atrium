@@ -16,6 +16,8 @@
 // Import api instance từ ./api.js
 // api đã có sẵn: base URL, interceptors, auth headers
 import api from './api';
+import { setToken } from '../utils/tokenStorage';
+import { mergeAuthUserFromProfile, unwrapApiData } from '../utils/helpers';
 
 /* ========================================
    AUTHSERVICE OBJECT
@@ -26,7 +28,7 @@ const authService = {
   /* ----- REGISTER: Đăng ký user mới -----
      
      Gọi: POST /auth/register
-     Body: { name, email, password }
+     Body: { firstName, lastName, email, password, dateOfBirth (YYYY-MM-DD) }
      Return: { token, user: { id, name, email, avatar } }
      
      Được gọi từ: AuthContext.register()
@@ -84,10 +86,26 @@ const authService = {
      - Cần refresh user info
      - Sau khi update profile */
   getCurrentUser: async () => {
-    // GET /auth/me với token trong header
-    // Server decode token → lấy userId → return user data
-    const response = await api.get('/auth/me');
-    return response;
+    const [authSettled, profileSettled] = await Promise.allSettled([
+      api.get('/auth/me'),
+      api.get('/users/me', { skipGlobalAuthFailure: true }),
+    ]);
+    const authBody =
+      authSettled.status === 'fulfilled'
+        ? authSettled.value?.data ?? authSettled.value
+        : null;
+    const profileBody =
+      profileSettled.status === 'fulfilled'
+        ? profileSettled.value?.data ?? profileSettled.value
+        : null;
+    // /users/me không có systemRole — phải gộp với /auth/me để không mất admin hệ thống.
+    if (profileBody || authBody) {
+      return mergeAuthUserFromProfile(
+        unwrapApiData(authBody) || authBody || {},
+        unwrapApiData(profileBody) || profileBody || authBody
+      );
+    }
+    throw authSettled.reason || profileSettled.reason;
   },
 
   /* ----- UPDATE PROFILE: Cập nhật thông tin cá nhân -----
@@ -116,16 +134,16 @@ const authService = {
      Server verify oldPassword trước khi đổi
      Được gọi từ: SettingsPage → Security tab */
   changePassword: async (oldPassword, newPassword) => {
-    // Gửi cả old và new password
-    // Server sẽ:
-    // 1. Verify oldPassword đúng
-    // 2. Hash newPassword
-    // 3. Update database
     const response = await api.post('/auth/change-password', {
       oldPassword,
       newPassword,
     });
-    return response;
+    const payload = response?.data || response;
+    const accessToken = payload?.accessToken;
+    if (accessToken) {
+      setToken(accessToken);
+    }
+    return payload;
   },
 
   /* ----- FORGOT PASSWORD: Quên mật khẩu -----
@@ -145,6 +163,22 @@ const authService = {
     const response = await api.post('/auth/forgot-password', { email });
     
     // Return: { message: "Email đã được gửi" }
+    return response;
+  },
+
+  /* ----- RESEND VERIFICATION: Gửi lại email xác thực -----
+
+     Gọi: POST /auth/resend-verification
+     Body: { email }
+
+     Được gọi khi user chưa verify email và cần nhận lại email xác thực */
+  resendVerification: async (email) => {
+    const response = await api.post('/auth/resend-verification', { email });
+    return response;
+  },
+
+  requestEmailChange: async (email) => {
+    const response = await api.post('/auth/change-email/request', { email });
     return response;
   },
 
@@ -170,23 +204,42 @@ const authService = {
     return response;
   },
 
-  /* ----- REFRESH TOKEN: Làm mới token -----
-     
-     Gọi: POST /auth/refresh-token
-     Header: Authorization: Bearer <old-token>
-     Return: { token: "new-jwt..." }
-     
-     Dùng khi:
-     - Token sắp hết hạn
-     - Response 401 từ API
-     
-     TODO: Implement auto refresh trong interceptor */
+  /* ----- REFRESH TOKEN: Làm mới access token -----
+     POST /auth/refresh-token body: { refreshToken }
+     Auto retry: api.js interceptor (single-flight). */
   refreshToken: async () => {
-    // Gửi token cũ, nhận token mới
-    const response = await api.post('/auth/refresh-token');
-    
-    // Return: { token: "new-jwt..." }
-    // Cần update localStorage với token mới
+    const response = await api.post(
+      '/auth/refresh-token',
+      {},
+      {
+        skipAuthRefresh: true,
+        withCredentials: true,
+        headers: { 'X-Atrium-Client': '1' },
+      }
+    );
+    const accessToken = response?.accessToken || response?.token || response?.data?.accessToken;
+    if (accessToken) {
+      setToken(accessToken);
+    }
+    return response;
+  },
+
+  /* ----- VERIFY EMAIL: Xác thực email -----
+     
+     Gọi: GET /auth/verify-email?token=${token}
+     Query: token (verification token từ email)
+     Return: { success: true, message: "...", data: { userId, email } }
+     
+     Lưu ý: KHÔNG dùng JWT token, chỉ dùng verification token trong query string
+     Được gọi từ: VerifyEmailPage khi user click link trong email */
+  verifyEmail: async (verificationToken) => {
+    // Dùng GET với token trong query string, KHÔNG dùng JWT
+    const response = await api.get(`/auth/verify-email?token=${encodeURIComponent(verificationToken)}`);
+    return response;
+  },
+
+  verifyEmailChange: async (verificationToken) => {
+    const response = await api.get(`/auth/verify-email-change?token=${encodeURIComponent(verificationToken)}`);
     return response;
   },
 };

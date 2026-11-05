@@ -20,6 +20,7 @@ import { BrowserRouter } from 'react-router-dom';
 // Import App component chính - chứa tất cả routes
 // File: ./App.jsx
 import App from './App';
+import FirstLoginOnboardingGate from './components/Auth/FirstLoginOnboardingGate';
 
 // Import global CSS - styles cho toàn bộ app
 // File này có Tailwind directives (@tailwind base/components/utilities)
@@ -31,9 +32,7 @@ import './index.css';
    cho tất cả components con qua Context API
 ======================================== */
 
-// Import Toaster để hiển thị toast notifications
-// Library: react-hot-toast - nhẹ, đẹp, dễ dùng
-import { Toaster } from 'react-hot-toast';
+import AtriumToaster from './components/Shared/AtriumToaster';
 
 // Import AuthProvider để quản lý authentication state
 // File: ./context/AuthContext.jsx
@@ -44,11 +43,21 @@ import { AuthProvider } from './context/AuthContext';
 // File: ./context/SocketContext.jsx  
 // Cung cấp: socket instance, online users, realtime events
 import { SocketProvider } from './context/SocketContext';
+import FriendCallRealtimeHost from './components/Call/FriendCallRealtimeHost';
+import { FriendCallSessionProvider } from './context/FriendCallSessionContext';
 
 // Import ThemeProvider để quản lý dark/light theme
 // File: ./context/ThemeContext.jsx
 // Cung cấp: theme state, toggleTheme(), theme colors
 import { ThemeProvider } from './context/ThemeContext';
+import AppAmbientBackground from './components/Layout/AppAmbientBackground';
+import { LocaleProvider } from './context/LocaleContext';
+import { WorkspaceProvider } from './context/WorkspaceContext';
+import BootstrapCompanySync from './components/Bootstrap/BootstrapCompanySync';
+import { WorkspaceSuiteProvider } from './context/WorkspaceSuiteContext';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './lib/queryClient';
+import QueryRealtimeSync from './components/Query/QueryRealtimeSync';
 
 /* ========================================
    RENDER ỨNG DỤNG VÀO DOM
@@ -95,66 +104,46 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           - Provide: isDark, colors, toggleTheme()
           - File: ./context/ThemeContext.jsx */}
       <ThemeProvider>
+        <AppAmbientBackground />
+        <div className="relative z-[1] min-h-screen">
+        <LocaleProvider>
         {/* AuthProvider: quản lý authentication state
             - Provide: user, token, login(), logout()
             - Lưu token vào localStorage
             - Auto refresh khi reload page
             - File: ./context/AuthContext.jsx */}
         <AuthProvider>
-          {/* SocketProvider: quản lý Socket.IO connection
-              - Kết nối đến backend socket server
-              - Cần user từ AuthContext để authenticate
-              - Provide: socket, onlineUsers, emit(), on()
-              - File: ./context/SocketContext.jsx */}
-          <SocketProvider>
-            {/* App component: chứa tất cả routes và pages
-                - File: ./App.jsx
-                - Có thể access tất cả contexts ở trên */}
-            <App />
-            
-            {/* Toaster: hiển thị toast notifications
-                - Đặt ở đây để dùng được ở mọi nơi
-                - toast.success(), toast.error() ở bất kỳ component nào */}
-            <Toaster
-              // Vị trí hiển thị toast: góc trên bên phải
-              position="top-right"
-              
-              // Options cho tất cả toasts
-              toastOptions={{
-                // Thời gian hiển thị: 3 giây (3000ms)
-                duration: 3000,
-                
-                // Style mặc định cho toast
-                style: {
-                  // Background màu slate đậm (dark mode friendly)
-                  background: '#1e293b',
-                  // Text màu trắng
-                  color: '#fff',
-                },
-                
-                // Style riêng cho success toast
-                success: {
-                  iconTheme: {
-                    // Icon màu xanh lá (green-500)
-                    primary: '#10b981',
-                    // Background icon màu trắng
-                    secondary: '#fff',
-                  },
-              },
-              
-              // Style riêng cho error toast
-              error: {
-                iconTheme: {
-                  // Icon màu đỏ (red-500)
-                  primary: '#ef4444',
-                  // Background icon màu trắng
-                  secondary: '#fff',
-                },
-              },
-            }}
-          />
-          </SocketProvider>
+          <QueryClientProvider client={queryClient}>
+          <FriendCallSessionProvider>
+            <WorkspaceProvider>
+            <BootstrapCompanySync />
+            <WorkspaceSuiteProvider>
+            {/* SocketProvider: quản lý Socket.IO connection
+                - Kết nối đến backend socket server
+                - Cần user từ AuthContext để authenticate
+                - Provide: socket, onlineUsers, emit(), on()
+                - File: ./context/SocketContext.jsx */}
+            <SocketProvider>
+              <QueryRealtimeSync />
+              {/* App component: chứa tất cả routes và pages
+                  - File: ./App.jsx
+                  - Có thể access tất cả contexts ở trên */}
+              <App />
+              <FirstLoginOnboardingGate />
+              <FriendCallRealtimeHost />
+
+              {/* Toaster: hiển thị toast notifications
+                  - Đặt ở đây để dùng được ở mọi nơi
+                  - toast.success(), toast.error() ở bất kỳ component nào */}
+              <AtriumToaster />
+            </SocketProvider>
+            </WorkspaceSuiteProvider>
+            </WorkspaceProvider>
+          </FriendCallSessionProvider>
+          </QueryClientProvider>
         </AuthProvider>
+        </LocaleProvider>
+        </div>
       </ThemeProvider>
     </BrowserRouter>
   </React.StrictMode>

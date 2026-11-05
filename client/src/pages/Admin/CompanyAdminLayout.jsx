@@ -1,0 +1,133 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Navigate, Outlet, useNavigate } from 'react-router-dom';
+import { FIGMA_PAGE_SHELL } from '../../components/Layout/figmaPageClasses';
+import AdminCompanyRealtimeSync from '../../components/Admin/AdminCompanyRealtimeSync';
+import useCompanyAdminAccess from '../../hooks/useCompanyAdminAccess';
+import useOrganizationDetail from '../../hooks/useOrganizationDetail';
+import { useAppStrings } from '../../locales/appStrings';
+import PageMotion from '../../motion/PageMotion';
+import {
+  fetchAdminMembers,
+  getAdminMembersCount,
+  getAdminMembersSnapshot,
+  subscribeAdminMembers,
+  VIEW_DIRECTORY,
+} from '../../stores/adminMembersStore';
+
+const CompanyAdminContext = createContext(null);
+
+export function useCompanyAdminContext() {
+  const ctx = useContext(CompanyAdminContext);
+  if (!ctx) {
+    throw new Error('useCompanyAdminContext must be used within CompanyAdminLayout');
+  }
+  return ctx;
+}
+
+export default function CompanyAdminLayout() {
+  const { t } = useAppStrings();
+  const navigate = useNavigate();
+  const { canAccessHub, isFullAccess, orgId, grantsLoading, grantsError, isSystemAdmin } = useCompanyAdminAccess();
+
+  const {
+    organization,
+    loading,
+    reload: refreshOrganization,
+  } = useOrganizationDetail(orgId, { enabled: Boolean(orgId) });
+
+  const [memberCount, setMemberCount] = useState(0);
+
+  const refreshStats = useCallback(async () => {
+    if (!orgId) return;
+    // Count-only — giữ rank đã hydrate; cold thì directory.
+    const snap = getAdminMembersSnapshot(orgId);
+    const view =
+      snap?.hydratedView === 'admin_table' ? 'admin_table' : VIEW_DIRECTORY;
+    await fetchAdminMembers(orgId, { showError: false, force: true, view }).catch(() => null);
+    setMemberCount(getAdminMembersCount(orgId));
+  }, [orgId]);
+
+  useEffect(() => {
+    if (!orgId || !canAccessHub) return undefined;
+    // Không prefetch members ở layout — mỗi trang gọi view đúng (directory|admin_table).
+    const syncCount = () => {
+      const next = getAdminMembersCount(orgId);
+      setMemberCount((prev) => (prev === next ? prev : next));
+    };
+    syncCount();
+    const unsub = subscribeAdminMembers(orgId, syncCount);
+    return unsub;
+  }, [orgId, canAccessHub]);
+
+  const contextValue = useMemo(
+    () => ({
+      orgId,
+      organization,
+      organizationLoading: loading,
+      isFullAccess,
+      memberCount,
+      refreshOrganization,
+      refreshStats,
+    }),
+    [orgId, organization, loading, isFullAccess, memberCount, refreshOrganization, refreshStats]
+  );
+
+  if (!isSystemAdmin && orgId && grantsLoading) {
+    return (
+      <div className={`flex h-full min-h-0 items-center justify-center ${FIGMA_PAGE_SHELL}`}>
+        <p className="text-muted-foreground">{t('common.loading')}</p>
+      </div>
+    );
+  }
+
+  if (!isSystemAdmin && orgId && grantsError) {
+    return (
+      <div className={`flex h-full min-h-0 items-center justify-center ${FIGMA_PAGE_SHELL}`}>
+        <p className="text-muted-foreground">{t('common.error')}</p>
+      </div>
+    );
+  }
+
+  if (!canAccessHub) {
+    return <Navigate to="/app/collaborate/workspaces" replace />;
+  }
+
+  if (!orgId) {
+    return (
+      <div className={`flex h-full min-h-0 items-center justify-center ${FIGMA_PAGE_SHELL}`}>
+        <p className="text-muted-foreground">{t('companyAdmin.missingCompany')}</p>
+      </div>
+    );
+  }
+
+  // Org detail load nền — không chặn Outlet/hub cards (chỉ cần orgId + grants).
+  if (!loading && !organization) {
+    return (
+      <div className={`flex h-full min-h-0 flex-col items-center justify-center gap-3 ${FIGMA_PAGE_SHELL}`}>
+        <p className="text-muted-foreground">{t('organizationSettings.notFound')}</p>
+        <button type="button" className="text-primary hover:underline" onClick={() => navigate('/app/collaborate/workspaces')}>
+          {t('companyAdmin.backToWork')}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <CompanyAdminContext.Provider value={contextValue}>
+      <AdminCompanyRealtimeSync />
+      <div className={`flex h-full min-h-0 flex-1 flex-col overflow-hidden ${FIGMA_PAGE_SHELL} text-foreground`}>
+        <header className="shrink-0 border-b border-border bg-card/40 px-4 py-4 md:px-8">
+          <h1 className="text-xl font-bold">{t('companyAdmin.title')}</h1>
+          <p className="text-sm text-muted-foreground">
+            {organization?.name || (loading ? t('common.loading') : '')}
+          </p>
+        </header>
+        <main className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+          <PageMotion className="min-h-0 flex-1">
+            <Outlet />
+          </PageMotion>
+        </main>
+      </div>
+    </CompanyAdminContext.Provider>
+  );
+}

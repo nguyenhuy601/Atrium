@@ -1,0 +1,1364 @@
+const {
+  mongo,
+  getRedisClient,
+  encryptField,
+  isEncrypted,
+  isEncryptionEnabled,
+  unwrapPlaintext,
+  recordLazyMigrate,
+} = require('@enterprise/shared');
+const { mongoose } = mongo;
+const Message = require('../models/Message');
+const Conversation = require('../models/Conversation');
+const { invalidateSignedReadCacheForStoragePath } = require('../utils/attachSignedReadUrls');
+const { toClientMessage } = require('../utils/messageDto');
+const { buildDeleteFilter } = require('../utils/messageMutationPolicy');
+const {
+  pageTokenFilter,
+  decodePageToken,
+  encodePageToken,
+  nextPageTokenFromDocs,
+} = require('@enterprise/shared/pagination/pageToken');
+const { mergeMongoFilter } = require('../utils/contextCallVisibility');
+const {
+  createChatError,
+  toChatError,
+  MAX_PAGE,
+  MAX_EMOJI_LENGTH,
+  MAX_REACTIONS_PER_USER,
+} = require('../utils/chatErrorMap');
+const { assertVoteSelection } = require('../utils/pollPolicy');
+const { visibilityMongoClauseForViewer } = require('./projectMembershipReadModel');
+const { rankMessagesByKeyword } = require('../utils/messageKeywordScore');
+
+const MONGO_UNAVAILABLE_MSG = 'Service temporarily unavailable. Please try again later.';
+
+async function ensureMongoReady() {
+  if (mongoose.connection.readyState === 1) return;
+
+  const state = mongoose.connection.readyState;
+  console.warn(
+    `[ChatService] MongoDB not connected (readyState=${state}). Operation will fail fast instead of buffering.`
+  );
+  throw new Error(MONGO_UNAVAILABLE_MSG);
+}
+
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function postFilterSearchMessages(messages, { qTrim, mentionTrim, hasLink, hasEmbed }) {
+  const needLink = hasLink === true || hasLink === 'true' || hasLink === '1';
+  const needEmbed = hasEmbed === true || hasEmbed === 'true' || hasEmbed === '1';
+  return messages.filter((m) => {
+    const text = String(unwrapPlaintext(m.content) || '');
+    const low = text.toLowerCase();
+    if (qTrim && !low.includes(String(qTrim).toLowerCase())) return false;
+    if (mentionTrim && !text.includes(mentionTrim)) return false;
+    if (needLink && !/https?:\/\//i.test(text)) return false;
+    if (needEmbed && !/<iframe|discord\.com\/channels|embed/i.test(text)) return false;
+    return true;
+  });
+}
+
+/** Rank only within current page/batch — pageToken cursor stays createdAt+_id. */
+function rankSearchBatch(messages, qTrim, mentionTrim) {
+  const queryText = [qTrim, mentionTrim].filter(Boolean).join(' ').trim();
+  if (!queryText) return messages;
+  return rankMessagesByKeyword(messages, queryText, {
+    getContent: (m) => String(unwrapPlaintext(m.content) || ''),
+  });
+}
+
+function normalizeMongoError(error) {
+  if (
+    error?.name === 'MongooseError' ||
+    (error?.message && error.message.includes('buffering timed out'))
+  ) {
+    return new Error(MONGO_UNAVAILABLE_MSG);
+  }
+  return error;
+}
+
+function assertValidEmoji(emoji) {
+  const em = String(emoji || '').trim();
+  if (!em) {
+    throw createChatError(400, 'CHAT_VALIDATION_ERROR', 'Biểu cảm là bắt buộc');
+  }
+  if (em.length > MAX_EMOJI_LENGTH) {
+    throw createChatError(400, 'CHAT_VALIDATION_ERROR', 'Biểu cảm không hợp lệ');
+  }
+  return em;
+}
+
+function toServiceError(op, error) {
+  const err = normalizeMongoError(error);
+  console.error(`[ChatService] ${op} failed:`, err?.message || err);
+  return toChatError(err);
+}
+
+function encryptContentIfEnabled(plain) {
+  if (!isEncryptionEnabled()) return plain;
+  return encryptField(String(plain ?? ''));
+}
+
+async function maybeMigrateMessageContent(doc) {
+  if (!doc || !isEncryptionEnabled()) return;
+  const updates = {};
+  if (doc.content && !isEncrypted(doc.content)) {
+    updates.content = encryptField(String(doc.content));
+    updates.encV = 1;
+    recordLazyMigrate();
+  }
+  if (doc.originalContent && !isEncrypted(doc.originalContent)) {
+    updates.originalContent = encryptField(String(doc.originalContent));
+    updates.encV = 1;
+    recordLazyMigrate();
+  }
+  if (Object.keys(updates).length > 0) {
+    await Message.updateOne({ _id: doc._id }, { $set: updates });
+    Object.assign(doc, updates);
+  }
+}
+
+class MessageService {
+  async ensureDmConversation(senderId, receiverId, organizationId = null) {
+    const a = String(senderId);
+    const b = String(receiverId);
+    const memberIds = [a, b]
+      .sort()
+      .map((id) => new mongoose.Types.ObjectId(id));
+    const orgFilter = organizationId
+      ? new mongoose.Types.ObjectId(String(organizationId))
+      : null;
+
+    let conversation = await Conversation.findOne({
+      type: 'dm',
+      members: { $all: memberIds, $size: 2 },
+      organizationId: orgFilter,
+    }).select('_id');
+
+    if (!conversation) {
+      conversation = await Conversation.create({
+        type: 'dm',
+        members: memberIds,
+        organizationId: orgFilter,
+      });
+    }
+    return conversation._id;
+  }
+
+  async createMessage(messageData) {
+    try {
+      await ensureMongoReady();
+      const payload = { ...messageData };
+      if (payload.receiverId && !payload.roomId) {
+        payload.conversationId = await this.ensureDmConversation(
+          payload.senderId,
+          payload.receiverId,
+          payload.organizationId || null
+        );
+      }
+      if (payload.content !== undefined) {
+        payload.content = encryptContentIfEnabled(payload.content);
+        if (isEncryptionEnabled()) payload.encV = 1;
+      }
+
+      const message = new Message(payload);
+      await message.save();
+
+      const redis = getRedisClient();
+      if (redis) {
+        try {
+          const cacheKey = `message:${message._id}`;
+          await redis.setex(cacheKey, 3600, JSON.stringify(toClientMessage(message)));
+          if (message.receiverId && message.senderId) {
+            const a = String(message.senderId);
+            const b = String(message.receiverId);
+            const pair = [a, b].sort().join(':');
+            await redis.del(`dm:last:${pair}`);
+          }
+        } catch (cacheErr) {
+          // Không fail tạo tin vì cache — tránh 500 sau khi đã ghi Mongo.
+          console.warn(
+            `[ChatService] message cache skip after create: ${cacheErr?.message || cacheErr}`
+          );
+        }
+      }
+
+      return toClientMessage(message);
+    } catch (error) {
+      throw toServiceError('createMessage', error);
+    }
+  }
+
+  /** Log cuộc gọi 1-1 đã kết thúc (voice-service gọi nội bộ). */
+  async createCallLogMessage({ callerId, calleeId, media, durationSec }) {
+    const c1 = String(callerId || '').trim();
+    const c2 = String(calleeId || '').trim();
+    if (!c1 || !c2) {
+      throw createChatError(400, 'CHAT_VALIDATION_ERROR', 'callerId và calleeId là bắt buộc');
+    }
+    const content = JSON.stringify({
+      v: 1,
+      media: media === 'audio' ? 'audio' : 'video',
+      callerId: c1,
+      calleeId: c2,
+      durationSec: Math.max(0, Math.floor(Number(durationSec) || 0)),
+    });
+    return this.createMessage({
+      senderId: c1,
+      receiverId: c2,
+      messageType: 'call_log',
+      content,
+    });
+  }
+
+  async getMessageById(messageId) {
+    try {
+      await ensureMongoReady();
+      const redis = getRedisClient();
+      if (redis) {
+        const cacheKey = `message:${messageId}`;
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+          return JSON.parse(cached);
+        }
+      }
+
+      const message = await Message.findById(messageId);
+      if (message) await maybeMigrateMessageContent(message);
+
+      if (redis && message) {
+        const cacheKey = `message:${messageId}`;
+        await redis.setex(cacheKey, 3600, JSON.stringify(toClientMessage(message)));
+      }
+
+      return toClientMessage(message);
+    } catch (error) {
+      throw toServiceError('getMessageById', error);
+    }
+  }
+
+  /**
+   * Tin nhắn gửi đến user (DM), không tính tin tự gửi; loại đã xóa/thu hồi.
+   */
+  async countIncomingMessagesInRange(userId, start, end) {
+    try {
+      await ensureMongoReady();
+      const uid = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(String(userId))
+        : userId;
+
+      return Message.countDocuments({
+        receiverId: uid,
+        senderId: { $ne: uid },
+        createdAt: { $gte: start, $lt: end },
+        isDeleted: { $ne: true },
+        isRecalled: { $ne: true },
+      });
+    } catch (error) {
+      throw toServiceError('countIncomingMessagesInRange', error);
+    }
+  }
+
+  /** Số tin chưa đọc (gửi đến user). */
+  async countUnreadIncoming(userId) {
+    try {
+      await ensureMongoReady();
+      const uid = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(String(userId))
+        : userId;
+
+      return Message.countDocuments({
+        receiverId: uid,
+        senderId: { $ne: uid },
+        isRead: false,
+        isDeleted: { $ne: true },
+        isRecalled: { $ne: true },
+      });
+    } catch (error) {
+      throw toServiceError('countUnreadIncoming', error);
+    }
+  }
+
+  /**
+   * Tin nhắn kênh tổ chức chưa đọc theo RoomReadCursor (watermark), không dùng Message.isRead.
+   */
+  async findUnreadOrgRoomMessages(userId, limit = 30, allowedRoomIds = null) {
+    try {
+      await ensureMongoReady();
+      const uid = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(String(userId))
+        : userId;
+
+      const cap = Math.min(Math.max(parseInt(limit, 10) || 30, 1), 100);
+
+      const roomFilter = { $exists: true, $ne: null };
+      let allowedOids = null;
+      if (Array.isArray(allowedRoomIds)) {
+        const ids = allowedRoomIds
+          .map((id) => String(id || '').trim())
+          .filter((id) => mongoose.Types.ObjectId.isValid(id));
+        if (!ids.length) {
+          return [];
+        }
+        allowedOids = ids.map((id) => new mongoose.Types.ObjectId(id));
+        roomFilter.$in = allowedOids;
+      }
+
+      const unreadFilter = {
+        roomId: roomFilter,
+        organizationId: { $exists: true, $ne: null },
+        senderId: { $ne: uid },
+        isDeleted: { $ne: true },
+        isRecalled: { $ne: true },
+      };
+      const visClause = await visibilityMongoClauseForViewer(userId, null);
+      const queryFilter = visClause ? mergeMongoFilter(unreadFilter, visClause) : unreadFilter;
+
+      // Lấy dư để lọc theo cursor (isRead boolean không đúng multi-reader).
+      const fetchCap = Math.min(cap * 4, 200);
+      const messages = await Message.find(queryFilter)
+        .sort({ createdAt: -1 })
+        .limit(fetchCap)
+        .exec();
+
+      const roomIdsForCursor = [
+        ...new Set(
+          messages
+            .map((m) => String(m.roomId || '').trim())
+            .filter((id) => mongoose.Types.ObjectId.isValid(id))
+        ),
+      ];
+      const {
+        getCursorMapForUserRooms,
+      } = require('./roomReadCursor.service');
+      const { isMessageSeenByCursor } = require('../utils/roomReadCursorLogic');
+      const cursorMap = await getCursorMapForUserRooms(userId, roomIdsForCursor);
+
+      const unread = [];
+      for (const m of messages) {
+        const rid = String(m.roomId || '');
+        const cursor = cursorMap.get(rid);
+        if (isMessageSeenByCursor(String(m._id), cursor?.lastReadMessageId)) continue;
+        await maybeMigrateMessageContent(m);
+        unread.push(toClientMessage(m));
+        if (unread.length >= cap) break;
+      }
+
+      return unread;
+    } catch (error) {
+      throw toServiceError('findUnreadOrgRoomMessages', error);
+    }
+  }
+
+  async getMessages(filter, options = {}) {
+    try {
+      await ensureMongoReady();
+      const {
+        page = 1,
+        limit = 50,
+        sort = { createdAt: -1, _id: -1 },
+        dmCacheKey,
+        pageToken,
+        fields = 'summary',
+        viewerUserId = null,
+        viewerOrganizationId = null,
+      } = options;
+      const lim = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
+      const dtoOpts = {
+        fields: fields === 'full' ? 'full' : 'summary',
+        viewerId: viewerUserId || '',
+      };
+
+      let queryFilter = filter;
+      if (viewerUserId) {
+        const visClause = await visibilityMongoClauseForViewer(
+          viewerUserId,
+          viewerOrganizationId || filter.organizationId
+        );
+        if (visClause) queryFilter = mergeMongoFilter(filter, visClause);
+      }
+
+      if (pageToken) {
+        const tokPart = pageTokenFilter(pageToken);
+        if (!tokPart) {
+          return { messages: [], nextPageToken: null, hasMore: false };
+        }
+        const combined = { $and: [queryFilter, tokPart] };
+        const batch = await Message.find(combined)
+          .sort(sort)
+          .limit(lim + 1)
+          .exec();
+        for (const m of batch) await maybeMigrateMessageContent(m);
+        const hasMore = batch.length > lim;
+        const slice = hasMore ? batch.slice(0, lim) : batch;
+        return {
+          messages: slice.map((m) => toClientMessage(m, dtoOpts)),
+          nextPageToken: nextPageTokenFromDocs(slice, { hasMore }),
+          hasMore,
+        };
+      }
+
+      const pageNum = Math.min(MAX_PAGE, Math.max(1, parseInt(page, 10) || 1));
+      if (pageNum > 1) {
+        console.warn(
+          '[chat-service] GET /messages: query `page` is deprecated; use `pageToken` + `nextPageToken`.'
+        );
+      }
+
+      const redis = getRedisClient();
+      if (redis && dmCacheKey && pageNum === 1 && lim <= 50) {
+        const ck = `dm:last:${dmCacheKey}`;
+        try {
+          const cached = await redis.get(ck);
+          if (cached) {
+            return JSON.parse(cached);
+          }
+        } catch {
+          /* miss */
+        }
+      }
+
+      const messages = await Message.find(queryFilter)
+        .sort(sort)
+        .limit(lim)
+        .skip((pageNum - 1) * lim);
+
+      for (const m of messages) {
+        await maybeMigrateMessageContent(m);
+      }
+
+      const total = await Message.countDocuments(queryFilter);
+
+      const mapped = messages.map((m) => toClientMessage(m, dtoOpts));
+      const hasMore = pageNum * lim < total;
+      const lastDoc = messages.length ? messages[messages.length - 1] : null;
+      const result = {
+        messages: mapped,
+        totalPages: Math.ceil(total / lim) || 1,
+        currentPage: pageNum,
+        total,
+        hasMore,
+        nextPageToken:
+          hasMore && lastDoc
+            ? encodePageToken({ createdAt: lastDoc.createdAt, id: lastDoc._id })
+            : null,
+      };
+
+      if (redis && dmCacheKey && pageNum === 1 && lim <= 50) {
+        try {
+          await redis.setex(`dm:last:${dmCacheKey}`, 60, JSON.stringify(result));
+        } catch {
+          /* ignore cache write */
+        }
+      }
+
+      return result;
+    } catch (error) {
+      throw toServiceError('getMessages', error);
+    }
+  }
+
+  async markAsRead(messageId, userId) {
+    try {
+      await ensureMongoReady();
+      const uid = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(String(userId))
+        : userId;
+      const existing = await Message.findById(messageId);
+      if (!existing) return null;
+      if (String(existing.receiverId) !== String(uid)) {
+        const err = new Error('Only the receiver can mark this message as read');
+        err.statusCode = 403;
+        throw err;
+      }
+      if (existing.isRead) {
+        return toClientMessage(existing);
+      }
+
+      const readAt = new Date();
+      const message = await Message.findByIdAndUpdate(
+        messageId,
+        {
+          isRead: true,
+          readAt,
+        },
+        { returnDocument: 'after' }
+      );
+
+      const redis = getRedisClient();
+      if (redis) {
+        const cacheKey = `message:${messageId}`;
+        await redis.del(cacheKey);
+      }
+
+      return toClientMessage(message);
+    } catch (error) {
+      throw toServiceError('markAsRead', error);
+    }
+  }
+
+  /** Đánh dấu đã đọc mọi tin DM incoming từ peer. */
+  async markConversationAsRead(readerId, peerId) {
+    try {
+      await ensureMongoReady();
+      const readerOid = mongoose.Types.ObjectId.isValid(readerId)
+        ? new mongoose.Types.ObjectId(String(readerId))
+        : readerId;
+      const peerOid = mongoose.Types.ObjectId.isValid(peerId)
+        ? new mongoose.Types.ObjectId(String(peerId))
+        : peerId;
+
+      const readAt = new Date();
+      const filter = {
+        receiverId: readerOid,
+        senderId: peerOid,
+        roomId: { $exists: false },
+        isRead: false,
+        isDeleted: { $ne: true },
+        isRecalled: { $ne: true },
+      };
+
+      const last = await Message.findOne(filter).sort({ createdAt: -1 }).select('_id').exec();
+      const result = await Message.updateMany(filter, { $set: { isRead: true, readAt } });
+
+      return {
+        modifiedCount: result.modifiedCount || 0,
+        readAt,
+        lastReadMessageId: last?._id ? String(last._id) : null,
+      };
+    } catch (error) {
+      throw toServiceError('markConversationAsRead', error);
+    }
+  }
+
+  /** Số tin chưa đọc theo từng người gửi (DM). */
+  async countUnreadByPeer(userId) {
+    try {
+      await ensureMongoReady();
+      const uid = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(String(userId))
+        : userId;
+
+      const rows = await Message.aggregate([
+        {
+          $match: {
+            receiverId: uid,
+            senderId: { $ne: uid },
+            isRead: false,
+            isDeleted: { $ne: true },
+            isRecalled: { $ne: true },
+            $or: [{ roomId: { $exists: false } }, { roomId: null }],
+          },
+        },
+        { $group: { _id: '$senderId', count: { $sum: 1 } } },
+      ]);
+
+      const byPeer = {};
+      for (const row of rows) {
+        if (row._id) byPeer[String(row._id)] = row.count;
+      }
+      return byPeer;
+    } catch (error) {
+      throw toServiceError('countUnreadByPeer', error);
+    }
+  }
+
+  async addReaction(messageId, userId, emoji) {
+    try {
+      await ensureMongoReady();
+      const em = assertValidEmoji(emoji);
+
+      const uid = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(String(userId))
+        : userId;
+
+      const msg = await Message.findById(messageId);
+      if (!msg || msg.isDeleted || msg.isRecalled) return null;
+
+      const me = String(uid);
+      const sender = String(msg.senderId);
+      const receiver = String(msg.receiverId || '');
+      const isOrgRoom = Boolean(msg.roomId && msg.organizationId);
+      // DM: chỉ sender/receiver. Kênh org: controller đã assertCanAccessMessage (canRead).
+      if (!isOrgRoom && me !== sender && me !== receiver) {
+        const err = new Error('Unauthorized');
+        err.statusCode = 403;
+        throw err;
+      }
+
+      const reactions = Array.isArray(msg.reactions) ? [...msg.reactions] : [];
+      const idx = reactions.findIndex(
+        (r) => String(r.userId) === me && String(r.emoji) === em
+      );
+      if (idx >= 0) {
+        return toClientMessage(msg);
+      }
+      const ownCount = reactions.filter((r) => String(r.userId) === me).length;
+      if (ownCount >= MAX_REACTIONS_PER_USER) {
+        throw createChatError(
+          400,
+          'CHAT_REACTION_LIMIT',
+          `Mỗi người tối đa ${MAX_REACTIONS_PER_USER} biểu cảm trên một tin nhắn`
+        );
+      }
+      reactions.push({ emoji: em, userId: uid, createdAt: new Date() });
+
+      const updated = await Message.findByIdAndUpdate(
+        messageId,
+        { reactions },
+        { returnDocument: 'after' }
+      );
+
+      const redis = getRedisClient();
+      if (redis) await redis.del(`message:${messageId}`);
+
+      return toClientMessage(updated);
+    } catch (error) {
+      throw toServiceError('addReaction', error);
+    }
+  }
+
+  /**
+   * Bỏ phiếu khảo sát kênh. userId chỉ từ caller đã auth; không nhận counts từ client.
+   * Cập nhật một document (pipeline) để không mất phiếu đồng thời.
+   */
+  async votePoll(messageId, userId, optionIds) {
+    try {
+      await ensureMongoReady();
+      const msg = await Message.findById(messageId);
+      if (!msg || msg.isDeleted || msg.isRecalled) return null;
+      if (msg.messageType !== 'poll' || !msg.poll) {
+        throw createChatError(400, 'CHAT_VALIDATION_ERROR', 'Tin nhắn không phải khảo sát.');
+      }
+      if (!msg.roomId) {
+        throw createChatError(400, 'CHAT_INVALID_MESSAGE_TYPE', 'Khảo sát chỉ dùng trên kênh.');
+      }
+      const ids = assertVoteSelection(msg.poll, optionIds, userId);
+      const uid = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(String(userId))
+        : userId;
+      const now = new Date();
+      const filter = {
+        _id: messageId,
+        messageType: 'poll',
+        isDeleted: { $ne: true },
+        isRecalled: { $ne: true },
+        'poll.closed': { $ne: true },
+        $or: [
+          { 'poll.closesAt': { $exists: false } },
+          { 'poll.closesAt': null },
+          { 'poll.closesAt': { $gt: now } },
+        ],
+      };
+      if (!msg.poll.allowMulti) {
+        // $ne trên field mảng khớp nếu còn phần tử khác — phải loại đúng user đã vote.
+        filter['poll.votes'] = { $not: { $elemMatch: { userId: uid } } };
+      }
+      const updated = await Message.findOneAndUpdate(
+        filter,
+        [
+          {
+            $set: {
+              'poll.votes': {
+                $concatArrays: [
+                  {
+                    $filter: {
+                      input: { $ifNull: ['$poll.votes', []] },
+                      as: 'v',
+                      cond: { $ne: ['$$v.userId', uid] },
+                    },
+                  },
+                  [{ userId: uid, optionIds: ids, at: now }],
+                ],
+              },
+            },
+          },
+        ],
+        { returnDocument: 'after' }
+      );
+      if (!updated) {
+        const fresh = await Message.findById(messageId);
+        assertVoteSelection(fresh?.poll, optionIds, userId);
+        throw createChatError(400, 'CHAT_POLL_ALREADY_VOTED', 'Bạn đã bỏ phiếu.');
+      }
+
+      const redis = getRedisClient();
+      if (redis) await redis.del(`message:${messageId}`);
+
+      return toClientMessage(updated, { viewerId: String(uid) });
+    } catch (error) {
+      throw toServiceError('votePoll', error);
+    }
+  }
+
+  async removeReaction(messageId, userId, emoji) {
+    try {
+      await ensureMongoReady();
+      const em = assertValidEmoji(emoji);
+
+      const uid = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(String(userId))
+        : userId;
+      const me = String(uid);
+
+      const msg = await Message.findById(messageId);
+      if (!msg) return null;
+
+      const sender = String(msg.senderId);
+      const receiver = String(msg.receiverId || '');
+      const isOrgRoom = Boolean(msg.roomId && msg.organizationId);
+      if (!isOrgRoom && me !== sender && me !== receiver) {
+        const err = new Error('Unauthorized');
+        err.statusCode = 403;
+        throw err;
+      }
+
+      const reactions = (Array.isArray(msg.reactions) ? msg.reactions : []).filter(
+        (r) => !(String(r.userId) === me && String(r.emoji) === em)
+      );
+
+      const updated = await Message.findByIdAndUpdate(
+        messageId,
+        { reactions },
+        { returnDocument: 'after' }
+      );
+
+      const redis = getRedisClient();
+      if (redis) await redis.del(`message:${messageId}`);
+
+      return toClientMessage(updated);
+    } catch (error) {
+      throw toServiceError('removeReaction', error);
+    }
+  }
+
+  async deleteMessage(messageId, userId, { asModerator = false } = {}) {
+    try {
+      await ensureMongoReady();
+      const message = await Message.findOneAndUpdate(
+        buildDeleteFilter({ messageId, userId, asModerator }),
+        {
+          isDeleted: true,
+          deletedAt: new Date(),
+        },
+        { returnDocument: 'after' }
+      );
+
+      const redis = getRedisClient();
+      if (redis) {
+        const cacheKey = `message:${messageId}`;
+        await redis.del(cacheKey);
+      }
+
+      const out = toClientMessage(message);
+      const deletedStoragePath = message?.fileMeta?.storagePath;
+      if (deletedStoragePath) {
+        await invalidateSignedReadCacheForStoragePath(deletedStoragePath);
+      }
+
+      return out;
+    } catch (error) {
+      throw toServiceError('deleteMessage', error);
+    }
+  }
+
+  async recallMessage(messageId, userId) {
+    try {
+      await ensureMongoReady();
+      const oldMessage = await Message.findById(messageId);
+      if (!oldMessage || oldMessage.senderId.toString() !== userId.toString()) {
+        return null;
+      }
+
+      const prevContent = oldMessage.content;
+      const encPrev = isEncryptionEnabled() ? encryptField(unwrapPlaintext(prevContent)) : prevContent;
+
+      const message = await Message.findOneAndUpdate(
+        {
+          _id: messageId,
+          senderId: userId,
+        },
+        {
+          isRecalled: true,
+          recalledAt: new Date(),
+          originalContent: encPrev,
+        },
+        { returnDocument: 'after' }
+      );
+
+      const redis = getRedisClient();
+      if (redis) {
+        const cacheKey = `message:${messageId}`;
+        await redis.del(cacheKey);
+      }
+
+      return toClientMessage(message);
+    } catch (error) {
+      throw toServiceError('recallMessage', error);
+    }
+  }
+
+  /**
+   * Xóa hẳn tin nhắn DM (bạn bè) giữa hai user — không có roomId (không xóa tin kênh tổ chức).
+   * Dùng khi hủy kết bạn để gỡ nội dung hội thoại.
+   */
+  async deleteDirectMessagesBetweenUsers(userIdA, userIdB) {
+    try {
+      await ensureMongoReady();
+      const toOid = (id) =>
+        mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(String(id)) : id;
+      const a = toOid(userIdA);
+      const b = toOid(userIdB);
+
+      const filter = {
+        $and: [
+          {
+            $or: [
+              { senderId: a, receiverId: b },
+              { senderId: b, receiverId: a },
+            ],
+          },
+          {
+            $or: [{ roomId: { $exists: false } }, { roomId: null }],
+          },
+        ],
+      };
+
+      const result = await Message.deleteMany(filter);
+
+      return { deletedCount: result.deletedCount || 0 };
+    } catch (error) {
+      throw toServiceError('deleteDirectMessagesBetweenUsers', error);
+    }
+  }
+
+  async editMessage(messageId, userId, newContent) {
+    try {
+      await ensureMongoReady();
+
+      const oldMessage = await Message.findById(messageId);
+      const senderStr = String(oldMessage?.senderId?._id || oldMessage?.senderId || '');
+      if (!oldMessage || !userId || senderStr !== String(userId)) {
+        return null;
+      }
+      if (oldMessage.isDeleted || oldMessage.isRecalled) {
+        return null;
+      }
+
+      const encNew = encryptContentIfEnabled(newContent);
+      const encOrig = encryptContentIfEnabled(unwrapPlaintext(oldMessage.content));
+
+      const message = await Message.findByIdAndUpdate(
+        messageId,
+        {
+          content: encNew,
+          originalContent: encOrig,
+          editedAt: new Date(),
+          ...(isEncryptionEnabled() ? { encV: 1 } : {}),
+        },
+        { returnDocument: 'after' }
+      );
+
+      const redis = getRedisClient();
+      if (redis) {
+        const cacheKey = `message:${messageId}`;
+        await redis.del(cacheKey);
+      }
+
+      return toClientMessage(message);
+    } catch (error) {
+      throw toServiceError('editMessage', error);
+    }
+  }
+
+  /**
+   * Đánh dấu file đã promote sang task — GC chat không xóa path (worker có thể đã xóa temp).
+   */
+  async promoteFileForTask(messageId, taskId) {
+    try {
+      await ensureMongoReady();
+      const message = await Message.findOneAndUpdate(
+        {
+          _id: messageId,
+          $or: [
+            { 'fileMeta.promotedToTask': { $ne: true } },
+            { 'fileMeta.promotedToTask': { $exists: false } },
+          ],
+        },
+        {
+          $set: {
+            'fileMeta.promotedToTask': true,
+            'fileMeta.taskId': taskId,
+          },
+        },
+        { returnDocument: 'after' }
+      );
+      const redis = getRedisClient();
+      if (redis && message) {
+        await redis.del(`message:${messageId}`);
+      }
+      return message ? toClientMessage(message) : null;
+    } catch (error) {
+      throw toServiceError('promoteFileForTask', error);
+    }
+  }
+
+  /**
+   * Tìm kiếm tin nhắn kênh tổ chức — roomId chỉ trong allowedRoomIds (từ organization-service).
+   */
+  async searchOrgMessages(params) {
+    try {
+      await ensureMongoReady();
+      const {
+        organizationId,
+        allowedRoomIds,
+        roomId,
+        senderId,
+        q,
+        createdAfter,
+        createdBefore,
+        hasAttachment,
+        hasLink,
+        hasEmbed,
+        messageType,
+        mentionText,
+        page = 1,
+        limit = 20,
+        pageToken,
+        fields = 'summary',
+        viewerUserId = null,
+      } = params;
+      const dtoOpts = {
+        fields: fields === 'full' ? 'full' : 'summary',
+        viewerId: viewerUserId || '',
+      };
+
+      const oid = mongoose.Types.ObjectId.isValid(organizationId)
+        ? new mongoose.Types.ObjectId(String(organizationId))
+        : organizationId;
+
+      const toOid = (id) =>
+        mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(String(id)) : id;
+
+      let roomScope;
+      if (roomId) {
+        roomScope = toOid(roomId);
+      } else {
+        const ids = (allowedRoomIds || []).filter(Boolean);
+        if (ids.length === 0) {
+          return { messages: [], total: 0, currentPage: 1, totalPages: 0 };
+        }
+        roomScope = { $in: ids.map((id) => toOid(id)) };
+      }
+
+      const parts = [
+        { organizationId: oid },
+        { roomId: roomScope },
+        { isDeleted: { $ne: true } },
+        { isRecalled: { $ne: true } },
+      ];
+
+      if (senderId) parts.push({ senderId: toOid(senderId) });
+      if (createdAfter || createdBefore) {
+        const r = {};
+        if (createdAfter) r.$gte = new Date(createdAfter);
+        if (createdBefore) r.$lte = new Date(createdBefore);
+        parts.push({ createdAt: r });
+      }
+      if (messageType) parts.push({ messageType });
+
+      if (viewerUserId) {
+        const visClause = await visibilityMongoClauseForViewer(viewerUserId, organizationId);
+        if (visClause) parts.push(visClause);
+      }
+
+      const wantAttach =
+        hasAttachment === true || hasAttachment === 'true' || hasAttachment === '1';
+      if (wantAttach) {
+        parts.push({
+          $or: [
+            { messageType: 'file' },
+            { messageType: 'image' },
+            { 'fileMeta.storagePath': { $exists: true, $nin: [null, ''] } },
+          ],
+        });
+      }
+
+      const enc = isEncryptionEnabled();
+      const qTrim = q && String(q).trim();
+      const mentionTrim = mentionText && String(mentionText).trim();
+
+      if (!enc && qTrim) {
+        parts.push({ content: { $regex: escapeRegex(qTrim), $options: 'i' } });
+      }
+      if (!enc && mentionTrim) {
+        parts.push({ content: { $regex: escapeRegex(mentionTrim), $options: 'i' } });
+      }
+
+      const filter = { $and: parts };
+
+      const pageNum = Math.min(MAX_PAGE, Math.max(1, parseInt(page, 10) || 1));
+      const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+
+      if (!enc) {
+        if (pageToken) {
+          const tokPart = pageTokenFilter(pageToken);
+          if (!tokPart) {
+            return { messages: [], nextPageToken: null, hasMore: false };
+          }
+          const combined = { $and: [filter, tokPart] };
+          const batch = await Message.find(combined)
+            .sort({ createdAt: -1, _id: -1 })
+            .limit(lim + 1)
+            .exec();
+          for (const m of batch) await maybeMigrateMessageContent(m);
+          const hasMore = batch.length > lim;
+          const slice = hasMore ? batch.slice(0, lim) : batch;
+          let out = slice.map((m) => toClientMessage(m, dtoOpts));
+          out = postFilterSearchMessages(out, {
+            qTrim: null,
+            mentionTrim: null,
+            hasLink,
+            hasEmbed,
+          });
+          // Re-rank display order only; cursor token still from fetch slice (createdAt+_id).
+          out = rankSearchBatch(out, qTrim, mentionTrim);
+          return {
+            messages: out,
+            nextPageToken: nextPageTokenFromDocs(slice, { hasMore }),
+            hasMore,
+          };
+        }
+
+        if (pageNum > 1) {
+          console.warn(
+            '[chat-service] GET /messages/search: query `page` is deprecated; use `pageToken`.'
+          );
+        }
+        const skip = (pageNum - 1) * lim;
+        const messages = await Message.find(filter)
+          .sort({ createdAt: -1, _id: -1 })
+          .skip(skip)
+          .limit(lim)
+          .exec();
+        for (const m of messages) await maybeMigrateMessageContent(m);
+        let out = messages.map((m) => toClientMessage(m, dtoOpts));
+        out = postFilterSearchMessages(out, { qTrim: null, mentionTrim: null, hasLink, hasEmbed });
+        out = rankSearchBatch(out, qTrim, mentionTrim);
+        const total = await Message.countDocuments(filter);
+        return {
+          messages: out,
+          total,
+          currentPage: pageNum,
+          totalPages: Math.max(1, Math.ceil(total / lim)),
+          hasMore: pageNum * lim < total,
+          nextPageToken: null,
+        };
+      }
+
+      const scanCap = Math.min(parseInt(process.env.CHAT_SEARCH_SCAN_CAP || '400', 10) || 400, 2000);
+      const raw = await Message.find(filter)
+        .sort({ createdAt: -1 })
+        .limit(scanCap)
+        .exec();
+      for (const m of raw) await maybeMigrateMessageContent(m);
+      let out = raw.map((m) => toClientMessage(m, dtoOpts));
+      out = postFilterSearchMessages(out, { qTrim, mentionTrim, hasLink, hasEmbed });
+      if (pageToken) {
+        const tok = decodePageToken(pageToken);
+        if (tok) {
+          const t = tok.createdAt.getTime();
+          const tid = tok.id;
+          out = out.filter((m) => {
+            const ca = new Date(m.createdAt).getTime();
+            const mid = String(m._id || m.id || '');
+            return ca < t || (ca === t && mid < tid);
+          });
+        }
+      }
+      const hasMore = out.length > lim;
+      const selection = out.slice(0, lim);
+      const ranked = rankSearchBatch(selection, qTrim, mentionTrim);
+      return {
+        messages: ranked,
+        total: null,
+        currentPage: null,
+        totalPages: null,
+        hasMore,
+        nextPageToken: nextPageTokenFromDocs(selection, { hasMore }),
+      };
+    } catch (error) {
+      throw toServiceError('searchOrgMessages', error);
+    }
+  }
+
+  /** Tìm kiếm tin DM giữa user và peer (không có roomId). */
+  async searchDmMessages(userId, peerId, options = {}) {
+    try {
+      await ensureMongoReady();
+      const { q, page = 1, limit = 30, pageToken, fields = 'summary' } = options;
+      const dtoOpts = {
+        fields: fields === 'full' ? 'full' : 'summary',
+        viewerId: userId || '',
+      };
+      if (!userId || !peerId) {
+        return { messages: [], total: 0, currentPage: 1, totalPages: 0 };
+      }
+
+      const me = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(String(userId))
+        : userId;
+      const peer = mongoose.Types.ObjectId.isValid(peerId)
+        ? new mongoose.Types.ObjectId(String(peerId))
+        : peerId;
+
+      const parts = [
+        {
+          $or: [
+            { senderId: me, receiverId: peer },
+            { senderId: peer, receiverId: me },
+          ],
+        },
+        { $or: [{ roomId: { $exists: false } }, { roomId: null }] },
+        { isDeleted: { $ne: true } },
+        { isRecalled: { $ne: true } },
+      ];
+
+      const enc = isEncryptionEnabled();
+      const qTrim = q && String(q).trim();
+      if (!enc && qTrim) {
+        parts.push({ content: { $regex: escapeRegex(qTrim), $options: 'i' } });
+      }
+
+      const filter = { $and: parts };
+      const pageNum = Math.min(MAX_PAGE, Math.max(1, parseInt(page, 10) || 1));
+      const lim = Math.min(Math.max(parseInt(limit, 10) || 30, 1), 100);
+
+      if (!enc) {
+        if (pageToken) {
+          const tokPart = pageTokenFilter(pageToken);
+          if (!tokPart) {
+            return { messages: [], nextPageToken: null, hasMore: false };
+          }
+          const combined = { $and: [filter, tokPart] };
+          const batch = await Message.find(combined)
+            .sort({ createdAt: -1, _id: -1 })
+            .limit(lim + 1)
+            .exec();
+          for (const m of batch) await maybeMigrateMessageContent(m);
+          const hasMore = batch.length > lim;
+          const slice = hasMore ? batch.slice(0, lim) : batch;
+          return {
+            messages: slice.map((m) => toClientMessage(m, dtoOpts)),
+            nextPageToken: nextPageTokenFromDocs(slice, { hasMore }),
+            hasMore,
+          };
+        }
+        if (pageNum > 1) {
+          console.warn(
+            '[chat-service] DM search: query `page` is deprecated; use `pageToken`.'
+          );
+        }
+        const skip = (pageNum - 1) * lim;
+        const messages = await Message.find(filter)
+          .sort({ createdAt: -1, _id: -1 })
+          .skip(skip)
+          .limit(lim)
+          .exec();
+        for (const m of messages) await maybeMigrateMessageContent(m);
+        const total = await Message.countDocuments(filter);
+        return {
+          messages: messages.map((m) => toClientMessage(m, dtoOpts)),
+          total,
+          currentPage: pageNum,
+          totalPages: Math.max(1, Math.ceil(total / lim)),
+          hasMore: pageNum * lim < total,
+          nextPageToken: null,
+        };
+      }
+
+      const scanCap = Math.min(parseInt(process.env.CHAT_SEARCH_SCAN_CAP || '400', 10) || 400, 2000);
+      const raw = await Message.find(filter).sort({ createdAt: -1 }).limit(scanCap).exec();
+      for (const m of raw) await maybeMigrateMessageContent(m);
+      let out = raw.map((m) => toClientMessage(m, dtoOpts));
+      if (qTrim) {
+        const low = qTrim.toLowerCase();
+        out = out.filter((m) => String(m.content || '').toLowerCase().includes(low));
+      }
+      const total = out.length;
+      const skip = (pageNum - 1) * lim;
+      const slice = out.slice(skip, skip + lim);
+      const hasMore = skip + lim < total;
+      return {
+        messages: slice,
+        total,
+        currentPage: pageNum,
+        totalPages: Math.max(1, Math.ceil(total / lim)),
+        hasMore,
+        nextPageToken: null,
+      };
+    } catch (error) {
+      throw toServiceError('searchDmMessages', error);
+    }
+  }
+
+  /**
+   * GC: xóa object Storage + soft-delete message có file hết hạn.
+   */
+  async runStorageGcOnce() {
+    const firebaseStorage = require('../utils/firebaseStorage');
+    if (!firebaseStorage.isEnabled()) {
+      return { scanned: 0, deleted: 0, skipped: true };
+    }
+    try {
+      await ensureMongoReady();
+      const now = new Date();
+      const msgs = await Message.find({
+        'fileMeta.expiresAt': { $lte: now },
+        'fileMeta.storagePath': { $exists: true, $nin: [null, ''] },
+        'fileMeta.promotedToTask': { $ne: true },
+        isDeleted: { $ne: true },
+      })
+        .limit(parseInt(process.env.STORAGE_GC_BATCH || '50', 10) || 50)
+        .lean();
+
+      let deleted = 0;
+      for (const m of msgs) {
+        const path = m.fileMeta?.storagePath;
+        if (!path) continue;
+        try {
+          await firebaseStorage.deleteObject(path);
+        } catch (e) {
+          /* vẫn cập nhật DB nếu 404 */
+        }
+        await invalidateSignedReadCacheForStoragePath(path);
+        await Message.updateOne(
+          { _id: m._id },
+          {
+            $set: {
+              isDeleted: true,
+              deletedAt: new Date(),
+              content: encryptContentIfEnabled('[Tệp đã hết hạn]'),
+              messageType: 'system',
+            },
+            $unset: { fileMeta: 1 },
+          }
+        );
+        const redis = getRedisClient();
+        if (redis) await redis.del(`message:${m._id}`);
+        deleted += 1;
+      }
+      return { scanned: msgs.length, deleted, skipped: false };
+    } catch (error) {
+      throw toServiceError('runStorageGcOnce', error);
+    }
+  }
+
+  /**
+   * Nội bộ: xuất lịch sử kênh org (plaintext) cho consumer nội bộ / S2S.
+   */
+  async exportOrgThreadInternal(params = {}) {
+    try {
+      await ensureMongoReady();
+      const {
+        organizationId,
+        roomId,
+        sinceMessageId,
+        limit,
+        unreadOnly,
+        readerId,
+      } = params;
+
+      if (!organizationId || !roomId) {
+        const err = new Error('organizationId and roomId are required');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const toOid = (id) =>
+        mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(String(id)) : id;
+
+      const maxCap = Math.min(
+        Math.max(parseInt(process.env.CHAT_INTERNAL_EXPORT_MAX_MESSAGES || '500', 10) || 500, 1),
+        2000
+      );
+      const lim = Math.min(Math.max(parseInt(limit, 10) || 200, 1), maxCap);
+
+      const filter = {
+        organizationId: toOid(organizationId),
+        roomId: toOid(roomId),
+        isDeleted: { $ne: true },
+        isRecalled: { $ne: true },
+      };
+
+      if (unreadOnly === true || unreadOnly === 'true' || unreadOnly === '1') {
+        if (!readerId) {
+          const err = new Error('readerId is required when unreadOnly is set');
+          err.statusCode = 400;
+          throw err;
+        }
+        filter.isRead = false;
+        filter.senderId = { $ne: toOid(readerId) };
+      }
+
+      if (sinceMessageId && mongoose.Types.ObjectId.isValid(String(sinceMessageId))) {
+        const sinceMsg = await Message.findById(sinceMessageId).select('createdAt _id').lean();
+        if (sinceMsg) {
+          filter.$or = [
+            { createdAt: { $gt: sinceMsg.createdAt } },
+            { createdAt: sinceMsg.createdAt, _id: { $gt: sinceMsg._id } },
+          ];
+        }
+      }
+
+      const batch = await Message.find(filter)
+        .sort({ createdAt: -1, _id: -1 })
+        .limit(lim + 1)
+        .exec();
+
+      const hasMore = batch.length > lim;
+      const slice = hasMore ? batch.slice(0, lim) : batch;
+      const chronological = [...slice].reverse();
+
+      for (const m of chronological) {
+        await maybeMigrateMessageContent(m);
+      }
+
+      const messages = chronological.map((m) => ({
+        _id: String(m._id),
+        senderId: String(m.senderId),
+        content: this._formatExportContent(m),
+        messageType: m.messageType || 'text',
+        createdAt: m.createdAt,
+      }));
+
+      return {
+        messages,
+        hasMore,
+        messageCount: messages.length,
+        firstMessageId: messages[0]?._id || null,
+        lastMessageId: messages[messages.length - 1]?._id || null,
+        exportedAt: new Date(),
+      };
+    } catch (error) {
+      throw toServiceError('exportOrgThreadInternal', error);
+    }
+  }
+
+  _formatExportContent(m) {
+    const type = String(m?.messageType || 'text');
+    if (type === 'image' || type === 'file') {
+      const name = String(m?.fileMeta?.originalName || m?.content || 'tệp').trim();
+      return `[đính kèm: ${name}]`;
+    }
+    if (type === 'system' || type === 'call_log') {
+      return unwrapPlaintext(m.content) || `[${type}]`;
+    }
+    return unwrapPlaintext(m.content) || '';
+  }
+}
+
+module.exports = new MessageService();

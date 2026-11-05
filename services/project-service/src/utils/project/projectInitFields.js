@@ -1,0 +1,294 @@
+/**
+ * Pure helpers — catalog Create Project lifecycle fields (không phụ thuộc DB).
+ */
+
+const {
+  DELIVERY_PHASES,
+  DEFAULT_DELIVERY_PHASE_EXISTING,
+  DEFAULT_DELIVERY_PHASE_NEW,
+  coerceDeliveryPhase,
+} = require('../../constants/projectDeliveryPhase');
+
+/** Một deliveryPhase một status. `on_hold` / `closed` không gắn phase. */
+const PROJECT_STATUSES = Object.freeze([
+  'draft',
+  'ready',
+  'in_development',
+  'qa_uat',
+  'release_handover',
+  'on_hold',
+  'closed',
+]);
+
+const STATUS_FOR_DELIVERY_PHASE = Object.freeze({
+  requirement_analysis: 'draft',
+  delivery_planning: 'ready',
+  development: 'in_development',
+  qa_uat: 'qa_uat',
+  release_handover: 'release_handover',
+});
+
+const PROJECT_CATEGORIES = Object.freeze(['internal', 'customer']);
+const PROJECT_PRIORITIES = Object.freeze(['low', 'medium', 'high', 'urgent']);
+const PROJECT_METHODOLOGIES = Object.freeze(['scrum']);
+const PROJECT_TYPES = Object.freeze([
+  'software',
+  'integration',
+  'maintenance',
+  'research',
+  'other',
+]);
+
+const WEEKDAYS = Object.freeze([
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+  'sunday',
+]);
+
+function parseOptionalDate(raw) {
+  if (raw === undefined) return { skip: true };
+  if (raw === null || raw === '') return { ok: true, value: null };
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return { ok: false, message: 'Ngày không hợp lệ' };
+  return { ok: true, value: parsed };
+}
+
+/**
+ * Normalize + validate catalog fields from create/patch body.
+ * @returns {{ ok: true, fields: object } | { ok: false, message: string }}
+ */
+function buildProjectInitFields(raw = {}, { partial = false } = {}) {
+  const body = raw && typeof raw === 'object' ? raw : {};
+  const fields = {};
+
+  if (body.status !== undefined) {
+    const st = coerceProjectLifecycleStatus(body.status);
+    if (!st) {
+      return { ok: false, message: 'status dự án không hợp lệ' };
+    }
+    fields.status = st;
+  } else if (!partial) {
+    fields.status = 'draft';
+  }
+
+  if (body.deliveryPhase !== undefined) {
+    const phase = coerceDeliveryPhase(body.deliveryPhase, { missingAsExisting: false });
+    if (!phase || !DELIVERY_PHASES.includes(phase)) {
+      return { ok: false, message: 'deliveryPhase không hợp lệ' };
+    }
+    fields.deliveryPhase = phase;
+  } else if (!partial) {
+    fields.deliveryPhase = DEFAULT_DELIVERY_PHASE_NEW;
+  }
+
+  if (body.projectType !== undefined || !partial) {
+    const pt = String(body.projectType || 'software').trim().toLowerCase() || 'software';
+    if (!PROJECT_TYPES.includes(pt)) {
+      return { ok: false, message: 'projectType không hợp lệ' };
+    }
+    fields.projectType = pt;
+  }
+
+  if (body.category !== undefined || !partial) {
+    const cat = String(body.category || 'internal').trim().toLowerCase() || 'internal';
+    if (!PROJECT_CATEGORIES.includes(cat)) {
+      return { ok: false, message: 'category phải là internal hoặc customer' };
+    }
+    fields.category = cat;
+  }
+
+  if (body.priority !== undefined || !partial) {
+    const pr = String(body.priority || 'medium').trim().toLowerCase() || 'medium';
+    if (!PROJECT_PRIORITIES.includes(pr)) {
+      return { ok: false, message: 'priority không hợp lệ' };
+    }
+    fields.priority = pr;
+  }
+
+  if (body.tags !== undefined) {
+    fields.tags = [...new Set(
+      (Array.isArray(body.tags) ? body.tags : String(body.tags || '').split(','))
+        .map((t) => String(t || '').trim().slice(0, 48))
+        .filter(Boolean)
+    )].slice(0, 20);
+  } else if (!partial) {
+    fields.tags = [];
+  }
+
+  const start = parseOptionalDate(body.startDate);
+  if (!start.skip) {
+    if (!start.ok) return { ok: false, message: 'startDate không hợp lệ' };
+    fields.startDate = start.value;
+  }
+
+  const expectedEnd = parseOptionalDate(
+    body.expectedEndDate !== undefined ? body.expectedEndDate : body.dueDate
+  );
+  if (!expectedEnd.skip) {
+    if (!expectedEnd.ok) return { ok: false, message: 'expectedEndDate/dueDate không hợp lệ' };
+    fields.expectedEndDate = expectedEnd.value;
+    fields.dueDate = expectedEnd.value;
+  }
+
+  if (body.estimatedDurationDays !== undefined) {
+    if (body.estimatedDurationDays === null || body.estimatedDurationDays === '') {
+      fields.estimatedDurationDays = null;
+    } else {
+      const n = Number(body.estimatedDurationDays);
+      if (!Number.isFinite(n) || n < 0 || n > 3650) {
+        return { ok: false, message: 'estimatedDurationDays không hợp lệ' };
+      }
+      fields.estimatedDurationDays = Math.round(n);
+    }
+  }
+
+  if (body.workingCalendar !== undefined) {
+    const cal = String(body.workingCalendar || 'standard').trim().slice(0, 64) || 'standard';
+    fields.workingCalendar = cal;
+  } else if (!partial) {
+    fields.workingCalendar = 'standard';
+  }
+
+  if (body.methodology !== undefined || !partial) {
+    const m = String(body.methodology || 'scrum').trim().toLowerCase() || 'scrum';
+    if (!PROJECT_METHODOLOGIES.includes(m)) {
+      return { ok: false, message: 'methodology phải là scrum' };
+    }
+    fields.methodology = m;
+  }
+
+  const settingsRaw =
+    body.methodologySettings && typeof body.methodologySettings === 'object'
+      ? body.methodologySettings
+      : {};
+  if (body.methodologySettings !== undefined || body.methodology !== undefined || !partial) {
+    const methodology = fields.methodology || String(body.methodology || 'scrum').toLowerCase();
+    const settings = {};
+    if (methodology === 'scrum') {
+      const dur = Number(settingsRaw.sprintDurationDays ?? body.sprintDurationDays ?? 14);
+      if (!Number.isFinite(dur) || dur < 1 || dur > 60) {
+        return { ok: false, message: 'sprintDurationDays phải từ 1–60' };
+      }
+      settings.sprintDurationDays = Math.round(dur);
+      const day = String(settingsRaw.sprintStartDay || body.sprintStartDay || 'monday')
+        .trim()
+        .toLowerCase();
+      if (!WEEKDAYS.includes(day)) {
+        return { ok: false, message: 'sprintStartDay không hợp lệ' };
+      }
+      settings.sprintStartDay = day;
+    }
+    fields.methodologySettings = settings;
+  }
+
+  const category = fields.category || String(body.category || '').toLowerCase();
+  if (body.customer !== undefined || category === 'customer') {
+    const c = body.customer && typeof body.customer === 'object' ? body.customer : {};
+    if (category === 'customer') {
+      const name = String(c.name || c.customer || body.customerName || '').trim();
+      if (!name) {
+        return { ok: false, message: 'Customer bắt buộc khi category = customer' };
+      }
+      fields.customer = {
+        name: name.slice(0, 180),
+        company: String(c.company || body.customerCompany || '').trim().slice(0, 180),
+        contactPerson: String(c.contactPerson || body.contactPerson || '').trim().slice(0, 180),
+        contractCode: String(c.contractCode || body.contractCode || '').trim().slice(0, 64),
+      };
+    } else if (body.customer === null || category === 'internal') {
+      fields.customer = null;
+    }
+  }
+
+  if (partial && !Object.keys(fields).length) {
+    return { ok: false, message: 'Không có field lifecycle hợp lệ' };
+  }
+  return { ok: true, fields };
+}
+
+/**
+ * Status đúng với deliveryPhase. `null` khi phase không thuộc map.
+ * Không áp cho `on_hold` / `closed`.
+ */
+function statusForDeliveryPhase(phase) {
+  const key = String(phase || '')
+    .trim()
+    .toLowerCase();
+  return STATUS_FOR_DELIVERY_PHASE[key] || null;
+}
+
+/**
+ * Alias trước enum: `ready_for_planning` → `ready`, `planning` / `new` / `created` → `draft`,
+ * `active` (Gate 2 cũ) → `in_development`, terminal cũ → `closed`.
+ */
+function coerceProjectLifecycleStatus(raw) {
+  const st = String(raw || '')
+    .trim()
+    .toLowerCase();
+  if (!st) return null;
+  if (st === 'ready_for_planning') return 'ready';
+  if (st === 'planning' || st === 'new' || st === 'created') return 'draft';
+  if (st === 'active') return 'in_development';
+  if (PROJECT_STATUSES.includes(st)) return st;
+  if (st === 'cancelled' || st === 'canceled' || st === 'completed' || st === 'archived') {
+    return 'closed';
+  }
+  return null;
+}
+
+/**
+ * Status bám deliveryPhase. `on_hold` / `closed` (kể cả alias đóng) giữ status
+ * và không bịa phase khi phase đang trống.
+ * Draft / AI (`analysisMode=ai`) với phase trống → requirement_analysis (Phase 0),
+ * không ép development (tránh nuốt nháp AI).
+ * @returns {{ status: string, deliveryPhase: string|null }}
+ */
+function alignedLifecycleFields({ status, deliveryPhase, analysisMode } = {}) {
+  const st = coerceProjectLifecycleStatus(status);
+  if (st === 'on_hold' || st === 'closed') {
+    const rawPhase = String(deliveryPhase || '')
+      .trim()
+      .toLowerCase();
+    return {
+      status: st,
+      deliveryPhase: DELIVERY_PHASES.includes(rawPhase) ? rawPhase : null,
+    };
+  }
+  const rawPhase = String(deliveryPhase || '')
+    .trim()
+    .toLowerCase();
+  const mode = String(analysisMode || '')
+    .trim()
+    .toLowerCase();
+  if (!rawPhase && (st === 'draft' || mode === 'ai')) {
+    return {
+      status: 'draft',
+      deliveryPhase: 'requirement_analysis',
+    };
+  }
+  const known = coerceDeliveryPhase(deliveryPhase);
+  const phase =
+    known && STATUS_FOR_DELIVERY_PHASE[known] ? known : DEFAULT_DELIVERY_PHASE_EXISTING;
+  return {
+    status: STATUS_FOR_DELIVERY_PHASE[phase],
+    deliveryPhase: phase,
+  };
+}
+
+module.exports = {
+  PROJECT_STATUSES,
+  STATUS_FOR_DELIVERY_PHASE,
+  PROJECT_CATEGORIES,
+  PROJECT_PRIORITIES,
+  PROJECT_METHODOLOGIES,
+  PROJECT_TYPES,
+  WEEKDAYS,
+  buildProjectInitFields,
+  coerceProjectLifecycleStatus,
+  statusForDeliveryPhase,
+  alignedLifecycleFields,
+};

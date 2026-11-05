@@ -1,536 +1,1060 @@
-import { useState } from 'react';
-import NavigationSidebar from '../../components/Layout/NavigationSidebar';
-import { GlassCard, GradientButton, Modal, Toast } from '../../components/Shared';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import toast from 'react-hot-toast';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  AlarmClock,
+  Bell,
+  CalendarDays,
+  Clock,
+  FileText,
+  Info,
+  MapPin,
+  Mic,
+  Pin,
+  Timer,
+  Users,
+  X,
+} from 'lucide-react';
+import { ConfirmDialog, GradientButton, Modal } from '../../components/Shared';
+import {
+  adminDangerBtnClass,
+  adminInputClass,
+  adminLabelClass,
+  adminSecondaryBtnClass,
+} from '../../components/adminUsers/adminUserPanelUi';
+import { resolveMentionNavIndex } from '../../utils/chatComposerLimits';
+import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
+import { useCalendarFeed } from '../../hooks/useCalendarFeed';
+import { useTaskDueAlerts } from '../../hooks/useTaskDueAlerts';
+import friendService from '../../services/friendService';
+import { organizationAPI } from '../../services/api/organizationAPI';
+import UserAvatar from '../../components/Shared/UserAvatar';
+import { getMeetingJoinState, toDateKey } from '../../utils/calendarUtils';
+import { useAppStrings } from '../../locales/appStrings';
+import { useLocale } from '../../context/LocaleContext';
+import { useWorkspace } from '../../context/WorkspaceContext';
+import { LOCAL_CUSTOM_KEY } from '../../utils/dmCalendarReminders';
+import { buildCollaborateProjectHubPath } from '../../utils/suitePathUtils';
+import {
+  FIGMA_PAGE_CARD_PAD,
+  FIGMA_PAGE_SHELL,
+} from '../../components/Layout/figmaPageClasses';
+import CalendarFigmaView from '../../components/Calendar/CalendarFigmaView';
+import { hasBackendCapability } from '../../config/backendCapabilities';
 
-function CalendarPage() {
-  const [view, setView] = useState('month');
+const CALENDAR_WRITE_ENABLED = hasBackendCapability('calendarEventService');
+
+const CALENDAR_LOCAL_KEY = LOCAL_CUSTOM_KEY;
+const EVENT_TITLE_MAX_LENGTH = 200;
+const EVENT_LOCATION_MAX_LENGTH = 200;
+const EVENT_DESCRIPTION_MAX_LENGTH = 500;
+const ATTENDEE_QUERY_MAX_LENGTH = 120;
+const EVENT_TYPE_OPTIONS = [
+  { id: 'meeting', labelKey: 'calendar.kindMeeting', Icon: Mic },
+  { id: 'deadline', labelKey: 'calendar.typeDeadline', Icon: AlarmClock },
+  { id: 'reminder', labelKey: 'calendar.tabReminder', Icon: Bell },
+];
+const DEFAULT_DURATION_MINUTES = '30';
+const DURATION_MINUTE_OPTIONS = ['15', '30', '45', '60', '90', '120'];
+const LEGACY_DURATION_MAP = {
+  '15 ph\u00fat': '15',
+  '30 ph\u00fat': '30',
+  '45 ph\u00fat': '45',
+  '1 gi\u1edd': '60',
+  '1.5 gi\u1edd': '90',
+  '2 gi\u1edd': '120',
+  '15 min': '15',
+  '30 min': '30',
+  '45 min': '45',
+  '1 hour': '60',
+  '1.5 hours': '90',
+  '2 hours': '120',
+};
+
+function resolveLocaleTag(locale) {
+  return String(locale || '').toLowerCase() === 'en' ? 'en-US' : 'vi-VN';
+}
+
+function normalizeDurationMinutes(value) {
+  if (value == null || value === '') return DEFAULT_DURATION_MINUTES;
+  const raw = String(value).trim();
+  if (/^\d+$/.test(raw)) return raw;
+  return LEGACY_DURATION_MAP[raw] || DEFAULT_DURATION_MINUTES;
+}
+
+function durationLabelForMinutes(minutes, t) {
+  const keyByMinutes = {
+    15: 'dur15',
+    30: 'dur30',
+    45: 'dur45',
+    60: 'dur60',
+    90: 'dur90',
+    120: 'dur120',
+  };
+  const key = keyByMinutes[Number(minutes)];
+  return key ? t(`calendar.${key}`) : String(minutes);
+}
+
+function parseTimeInputToDisplay(hhmm, loc) {
+  if (!hhmm || !String(hhmm).includes(':')) return '';
+  const [h, m] = String(hhmm).split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return '';
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  const tag = resolveLocaleTag(loc);
+  return d.toLocaleTimeString(tag, { hour: '2-digit', minute: '2-digit' });
+}
+
+function CalendarPage({
+  spaceOrganizationId = '',
+  spaceProjectId = '',
+} = {}) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const { activeWorkspace, company } = useWorkspace();
+  const organizationId = useMemo(() => {
+    const fromSpace = String(spaceOrganizationId || '').trim();
+    if (fromSpace) return fromSpace;
+    const fromQuery = String(searchParams.get('organizationId') || '').trim();
+    if (fromQuery) return fromQuery;
+    const path = String(location.pathname || '');
+    const onOrgSuite =
+      path.startsWith('/app/collaborate') ||
+      path.startsWith('/app/company') ||
+      path.startsWith('/app/projects');
+    if (!onOrgSuite) return '';
+    return String(
+      activeWorkspace?._id ||
+        activeWorkspace?.id ||
+        activeWorkspace?.organizationId ||
+        company?.id ||
+        company?._id ||
+        company?.organizationId ||
+        ''
+    ).trim();
+  }, [searchParams, location.pathname, activeWorkspace, company, spaceOrganizationId]);
+  const projectIdFilter = String(spaceProjectId || searchParams.get('projectId') || '').trim();
+  const { t } = useAppStrings();
+  const formIdPrefix = useId();
+  const fieldId = (name) => `${formIdPrefix}-${name}`;
+  const { locale } = useLocale();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [showCreateEventModal, setShowCreateEventModal] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [editingEventId, setEditingEventId] = useState(null);
+  const [createType, setCreateType] = useState('meeting');
+  /** Gắn nhắc hẹn / sự kiện local với bạn DM (từ chat) */
+  const [dmPeerFriendId, setDmPeerFriendId] = useState('');
+  const [dmPeerFriendName, setDmPeerFriendName] = useState('');
+  const [eventForm, setEventForm] = useState({
+    title: '',
+    date: '',
+    time: '',
+    duration: DEFAULT_DURATION_MINUTES,
+    location: '',
+    description: '',
+    attendeesText: '',
+  });
+  const [attendeeNames, setAttendeeNames] = useState([]);
+  const [attendeeSuggestions, setAttendeeSuggestions] = useState([]);
+  const [showAttendeeSuggestions, setShowAttendeeSuggestions] = useState(false);
+  const [attendeeActiveIndex, setAttendeeActiveIndex] = useState(-1);
+  const [deleteConfirmEventId, setDeleteConfirmEventId] = useState(null);
+  /** month | week | list — Figma suite layout */
+  const [viewMode, setViewMode] = useState('month');
 
-  const showToast = (message, type = "success") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+  const {
+    events,
+    tasksForAlerts,
+    reloadLocal,
+    refetch,
+    loading: feedLoading,
+    error: feedError,
+  } = useCalendarFeed(selectedDate, organizationId, projectIdFilter);
+
+  useTaskDueAlerts(tasksForAlerts, {
+    enabled: true,
+    onAlert: ({ title }) => {
+      toast(t('calendar.toastDeadlineAlert', { title }));
+    },
+  });
+
+  const selectedDateEvents = useMemo(() => {
+    const key = toDateKey(selectedDate);
+    return events
+      .filter((e) => e.date === key)
+      .sort((a, b) => new Date(a.startAt || 0).getTime() - new Date(b.startAt || 0).getTime());
+  }, [events, selectedDate]);
+
+  const upcomingMonthEvents = useMemo(() => {
+    const y = selectedDate.getFullYear();
+    const m = selectedDate.getMonth();
+    return events.filter((e) => {
+      if (!e.date) return false;
+      const d = new Date(`${e.date}T12:00:00`);
+      if (Number.isNaN(d.getTime())) return false;
+      return d.getFullYear() === y && d.getMonth() === m;
+    });
+  }, [events, selectedDate]);
+
+  const resetEventForm = () => {
+    setEditingEventId(null);
+    setCreateType('meeting');
+    setAttendeeNames([]);
+    setShowAttendeeSuggestions(false);
+    setAttendeeActiveIndex(-1);
+    setEventForm({
+      title: '',
+      date: '',
+      time: '',
+      duration: DEFAULT_DURATION_MINUTES,
+      location: '',
+      description: '',
+      attendeesText: '',
+    });
   };
 
-  const events = [
-    { id: 1, title: 'Họp Nhóm Hàng Ngày', date: '2026-01-18', time: '10:00 AM', duration: '30 phút', type: 'meeting', attendees: 8, location: 'Voice Room 1', color: 'from-blue-500 to-cyan-500' },
-    { id: 2, title: 'Demo Khách Hàng', date: '2026-01-18', time: '2:30 PM', duration: '1 giờ', type: 'meeting', attendees: 5, location: 'Voice Room 2', color: 'from-purple-600 to-pink-600' },
-    { id: 3, title: 'Deadline: Thiết kế Landing Page', date: '2026-01-18', time: '5:00 PM', duration: '', type: 'deadline', priority: 'high', color: 'from-red-500 to-orange-500' },
-    { id: 4, title: 'Đánh Giá Thiết Kế', date: '2026-01-19', time: '4:00 PM', duration: '45 phút', type: 'meeting', attendees: 4, location: 'Voice Room 3', color: 'from-green-500 to-emerald-500' },
-    { id: 5, title: 'Sprint Planning', date: '2026-01-20', time: '9:00 AM', duration: '2 giờ', type: 'meeting', attendees: 12, location: 'Voice Room 1', color: 'from-blue-500 to-cyan-500' },
-    { id: 6, title: 'Deadline: Review Code', date: '2026-01-21', time: '6:00 PM', duration: '', type: 'deadline', priority: 'medium', color: 'from-orange-500 to-yellow-500' },
-    { id: 7, title: '1-1 với Mike', date: '2026-01-22', time: '3:00 PM', duration: '30 phút', type: 'meeting', attendees: 2, location: 'Direct Call', color: 'from-purple-600 to-pink-600' }
-  ];
+  const openCreateModal = (prefilledTitle = null) => {
+    resetEventForm();
+    const dateStr = toDateKey(selectedDate);
+    const title = prefilledTitle || `${t('calendar.newEventDefault', { date: dateStr })}`;
+    setEventForm((prev) => ({
+      ...prev,
+      date: dateStr,
+      time: '09:00',
+      title: title,
+    }));
+    setShowCreateEventModal(true);
+  };
 
-  const todayEvents = events.filter(e => e.date === '2026-01-18');
-  const upcomingEvents = events.filter(e => new Date(e.date) > new Date('2026-01-18'));
+  useEffect(() => {
+    const state = location.state;
+    if (!state || state.source !== 'friend-chat') return;
+    const prefillTitle = String(state.prefillTitle || '').trim();
+    const prefillAttendees = Array.isArray(state.prefillAttendees)
+      ? state.prefillAttendees.map((x) => String(x || '').trim()).filter(Boolean)
+      : [];
+    const prefillType = String(state.prefillType || '').trim();
+    const friendId = String(state.friendId || '').trim();
+    const friendName = String(state.friendName || '').trim();
+
+    if (prefillType === 'reminder' || prefillType === 'meeting' || prefillType === 'deadline') {
+      setCreateType(prefillType);
+    }
+    if (friendId) setDmPeerFriendId(friendId);
+    if (friendName) setDmPeerFriendName(friendName);
+    if (state.prefillDate) {
+      const d = String(state.prefillDate).trim();
+      if (d) setSelectedDate(new Date(`${d}T12:00:00`));
+    }
+
+    openCreateModal(prefillTitle || null);
+    if (prefillAttendees.length > 0) {
+      setAttendeeNames(Array.from(new Set(prefillAttendees)));
+    }
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+  }, [location.pathname, location.search, location.state, navigate]);
+
+  useEffect(() => {
+    const openCreate = searchParams.get('openCreate');
+    const friendId = String(searchParams.get('friendId') || '').trim();
+    const friendName = String(searchParams.get('friendName') || '').trim();
+    const type = String(searchParams.get('type') || '').trim();
+    if (openCreate !== '1' || !friendId) return;
+
+    if (type === 'reminder' || type === 'meeting' || type === 'deadline') {
+      setCreateType(type);
+    }
+    setDmPeerFriendId(friendId);
+    if (friendName) setDmPeerFriendName(friendName);
+    openCreateModal(
+      friendName
+        ? t('calendar.reminderWithFriend', { name: friendName })
+        : null
+    );
+    navigate(`${location.pathname}`, { replace: true });
+  }, [searchParams, navigate, location.pathname, t]);
+
+  const openEditModal = (eventData) => {
+    if (!eventData) return;
+    if (eventData.source === 'api') {
+      toast(t('calendar.toastEditElsewhere'));
+      return;
+    }
+    setEditingEventId(eventData.id);
+    setCreateType(eventData.type || 'meeting');
+    setEventForm({
+      title: eventData.title || '',
+      date: eventData.date || '',
+      time: eventData.timeInput || eventData.time || '',
+      duration: normalizeDurationMinutes(eventData.duration),
+      location: eventData.location || '',
+      description: eventData.description || '',
+      attendeesText: '',
+    });
+    if (Array.isArray(eventData.attendeeNames)) {
+      setAttendeeNames(eventData.attendeeNames.filter(Boolean));
+    } else {
+      setAttendeeNames([]);
+    }
+    setShowCreateEventModal(true);
+  };
+
+  const handleAddAttendees = () => {
+    const raw = String(eventForm.attendeesText || '').trim();
+    if (!raw) {
+      toast.error(t('calendar.toastParticipantName'));
+      return;
+    }
+
+    const parsed = raw
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean);
+
+    if (parsed.length === 0) {
+      toast.error(t('calendar.toastParticipantInvalid'));
+      return;
+    }
+
+    setAttendeeNames((prev) => Array.from(new Set([...prev, ...parsed])));
+    setEventForm((prev) => ({ ...prev, attendeesText: '' }));
+    toast.success(t('calendar.toastParticipantAdded'));
+  };
+
+  const addAttendeeName = (name) => {
+    const clean = String(name || '').trim();
+    if (!clean) return;
+    setAttendeeNames((prev) => Array.from(new Set([...prev, clean])));
+    setEventForm((prev) => ({ ...prev, attendeesText: '' }));
+    setShowAttendeeSuggestions(false);
+    setAttendeeActiveIndex(-1);
+  };
+
+  const handleRemoveAttendee = (name) => {
+    setAttendeeNames((prev) => prev.filter((item) => item !== name));
+  };
+
+  const filteredAttendeeSuggestions = useMemo(() => {
+    const q = String(eventForm.attendeesText || '').trim().toLowerCase();
+    return attendeeSuggestions
+      .filter((item) => !attendeeNames.includes(item.label))
+      .filter((item) => {
+        if (!q) return true;
+        return `${item.label} ${item.sub || ''}`.toLowerCase().includes(q);
+      })
+      .slice(0, 8);
+  }, [attendeeSuggestions, attendeeNames, eventForm.attendeesText]);
+
+  const loadAttendeeSuggestions = useCallback(async () => {
+    try {
+      const [friendsRes, membersRes] = await Promise.all([
+        friendService.getFriends().catch(() => null),
+        organizationId ? organizationAPI.getMembers(organizationId).catch(() => null) : Promise.resolve(null),
+      ]);
+      const rawFriends = friendsRes?.data?.friends ?? friendsRes?.data?.data?.friends ?? friendsRes?.data ?? [];
+      const friendRows = (Array.isArray(rawFriends) ? rawFriends : [])
+        .map((item) => item?.friendId || item)
+        .filter(Boolean)
+        .map((u) => ({
+          id: String(u?._id || u?.id || u?.userId || ''),
+          label: String(u?.displayName || u?.fullName || u?.username || u?.email || '').trim(),
+          sub: String(u?.email || u?.phone || u?.phoneNumber || '').trim(),
+        }))
+        .filter((row) => row.id && row.label);
+
+      const rawMembers = membersRes?.data?.data ?? membersRes?.data ?? [];
+      const memberRows = (Array.isArray(rawMembers) ? rawMembers : [])
+        .map((item) => item?.user || item)
+        .filter(Boolean)
+        .map((u) => ({
+          id: String(u?._id || u?.id || u?.userId || ''),
+          label: String(u?.displayName || u?.fullName || u?.username || u?.email || '').trim(),
+          sub: String(u?.email || u?.phone || u?.phoneNumber || '').trim(),
+        }))
+        .filter((row) => row.id && row.label);
+
+      const merged = new Map();
+      [...memberRows, ...friendRows].forEach((row) => {
+        if (!merged.has(row.id)) merged.set(row.id, row);
+      });
+      setAttendeeSuggestions(Array.from(merged.values()));
+    } catch {
+      setAttendeeSuggestions([]);
+    }
+  }, [organizationId]);
+
+  useEffect(() => {
+    if (showCreateEventModal) loadAttendeeSuggestions();
+  }, [showCreateEventModal, loadAttendeeSuggestions]);
+
+  const persistLocalList = useCallback((updater) => {
+    try {
+      let list = [];
+      const raw = localStorage.getItem(CALENDAR_LOCAL_KEY) || localStorage.getItem('calendar:events');
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (Array.isArray(p)) list = p;
+      }
+      const next = typeof updater === 'function' ? updater(list) : updater;
+      localStorage.setItem(CALENDAR_LOCAL_KEY, JSON.stringify(next));
+      reloadLocal();
+      return true;
+    } catch {
+      toast.error(t('calendar.toastLocalSaveFail'));
+      return false;
+    }
+  }, [reloadLocal, t]);
+
+  const closeCreateModal = () => {
+    setShowCreateEventModal(false);
+    resetEventForm();
+    setDmPeerFriendId('');
+    setDmPeerFriendName('');
+  };
+
+  const handleCreateModalClose = () => {
+    if (showAttendeeSuggestions && filteredAttendeeSuggestions.length > 0) {
+      setShowAttendeeSuggestions(false);
+      setAttendeeActiveIndex(-1);
+      return;
+    }
+    closeCreateModal();
+  };
+
+  const handleSaveEvent = () => {
+    const title = String(eventForm.title || '').trim();
+    const date = String(eventForm.date || '').trim();
+    const timeRaw = String(eventForm.time || '').trim();
+
+    if (!title || !date || !timeRaw) {
+      toast.error(t('calendar.toastFillRequired'));
+      return;
+    }
+
+    const colorByType = {
+      meeting: 'from-blue-500 to-cyan-500',
+      deadline: 'from-red-500 to-orange-500',
+      reminder: 'from-cyan-600 to-teal-600',
+    };
+
+    const timeLabel = parseTimeInputToDisplay(timeRaw) || timeRaw;
+    let startAt = null;
+    try {
+      startAt = new Date(`${date}T${timeRaw}`);
+      if (Number.isNaN(startAt.getTime())) startAt = null;
+    } catch {
+      startAt = null;
+    }
+
+    const peerId = String(dmPeerFriendId || '').trim();
+    const peerName = String(dmPeerFriendName || '').trim();
+    const nextEvent = {
+      id: editingEventId || `local:${Date.now()}`,
+      kind: 'local',
+      source: 'local',
+      title,
+      date,
+      time: timeLabel,
+      timeInput: timeRaw,
+      duration:
+        createType === 'meeting'
+          ? durationLabelForMinutes(normalizeDurationMinutes(eventForm.duration), t)
+          : '',
+      type: createType,
+      attendees: createType === 'meeting' ? attendeeNames.length : 0,
+      attendeeNames: createType === 'meeting' ? attendeeNames : [],
+      location: eventForm.location || '',
+      description: eventForm.description || '',
+      priority: createType === 'deadline' ? 'high' : undefined,
+      color: colorByType[createType] || colorByType.reminder,
+      startAt: startAt ? startAt.toISOString() : null,
+      ...(peerId
+        ? {
+            friendId: peerId,
+            friendName: peerName || undefined,
+          }
+        : {}),
+    };
+
+    const saved = editingEventId
+      ? persistLocalList((list) =>
+        list.map((item) => (String(item.id) === String(editingEventId) ? nextEvent : item))
+      )
+      : persistLocalList((list) => [nextEvent, ...list]);
+    if (!saved) return;
+
+    toast.success(editingEventId ? t('calendar.toastUpdated') : t('calendar.toastCreated'));
+    closeCreateModal();
+  };
+
+  const handleDeleteEvent = (eventId, source) => {
+    if (!eventId) return;
+    if (source === 'api') {
+      toast(t('calendar.toastDeleteTaskVoice'));
+      return;
+    }
+    setDeleteConfirmEventId(eventId);
+  };
+
+  const confirmDeleteLocalEvent = () => {
+    const eventId = deleteConfirmEventId;
+    if (!eventId) return;
+    const deleted = persistLocalList((list) => list.filter((item) => String(item.id) !== String(eventId)));
+    if (!deleted) return;
+    if (selectedEvent?.id === eventId) {
+      setSelectedEvent(null);
+    }
+    toast.success(t('calendar.toastDeleted'));
+  };
+
+  const handleJoinEvent = (eventData) => {
+    if (!eventData) return;
+    if (eventData.kind === 'meeting' && eventData.meetingId && eventData.raw) {
+      const st = getMeetingJoinState(eventData.raw, new Date());
+      if (!st.joinEligible) {
+        if (st.disabledReason === 'too_early') {
+          toast.error(t('calendar.toastJoinWindow'));
+        } else if (st.disabledReason === 'ended') {
+          toast.error(t('calendar.toastMeetingEnded'));
+        } else {
+          toast.error(t('calendar.toastJoinFail'));
+        }
+        return;
+      }
+      navigate(`/voice/${encodeURIComponent(eventData.meetingId)}`);
+      toast.success(t('calendar.toastJoining'));
+      return;
+    }
+    if (eventData.type === 'meeting' && eventData.source === 'local') {
+      toast(t('calendar.toastLocalEvent'));
+      return;
+    }
+    if (eventData.kind === 'task' || eventData.kind === 'work' || eventData.type === 'deadline' || eventData.type === 'work') {
+      const projectId = String(eventData.projectId || eventData.raw?.projectId || '').trim();
+      const boardId = String(eventData.boardId || eventData.raw?.boardId || '').trim();
+      const orgId = String(
+        eventData.organizationId || eventData.raw?.organizationId || organizationId || ''
+      ).trim();
+      if (projectId) {
+        navigate(
+          buildCollaborateProjectHubPath(projectId, {
+            organizationId: orgId,
+            boardId,
+          })
+        );
+        return;
+      }
+      toast(t('calendar.toastOpenTasks'));
+      return;
+    }
+    toast(t('calendar.toastDetail'));
+  };
+
+  const renderModalCard = (children) => (
+    <div className={FIGMA_PAGE_CARD_PAD}>{children}</div>
+  );
+  const modalHeading = 'mb-3 flex items-center gap-2 text-sm font-semibold text-foreground';
+  const modalBody = 'space-y-2 text-sm text-muted-foreground';
+  const modalInfoRow = 'flex items-center gap-2';
+  const modalIcon = 'shrink-0 text-muted-foreground';
+  const formInput = adminInputClass('text-foreground placeholder:text-muted-foreground');
+  const formDateInput = adminInputClass('text-foreground [color-scheme:light] dark:[color-scheme:dark]');
+  const formLabel = adminLabelClass();
+  const isMeetingType = createType === 'meeting';
+  const attendeeListboxId = fieldId('attendee-listbox');
+  const attendeeOptionId = (index) => fieldId(`attendee-option-${index}`);
+  const isAttendeeListOpen = showAttendeeSuggestions && filteredAttendeeSuggestions.length > 0;
+
+  const handleCalendarRefresh = async () => {
+    reloadLocal();
+    const result = await refetch();
+    if (result?.isError) {
+      toast.error(resolveApiErrorMessage(result.error, { t, fallback: t('calendar.toastRefreshFail') }));
+      return;
+    }
+    toast.success(t('calendar.toastRefreshed'));
+  };
+
+  const handlePrevMonth = () => {
+    const newDate = new Date(selectedDate);
+    newDate.setMonth(newDate.getMonth() - 1);
+    setSelectedDate(newDate);
+    toast(t('calendar.toastMonthNav', { m: newDate.getMonth() + 1, y: newDate.getFullYear() }));
+  };
+
+  const handleNextMonth = () => {
+    const newDate = new Date(selectedDate);
+    newDate.setMonth(newDate.getMonth() + 1);
+    setSelectedDate(newDate);
+    toast(t('calendar.toastMonthNav', { m: newDate.getMonth() + 1, y: newDate.getFullYear() }));
+  };
+
+  const handleToday = () => {
+    setSelectedDate(new Date());
+    toast(t('calendar.toastBackToday'));
+  };
+
+  const handleEventTypeKeyDown = (e, index) => {
+    const delta = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!delta) return;
+    e.preventDefault();
+    const next = EVENT_TYPE_OPTIONS[(index + delta + EVENT_TYPE_OPTIONS.length) % EVENT_TYPE_OPTIONS.length];
+    setCreateType(next.id);
+    document.getElementById(fieldId(`type-${next.id}`))?.focus();
+  };
+
+  const handleAttendeeKeyDown = (e) => {
+    const count = filteredAttendeeSuggestions.length;
+    const isOpen = showAttendeeSuggestions && count > 0;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!count) return;
+      e.preventDefault();
+      if (!showAttendeeSuggestions) setShowAttendeeSuggestions(true);
+      setAttendeeActiveIndex((prev) => resolveMentionNavIndex(prev, e.key, count));
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (isOpen) {
+        const pick = filteredAttendeeSuggestions[attendeeActiveIndex >= 0 ? attendeeActiveIndex : 0];
+        addAttendeeName(pick.label);
+        return;
+      }
+      if (String(eventForm.attendeesText || '').trim()) handleAddAttendees();
+      return;
+    }
+    if (e.key === 'Escape' && showAttendeeSuggestions) {
+      setShowAttendeeSuggestions(false);
+      setAttendeeActiveIndex(-1);
+    }
+  };
+
+  const handleUpcomingClick = (ev, date) => {
+    setSelectedDate(date);
+    setSelectedEvent(ev);
+  };
+
+  const calendarFigmaView = (
+    <CalendarFigmaView
+      viewMode={viewMode}
+      onViewModeChange={setViewMode}
+      events={events}
+      selectedDate={selectedDate}
+      onSelectDate={setSelectedDate}
+      selectedEvent={selectedEvent}
+      onSelectEvent={setSelectedEvent}
+      locale={locale}
+      t={t}
+      onPrevMonth={handlePrevMonth}
+      onNextMonth={handleNextMonth}
+      onToday={handleToday}
+      onOpenCreate={() => openCreateModal()}
+      calendarWriteEnabled={CALENDAR_WRITE_ENABLED}
+      onRefresh={handleCalendarRefresh}
+      onJoinEvent={handleJoinEvent}
+      selectedDateEvents={selectedDateEvents}
+      upcomingMonthEvents={upcomingMonthEvents}
+      onUpcomingClick={handleUpcomingClick}
+      loading={feedLoading}
+      error={feedError}
+      onRetry={refetch}
+    />
+  );
 
   return (
     <>
-      <div className="min-h-screen flex">
-        <NavigationSidebar currentPage="Lịch" />
-        <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <div className="p-6 glass-strong border-b border-white/10">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-4xl font-black text-gradient mb-2">Lịch và Sự Kiện</h1>
-              <p className="text-gray-400">Quản lý meetings, deadlines và sự kiện</p>
+      <div className={`${FIGMA_PAGE_SHELL} h-full overflow-hidden`}>{calendarFigmaView}</div>
+
+      <Modal
+        isOpen={selectedEvent !== null}
+        onClose={() => setSelectedEvent(null)}
+        title={selectedEvent?.title}
+        size="lg"
+      >
+        {selectedEvent && (
+          <div className="space-y-4">
+            <div aria-hidden="true" className={`h-2 w-full rounded-full bg-gradient-to-r ${selectedEvent.color}`} />
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {renderModalCard(
+                <>
+                  <h4 className={modalHeading}>
+                    <Clock size={16} aria-hidden="true" className={modalIcon} />
+                    {t('calendar.sectionTime')}
+                  </h4>
+                  <div className={modalBody}>
+                    <div className={modalInfoRow}>
+                      <CalendarDays size={14} aria-hidden="true" className={modalIcon} />
+                      {selectedEvent.date}
+                    </div>
+                    <div className={modalInfoRow}>
+                      <AlarmClock size={14} aria-hidden="true" className={modalIcon} />
+                      {selectedEvent.time}
+                    </div>
+                    {selectedEvent.duration && (
+                      <div className={modalInfoRow}>
+                        <Timer size={14} aria-hidden="true" className={modalIcon} />
+                        {selectedEvent.duration}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {renderModalCard(
+                <>
+                  <h4 className={modalHeading}>
+                    <Info size={16} aria-hidden="true" className={modalIcon} />
+                    {t('calendar.sectionDetailBlock')}
+                  </h4>
+                  <div className={modalBody}>
+                    <div className={modalInfoRow}>
+                      <Pin size={14} aria-hidden="true" className={modalIcon} />
+                      {selectedEvent.kind === 'task'
+                        ? t('calendar.kindTaskDeadline')
+                        : selectedEvent.type === 'meeting'
+                          ? t('calendar.kindMeeting')
+                          : t('calendar.eventOrMeeting')}
+                    </div>
+                    {selectedEvent.location && (
+                      <div className={modalInfoRow}>
+                        <MapPin size={14} aria-hidden="true" className={modalIcon} />
+                        {selectedEvent.location}
+                      </div>
+                    )}
+                    {selectedEvent.attendees > 0 && (
+                      <div className={modalInfoRow}>
+                        <Users size={14} aria-hidden="true" className={modalIcon} />
+                        {t('calendar.peopleCount', { n: selectedEvent.attendees })}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
-            <div className="flex gap-3">
-              <div className="flex gap-2">
-                {['day', 'week', 'month'].map(v => (
+
+            {selectedEvent.type === 'meeting' &&
+              Array.isArray(selectedEvent.attendeeNames) &&
+              selectedEvent.attendeeNames.length > 0 &&
+              renderModalCard(
+                <>
+                  <h4 className={modalHeading}>
+                    <Users size={16} aria-hidden="true" className={modalIcon} />
+                    {t('calendar.attendeesSection', { n: selectedEvent.attendeeNames.length })}
+                  </h4>
+                  <ul className="m-0 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2">
+                    {selectedEvent.attendeeNames.map((name) => (
+                      <li key={name} className="flex items-center gap-2 rounded-lg border border-border bg-card p-2">
+                        <UserAvatar name={name} size="xs" />
+                        <span className="truncate text-sm font-semibold text-foreground">{name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
+            {renderModalCard(
+              <>
+                <h4 className={modalHeading}>
+                  <FileText size={16} aria-hidden="true" className={modalIcon} />
+                  {t('calendar.sectionDescription')}
+                </h4>
+                <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+                  {selectedEvent.description ||
+                    selectedEvent.raw?.description ||
+                    (selectedEvent.type === 'meeting' ? t('calendar.meetingHint') : t('calendar.taskHint'))}
+                </p>
+              </>
+            )}
+
+            <div className="flex flex-wrap gap-3">
+              {selectedEvent.type === 'meeting' && (() => {
+                const mj =
+                  selectedEvent.kind === 'meeting' && selectedEvent.raw
+                    ? getMeetingJoinState(selectedEvent.raw)
+                    : null;
+                const joinDisabled = Boolean(mj && !mj.joinEligible);
+                return (
+                  <GradientButton
+                    variant="primary"
+                    disabled={joinDisabled}
+                    onClick={() => {
+                      handleJoinEvent(selectedEvent);
+                      setSelectedEvent(null);
+                    }}
+                    className="min-w-[140px] flex-1"
+                  >
+                    {joinDisabled ? t('calendar.joinClosedBtn') : t('calendar.joinNow')}
+                  </GradientButton>
+                );
+              })()}
+              {selectedEvent.source !== 'api' && (
+                <GradientButton
+                  variant="secondary"
+                  onClick={() => {
+                    setSelectedEvent(null);
+                    openEditModal(selectedEvent);
+                  }}
+                  className="min-w-[140px] flex-1"
+                >
+                  {t('calendar.editEventBtn')}
+                </GradientButton>
+              )}
+              {selectedEvent.source !== 'api' && (
+                <button
+                  type="button"
+                  onClick={() => handleDeleteEvent(selectedEvent?.id, selectedEvent?.source)}
+                  className={adminDangerBtnClass('px-6 py-3')}
+                >
+                  {t('calendar.deleteEventBtn')}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={showCreateEventModal}
+        onClose={handleCreateModalClose}
+        title={editingEventId ? t('calendar.modalEditTitle') : t('calendar.modalCreateTitle')}
+        size="lg"
+      >
+        <div className="space-y-4 text-foreground">
+          <div>
+            <label htmlFor={fieldId('title')} className={formLabel}>
+              {t('calendar.labelEventTitle')}
+            </label>
+            <input
+              id={fieldId('title')}
+              type="text"
+              placeholder={t('calendar.phTitle')}
+              value={eventForm.title}
+              maxLength={EVENT_TITLE_MAX_LENGTH}
+              required
+              onChange={(e) => setEventForm((prev) => ({ ...prev, title: e.target.value }))}
+              className={formInput}
+            />
+          </div>
+
+          <fieldset className="m-0 min-w-0 border-0 p-0">
+            <legend className={formLabel}>{t('calendar.formTypeLegend')}</legend>
+            <div role="radiogroup" aria-label={t('calendar.formTypeLegend')} className="grid grid-cols-3 gap-2 sm:gap-3">
+              {EVENT_TYPE_OPTIONS.map(({ id, labelKey, Icon }, index) => {
+                const active = createType === id;
+                return (
                   <button
-                    key={v}
-                    onClick={() => setView(v)}
-                    className={`px-4 py-2 rounded-xl font-semibold transition-all ${
-                      view === v
-                        ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white'
-                        : 'glass hover:bg-white/10 text-gray-400'
+                    key={id}
+                    id={fieldId(`type-${id}`)}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    tabIndex={active ? 0 : -1}
+                    onClick={() => setCreateType(id)}
+                    onKeyDown={(e) => handleEventTypeKeyDown(e, index)}
+                    className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border px-3 py-3 text-sm font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:flex-row sm:gap-2 ${
+                      active
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border bg-card text-foreground hover:bg-muted'
                     }`}
                   >
-                    {v === 'day' ? 'Ngày' : v === 'week' ? 'Tuần' : 'Tháng'}
+                    <Icon size={18} aria-hidden="true" />
+                    <span>{t(labelKey)}</span>
                   </button>
-                ))}
-              </div>
-              <GradientButton 
-                variant="primary"
-                onClick={() => setShowCreateEventModal(true)}
-              >
-                <span className="text-xl mr-2">➕</span> Tạo Sự Kiện
-              </GradientButton>
+                );
+              })}
             </div>
-          </div>
+          </fieldset>
 
-          {/* Quick Stats */}
-          <div className="grid grid-cols-4 gap-4">
-            <GlassCard hover>
-              <div className="flex items-center gap-3">
-                <div className="text-3xl">📅</div>
-                <div>
-                  <div className="text-2xl font-black text-white">{todayEvents.length}</div>
-                  <div className="text-xs text-gray-400">Hôm nay</div>
-                </div>
-              </div>
-            </GlassCard>
-            <GlassCard hover>
-              <div className="flex items-center gap-3">
-                <div className="text-3xl">🔜</div>
-                <div>
-                  <div className="text-2xl font-black text-white">{upcomingEvents.length}</div>
-                  <div className="text-xs text-gray-400">Sắp tới</div>
-                </div>
-              </div>
-            </GlassCard>
-            <GlassCard hover>
-              <div className="flex items-center gap-3">
-                <div className="text-3xl">🎤</div>
-                <div>
-                  <div className="text-2xl font-black text-white">{events.filter(e => e.type === 'meeting').length}</div>
-                  <div className="text-xs text-gray-400">Meetings</div>
-                </div>
-              </div>
-            </GlassCard>
-            <GlassCard hover>
-              <div className="flex items-center gap-3">
-                <div className="text-3xl">⏰</div>
-                <div>
-                  <div className="text-2xl font-black text-white">{events.filter(e => e.type === 'deadline').length}</div>
-                  <div className="text-xs text-gray-400">Deadlines</div>
-                </div>
-              </div>
-            </GlassCard>
-          </div>
-        </div>
-
-        <div className="flex-1 p-6 overflow-y-auto overflow-x-visible scrollbar-gradient grid grid-cols-3 gap-6">
-          {/* Calendar View */}
-          <div className="col-span-2">
-            <GlassCard>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-white">Tháng {selectedDate.getMonth() + 1}, {selectedDate.getFullYear()}</h2>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => {
-                      const newDate = new Date(selectedDate);
-                      newDate.setMonth(newDate.getMonth() - 1);
-                      setSelectedDate(newDate);
-                      showToast(`Chuyển sang ${newDate.getMonth() + 1}/${newDate.getFullYear()}`, "info");
-                    }}
-                    className="glass px-3 py-2 rounded-lg hover:bg-white/10 transition-all"
-                  >◀</button>
-                  <button 
-                    onClick={() => {
-                      setSelectedDate(new Date());
-                      showToast("Quay về hôm nay", "info");
-                    }}
-                    className="glass px-4 py-2 rounded-lg hover:bg-white/10 transition-all font-semibold"
-                  >Hôm nay</button>
-                  <button 
-                    onClick={() => {
-                      const newDate = new Date(selectedDate);
-                      newDate.setMonth(newDate.getMonth() + 1);
-                      setSelectedDate(newDate);
-                      showToast(`Chuyển sang ${newDate.getMonth() + 1}/${newDate.getFullYear()}`, "info");
-                    }}
-                    className="glass px-3 py-2 rounded-lg hover:bg-white/10 transition-all"
-                  >▶</button>
-                </div>
-              </div>
-
-              {/* Calendar Grid */}
-              <div className="grid grid-cols-7 gap-2">
-                {['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'].map(day => (
-                  <div key={day} className="text-center text-sm font-bold text-gray-400 py-2">{day}</div>
-                ))}
-                {Array.from({length: 35}, (_, i) => {
-                  const dayNum = i - 2; // Start from day 1 on Wednesday
-                  const isToday = dayNum === 18;
-                  const hasEvent = events.some(e => parseInt(e.date.split('-')[2]) === dayNum);
-                  return (
-                    <div 
-                      key={i}
-                      onClick={() => {
-                        if (dayNum > 0 && dayNum <= 31) {
-                          const newDate = new Date(2026, 0, dayNum);
-                          setSelectedDate(newDate);
-                          const dayEvents = events.filter(e => parseInt(e.date.split('-')[2]) === dayNum);
-                          if (dayEvents.length > 0) {
-                            showToast(`${dayEvents.length} sự kiện vào ngày ${dayNum}/1/2026`, "info");
-                          }
-                        }
-                      }}
-                      className={`aspect-square glass rounded-lg p-2 cursor-pointer transition-all hover:scale-105 ${
-                        isToday ? 'bg-gradient-to-br from-purple-600 to-pink-600 text-white' :
-                        hasEvent ? 'hover:bg-white/10 border border-purple-500/50' :
-                        'hover:bg-white/5'
-                      } ${dayNum < 1 || dayNum > 31 ? 'opacity-30 cursor-default' : ''}`}
-                    >
-                      {dayNum > 0 && dayNum <= 31 && (
-                        <>
-                          <div className={`text-sm font-bold ${isToday ? 'text-white' : 'text-gray-300'}`}>{dayNum}</div>
-                          {hasEvent && (
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {events.filter(e => parseInt(e.date.split('-')[2]) === dayNum).slice(0, 2).map(e => (
-                                <div key={e.id} className="w-1 h-1 rounded-full bg-purple-400"></div>
-                              ))}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </GlassCard>
-          </div>
-
-          {/* Events Sidebar */}
-          <div className="space-y-6">
-            {/* Today's Events */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                <span>📅</span> Hôm Nay - {todayEvents.length} sự kiện
-              </h3>
-              <div className="space-y-3">
-                {todayEvents.map((event, idx) => (
-                  <GlassCard 
-                    key={event.id} 
-                    hover 
-                    className="animate-slideUp cursor-pointer" 
-                    style={{animationDelay: `${idx * 0.1}s`}}
-                    onClick={() => setSelectedEvent(event)}
-                  >
-                    <div className={`w-full h-1 rounded-full bg-gradient-to-r ${event.color} mb-3`}></div>
-                    <h4 className="font-bold text-white mb-2">{event.title}</h4>
-                    <div className="space-y-1 text-sm text-gray-400">
-                      <div className="flex items-center gap-2">
-                        <span>🕐</span>
-                        <span>{event.time}</span>
-                        {event.duration && <span>({event.duration})</span>}
-                      </div>
-                      {event.location && (
-                        <div className="flex items-center gap-2">
-                          <span>📍</span>
-                          <span>{event.location}</span>
-                        </div>
-                      )}
-                      {event.attendees && (
-                        <div className="flex items-center gap-2">
-                          <span>👥</span>
-                          <span>{event.attendees} người</span>
-                        </div>
-                      )}
-                    </div>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        showToast(event.type === 'meeting' ? 'Đang tham gia...' : 'Mở chi tiết...', 'info');
-                      }}
-                      className="w-full mt-3 py-2 glass rounded-lg hover:bg-white/10 transition-all text-sm font-semibold"
-                    >
-                      {event.type === 'meeting' ? 'Tham Gia' : 'Xem Chi Tiết'}
-                    </button>
-                  </GlassCard>
-                ))}
-              </div>
+              <label htmlFor={fieldId('date')} className={formLabel}>
+                {t('calendar.labelDate')}
+              </label>
+              <input
+                id={fieldId('date')}
+                type="date"
+                value={eventForm.date}
+                required
+                onChange={(e) => setEventForm((prev) => ({ ...prev, date: e.target.value }))}
+                className={formDateInput}
+              />
             </div>
-
-            {/* Upcoming Events */}
             <div>
-              <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                <span>🔜</span> Sắp Tới
-              </h3>
-              <div className="space-y-2">
-                {upcomingEvents.slice(0, 4).map((event, idx) => (
-                  <GlassCard 
-                    key={event.id} 
-                    hover 
-                    className="p-3 cursor-pointer"
-                    onClick={() => setSelectedEvent(event)}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${event.color} flex items-center justify-center text-xl flex-shrink-0`}>
-                        {event.type === 'meeting' ? '🎤' : '⏰'}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-white text-sm truncate">{event.title}</div>
-                        <div className="text-xs text-gray-400">{event.date} • {event.time}</div>
-                      </div>
-                    </div>
-                  </GlassCard>
-                ))}
-              </div>
+              <label htmlFor={fieldId('time')} className={formLabel}>
+                {t('calendar.labelTime')}
+              </label>
+              <input
+                id={fieldId('time')}
+                type="time"
+                value={eventForm.time}
+                required
+                onChange={(e) => setEventForm((prev) => ({ ...prev, time: e.target.value }))}
+                className={formDateInput}
+              />
             </div>
           </div>
-        </div>
-      </div>
-    </div>
 
-    {/* Event Detail Modal */}
-    <Modal 
-      isOpen={selectedEvent !== null} 
-      onClose={() => setSelectedEvent(null)}
-      title={selectedEvent?.title}
-      size="lg"
-    >
-      {selectedEvent && (
-        <div className="space-y-4">
-          {/* Event Header */}
-          <div className={`w-full h-2 rounded-full bg-gradient-to-r ${selectedEvent.color}`}></div>
-          
-          {/* Event Info */}
-          <div className="grid grid-cols-2 gap-4">
-            <GlassCard>
-              <h4 className="font-bold text-white mb-3 flex items-center gap-2">
-                <span>🕐</span> Thời Gian
-              </h4>
-              <div className="space-y-2 text-sm text-gray-300">
-                <div>📅 {selectedEvent.date}</div>
-                <div>⏰ {selectedEvent.time}</div>
-                {selectedEvent.duration && <div>⌛ {selectedEvent.duration}</div>}
+          {isMeetingType && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 motion-safe:animate-fade-in-fast">
+              <div>
+                <label htmlFor={fieldId('duration')} className={formLabel}>
+                  {t('calendar.labelDuration')}
+                </label>
+                <select
+                  id={fieldId('duration')}
+                  value={eventForm.duration}
+                  onChange={(e) => setEventForm((prev) => ({ ...prev, duration: e.target.value }))}
+                  className={formInput}
+                >
+                  {DURATION_MINUTE_OPTIONS.map((minutes) => (
+                    <option key={minutes} value={minutes}>
+                      {durationLabelForMinutes(minutes, t)}
+                    </option>
+                  ))}
+                </select>
               </div>
-            </GlassCard>
-
-            <GlassCard>
-              <h4 className="font-bold text-white mb-3 flex items-center gap-2">
-                <span>ℹ️</span> Chi Tiết
-              </h4>
-              <div className="space-y-2 text-sm text-gray-300">
-                <div>📌 {selectedEvent.type === 'meeting' ? 'Meeting' : 'Deadline'}</div>
-                {selectedEvent.location && <div>📍 {selectedEvent.location}</div>}
-                {selectedEvent.attendees && <div>👥 {selectedEvent.attendees} người</div>}
+              <div>
+                <label htmlFor={fieldId('location')} className={formLabel}>
+                  {t('calendar.labelLocation')}
+                </label>
+                <input
+                  id={fieldId('location')}
+                  type="text"
+                  placeholder={t('calendar.phVoice')}
+                  value={eventForm.location}
+                  maxLength={EVENT_LOCATION_MAX_LENGTH}
+                  onChange={(e) => setEventForm((prev) => ({ ...prev, location: e.target.value }))}
+                  className={formInput}
+                />
               </div>
-            </GlassCard>
-          </div>
-
-          {/* Attendees List */}
-          {selectedEvent.attendees && selectedEvent.type === 'meeting' && (
-            <GlassCard>
-              <h4 className="font-bold text-white mb-3 flex items-center gap-2">
-                <span>👥</span> Người Tham Gia ({selectedEvent.attendees})
-              </h4>
-              <div className="grid grid-cols-2 gap-2">
-                {['Sarah Chen', 'Mike Ross', 'Emma Wilson', 'David Kim', 'Lisa Park', 'Tom Zhang', 'Anna Lee', 'John Doe'].slice(0, selectedEvent.attendees).map((name, idx) => (
-                  <div key={idx} className="flex items-center gap-2 p-2 glass rounded-lg">
-                    <div className={`w-8 h-8 rounded-full bg-gradient-to-br ${['from-purple-600 to-pink-600', 'from-blue-500 to-cyan-500', 'from-green-500 to-emerald-500', 'from-orange-500 to-red-500'][idx % 4]} flex items-center justify-center text-xs font-bold`}>
-                      {name.split(' ').map(n => n[0]).join('')}
-                    </div>
-                    <div className="text-sm font-semibold text-white">{name}</div>
-                  </div>
-                ))}
-              </div>
-            </GlassCard>
+            </div>
           )}
 
-          {/* Description */}
-          <GlassCard>
-            <h4 className="font-bold text-white mb-3 flex items-center gap-2">
-              <span>📝</span> Mô Tả
-            </h4>
-            <p className="text-gray-300 text-sm">
-              {selectedEvent.type === 'meeting' 
-                ? 'Cuộc họp để thảo luận về tiến độ dự án và các vấn đề cần giải quyết. Vui lòng chuẩn bị báo cáo tiến độ và danh sách câu hỏi.'
-                : 'Hoàn thành và submit tất cả deliverables trước deadline. Đảm bảo đã review và test kỹ lưỡng.'}
-            </p>
-          </GlassCard>
+          <div>
+            <label htmlFor={fieldId('description')} className={formLabel}>
+              {t('calendar.labelDesc')}
+            </label>
+            <textarea
+              id={fieldId('description')}
+              rows={4}
+              placeholder={t('calendar.phDesc')}
+              value={eventForm.description}
+              maxLength={EVENT_DESCRIPTION_MAX_LENGTH}
+              onChange={(e) => setEventForm((prev) => ({ ...prev, description: e.target.value }))}
+              className={`${formInput} resize-none`}
+            />
+          </div>
 
-          {/* Action Buttons */}
+          {isMeetingType && (
+            <div className="motion-safe:animate-fade-in-fast">
+              <label htmlFor={fieldId('attendees')} className={formLabel}>
+                {t('calendar.labelAttendees')}
+              </label>
+              <div className="relative flex gap-2">
+                <input
+                  id={fieldId('attendees')}
+                  type="text"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={isAttendeeListOpen}
+                  aria-controls={attendeeListboxId}
+                  aria-activedescendant={
+                    isAttendeeListOpen && attendeeActiveIndex >= 0 ? attendeeOptionId(attendeeActiveIndex) : undefined
+                  }
+                  aria-label={t('calendar.attendeeSearchAria')}
+                  placeholder={t('calendar.phAttendees')}
+                  value={eventForm.attendeesText}
+                  maxLength={ATTENDEE_QUERY_MAX_LENGTH}
+                  onFocus={() => setShowAttendeeSuggestions(true)}
+                  onBlur={() => {
+                    setShowAttendeeSuggestions(false);
+                    setAttendeeActiveIndex(-1);
+                  }}
+                  onChange={(e) => {
+                    setEventForm((prev) => ({ ...prev, attendeesText: e.target.value }));
+                    setShowAttendeeSuggestions(true);
+                    setAttendeeActiveIndex(-1);
+                  }}
+                  onKeyDown={handleAttendeeKeyDown}
+                  className={`flex-1 ${formInput}`}
+                />
+                <button type="button" className={adminSecondaryBtnClass('shrink-0')} onClick={handleAddAttendees}>
+                  {t('calendar.addAttendeeBtn')}
+                </button>
+                <ul
+                  id={attendeeListboxId}
+                  role="listbox"
+                  aria-label={t('calendar.attendeeSuggestionsAria')}
+                  hidden={!isAttendeeListOpen}
+                  className="absolute left-0 right-[6.5rem] top-[calc(100%+0.35rem)] z-20 m-0 max-h-52 list-none overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg motion-safe:animate-fade-in-fast"
+                >
+                  {filteredAttendeeSuggestions.map((item, index) => {
+                    const active = index === attendeeActiveIndex;
+                    return (
+                      <li
+                        key={item.id}
+                        id={attendeeOptionId(index)}
+                        role="option"
+                        aria-selected={active}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => addAttendeeName(item.label)}
+                        className={`flex cursor-pointer items-center justify-between rounded-lg px-2.5 py-2 text-sm text-foreground ${
+                          active ? 'bg-muted' : 'hover:bg-muted'
+                        }`}
+                      >
+                        <span className="truncate">{item.label}</span>
+                        <span className="ml-2 truncate text-xs text-muted-foreground">{item.sub || ''}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+              {attendeeNames.length > 0 && (
+                <ul className="m-0 mt-3 flex list-none flex-wrap gap-2 p-0">
+                  {attendeeNames.map((name) => (
+                    <li key={name}>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAttendee(name)}
+                        aria-label={t('calendar.attendeeRemoveAria', { name })}
+                        className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors duration-150 hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+                      >
+                        {name}
+                        <X size={12} aria-hidden="true" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-3">
-            {selectedEvent.type === 'meeting' && (
-              <GradientButton 
-                variant="primary" 
-                onClick={() => {
-                  showToast("Đang tham gia meeting...", "success");
-                  setSelectedEvent(null);
-                }}
-                className="flex-1"
-              >
-                🎤 Tham Gia Ngay
-              </GradientButton>
-            )}
-            <GradientButton 
-              variant="secondary" 
-              onClick={() => {
-                showToast("Đã chỉnh sửa sự kiện", "success");
-                setSelectedEvent(null);
-              }}
-              className="flex-1"
-            >
-              ✏️ Chỉnh Sửa
+            <GradientButton variant="primary" onClick={handleSaveEvent} className="flex-1">
+              {editingEventId ? t('calendar.saveEvent') : t('calendar.createEvent')}
             </GradientButton>
-            <button 
-              onClick={() => {
-                if (confirm('Xóa sự kiện này?')) {
-                  showToast("Đã xóa sự kiện", "success");
-                  setSelectedEvent(null);
-                }
-              }}
-              className="glass px-6 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold text-red-400"
-            >
-              🗑️ Xóa
+            <button type="button" onClick={closeCreateModal} className={adminSecondaryBtnClass('shrink-0 px-4 py-3')}>
+              {t('calendar.cancelBtn')}
             </button>
           </div>
         </div>
-      )}
-    </Modal>
+      </Modal>
 
-    {/* Create Event Modal */}
-    <Modal 
-      isOpen={showCreateEventModal} 
-      onClose={() => setShowCreateEventModal(false)}
-      title="Tạo Sự Kiện Mới"
-      size="lg"
-    >
-      <div className="space-y-4">
-        {/* Event Title */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-400 mb-2">
-            Tiêu Đề Sự Kiện
-          </label>
-          <input 
-            type="text"
-            placeholder="Nhập tiêu đề..."
-            className="w-full glass px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-purple-500/50 focus:outline-none text-white placeholder-gray-500 transition-all"
-          />
-        </div>
-
-        {/* Event Type */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-400 mb-2">
-            Loại Sự Kiện
-          </label>
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { id: 'meeting', label: 'Meeting', icon: '🎤' },
-              { id: 'deadline', label: 'Deadline', icon: '⏰' },
-              { id: 'reminder', label: 'Nhắc Nhở', icon: '🔔' }
-            ].map(type => (
-              <button
-                key={type.id}
-                className="glass px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold flex items-center justify-center gap-2"
-              >
-                <span>{type.icon}</span>
-                <span>{type.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Date & Time */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-semibold text-gray-400 mb-2">
-              Ngày
-            </label>
-            <input 
-              type="date"
-              className="w-full glass px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-purple-500/50 focus:outline-none text-white transition-all"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-gray-400 mb-2">
-              Giờ
-            </label>
-            <input 
-              type="time"
-              className="w-full glass px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-purple-500/50 focus:outline-none text-white transition-all"
-            />
-          </div>
-        </div>
-
-        {/* Duration & Location */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-semibold text-gray-400 mb-2">
-              Thời Lượng
-            </label>
-            <select className="w-full glass px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white">
-              <option>15 phút</option>
-              <option>30 phút</option>
-              <option>45 phút</option>
-              <option>1 giờ</option>
-              <option>1.5 giờ</option>
-              <option>2 giờ</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-gray-400 mb-2">
-              Địa Điểm
-            </label>
-            <input 
-              type="text"
-              placeholder="Voice Room hoặc link..."
-              className="w-full glass px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-purple-500/50 focus:outline-none text-white placeholder-gray-500 transition-all"
-            />
-          </div>
-        </div>
-
-        {/* Description */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-400 mb-2">
-            Mô Tả
-          </label>
-          <textarea 
-            rows={4}
-            placeholder="Nhập mô tả chi tiết..."
-            className="w-full glass px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-purple-500/50 focus:outline-none text-white placeholder-gray-500 transition-all resize-none"
-          ></textarea>
-        </div>
-
-        {/* Attendees */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-400 mb-2">
-            Người Tham Gia
-          </label>
-          <div className="flex gap-2">
-            <input 
-              type="text"
-              placeholder="Thêm người tham gia..."
-              className="flex-1 glass px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:border-purple-500/50 focus:outline-none text-white placeholder-gray-500 transition-all"
-            />
-            <button className="glass px-4 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold">
-              ➕ Thêm
-            </button>
-          </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex gap-3">
-          <GradientButton 
-            variant="primary" 
-            onClick={() => {
-              showToast("Đã tạo sự kiện mới!", "success");
-              setShowCreateEventModal(false);
-            }}
-            className="flex-1"
-          >
-            ✅ Tạo Sự Kiện
-          </GradientButton>
-          <button 
-            onClick={() => setShowCreateEventModal(false)}
-            className="glass px-6 py-3 rounded-xl hover:bg-white/10 transition-all font-semibold"
-          >
-            Hủy
-          </button>
-        </div>
-      </div>
-    </Modal>
-
-    {/* Toast */}
-    {toast && (
-      <Toast 
-        message={toast.message} 
-        type={toast.type}
-        onClose={() => setToast(null)}
+      <ConfirmDialog
+        isOpen={deleteConfirmEventId != null}
+        onClose={() => setDeleteConfirmEventId(null)}
+        onConfirm={confirmDeleteLocalEvent}
+        title={t('calendar.confirmDeleteTitle')}
+        message={t('calendar.confirmDeleteMsg')}
+        confirmText={t('calendar.confirmDeleteOk')}
+        cancelText={t('calendar.cancelBtn')}
+        variant="danger"
       />
-    )}
     </>
   );
 }
-
-// ============= ANALYTICS PAGE =============
 
 export default CalendarPage;

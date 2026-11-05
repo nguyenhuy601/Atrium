@@ -1,0 +1,237 @@
+/**
+ * Project deliveryPhase — orthogonal to Project.status lifecycle.
+ * SSOT: docs/adr/0001-project-delivery-phase-and-req-analysis.md
+ */
+
+const DELIVERY_PHASES = Object.freeze([
+  'requirement_analysis',
+  'delivery_planning',
+  'development',
+  'qa_uat',
+  'release_handover',
+]);
+
+/** Missing / legacy documents → keep Development hub UX */
+const DEFAULT_DELIVERY_PHASE_EXISTING = 'development';
+
+/** New Project.create default */
+const DEFAULT_DELIVERY_PHASE_NEW = 'requirement_analysis';
+
+const RELEASE_HANDOVER_CHECKLIST = Object.freeze([
+  Object.freeze({ id: 'release_notes', labelKey: 'project.releaseHandover.releaseNotes' }),
+  Object.freeze({ id: 'deployment_verified', labelKey: 'project.releaseHandover.deploymentVerified' }),
+  Object.freeze({ id: 'acceptance_signed_off', labelKey: 'project.releaseHandover.acceptanceSignedOff' }),
+  Object.freeze({ id: 'handover_completed', labelKey: 'project.releaseHandover.handoverCompleted' }),
+]);
+
+const PHASE_HOME_MODULE = Object.freeze({
+  requirement_analysis: 'overview',
+  delivery_planning: 'overview',
+  /** Phase 2 — Board là mặt phẳng thực thi chính */
+  development: 'board',
+  qa_uat: 'board',
+  release_handover: 'overview',
+});
+
+/**
+ * Modules allowed per deliveryPhase.
+ * development = current suite post-select menu 1:1.
+ */
+const DEVELOPMENT_MODULES = Object.freeze([
+  'overview',
+  'list',
+  'planning',
+  'board',
+  'chat',
+  'timeline',
+  'change-requests',
+  'test-cases',
+  'members',
+  'files',
+  'activity',
+  'settings',
+  'calendar',
+  'documents',
+]);
+
+const COLLAB_MIN = Object.freeze(['chat', 'calendar', 'documents', 'settings', 'members']);
+
+const PLANNING_SUBMODULES = Object.freeze([
+  'planning-overview',
+  'planning-wbs',
+  'planning-architecture',
+  'planning-resources',
+  'planning-dependencies',
+  'planning-schedule',
+  'planning-milestones',
+  'planning-releases',
+  'planning-risks',
+  'planning-approval',
+  /** nested path aliases (FE path planning/wbs) */
+  'planning/overview',
+  'planning/wbs',
+  'planning/architecture',
+  'planning/resources',
+  'planning/resources/wbs',
+  'planning/resources/effort',
+  'planning/resources/match',
+  'planning/resources/capacity',
+  'planning/resources/schedule',
+  'planning/dependencies',
+  'planning/schedule',
+  'planning/milestones',
+  'planning/releases',
+  'planning/risks',
+  'planning/approval',
+]);
+
+const REQUIREMENT_ANALYSIS_MODULES = Object.freeze([
+  'overview',
+  'customer-documents',
+  'analysis-bg',
+  'analysis-br',
+  'analysis-bpm',
+  'analysis-fr',
+  'analysis-uc',
+  'analysis-nfr',
+  'analysis-scope',
+  'traceability',
+  'analysis-reviews',
+  'srs-baselines',
+  /** Planning visible but locked at FE until Start Planning */
+  ...PLANNING_SUBMODULES,
+  ...COLLAB_MIN,
+]);
+
+const DELIVERY_PLANNING_MODULES = Object.freeze([
+  'overview',
+  'customer-documents',
+  'analysis-bg',
+  'analysis-br',
+  'analysis-bpm',
+  'analysis-fr',
+  'analysis-uc',
+  'analysis-nfr',
+  'analysis-scope',
+  'traceability',
+  'analysis-reviews',
+  'srs-baselines',
+  'customer-baselines',
+  'customer-planning',
+  'delivery-planning',
+  ...PLANNING_SUBMODULES,
+  'planning',
+  'timeline',
+  ...COLLAB_MIN,
+  'activity',
+]);
+
+const QA_UAT_MODULES = Object.freeze([
+  'overview',
+  'list',
+  'board',
+  'test-cases',
+  'change-requests',
+  'files',
+  ...COLLAB_MIN,
+  'activity',
+]);
+
+const RELEASE_HANDOVER_MODULES = Object.freeze([
+  'overview',
+  'handover',
+  'deploy-evidence',
+  'release-notes',
+  'list',
+  'board',
+  'test-cases',
+  'change-requests',
+  'files',
+  ...COLLAB_MIN,
+  'activity',
+]);
+
+const PHASE_NAV_MODULES = Object.freeze({
+  requirement_analysis: REQUIREMENT_ANALYSIS_MODULES,
+  delivery_planning: DELIVERY_PLANNING_MODULES,
+  development: DEVELOPMENT_MODULES,
+  qa_uat: QA_UAT_MODULES,
+  release_handover: RELEASE_HANDOVER_MODULES,
+});
+
+/** Adjacent transitions (PM may move ±1 or any — MVP allow any known phase) */
+const DELIVERY_PHASE_TRANSITIONS = Object.freeze({
+  requirement_analysis: ['delivery_planning', 'development'],
+  delivery_planning: ['requirement_analysis', 'development', 'qa_uat'],
+  development: ['delivery_planning', 'qa_uat', 'requirement_analysis'],
+  qa_uat: ['development', 'release_handover', 'delivery_planning'],
+  release_handover: ['qa_uat', 'development'],
+});
+
+function coerceDeliveryPhase(raw, { missingAsExisting = true } = {}) {
+  const value = String(raw || '')
+    .trim()
+    .toLowerCase();
+  if (!value) {
+    return missingAsExisting ? DEFAULT_DELIVERY_PHASE_EXISTING : DEFAULT_DELIVERY_PHASE_NEW;
+  }
+  if (DELIVERY_PHASES.includes(value)) return value;
+  return null;
+}
+
+function normalizeModuleKey(moduleKey) {
+  const mod = String(moduleKey || '')
+    .trim()
+    .toLowerCase();
+  if (mod.startsWith('planning/') || mod.startsWith('planning-')) return mod;
+  return mod;
+}
+
+function isModuleAllowedForPhase(moduleKey, deliveryPhase) {
+  const phase = coerceDeliveryPhase(deliveryPhase) || DEFAULT_DELIVERY_PHASE_EXISTING;
+  const allowed = PHASE_NAV_MODULES[phase] || DEVELOPMENT_MODULES;
+  const mod = normalizeModuleKey(moduleKey);
+  return allowed.includes(mod);
+}
+
+function phaseHomeModule(deliveryPhase) {
+  const phase = coerceDeliveryPhase(deliveryPhase) || DEFAULT_DELIVERY_PHASE_EXISTING;
+  return PHASE_HOME_MODULE[phase] || 'overview';
+}
+
+function canTransitionDeliveryPhase(from, to) {
+  const a = coerceDeliveryPhase(from);
+  const b = coerceDeliveryPhase(to, { missingAsExisting: false });
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const next = DELIVERY_PHASE_TRANSITIONS[a] || [];
+  return next.includes(b);
+}
+
+function listForwardPhases(from) {
+  const phase = coerceDeliveryPhase(from, { missingAsExisting: false });
+  if (!phase) return [];
+  const index = DELIVERY_PHASES.indexOf(phase);
+  return DELIVERY_PHASES.slice(index + 1);
+}
+
+module.exports = {
+  DELIVERY_PHASES,
+  DEFAULT_DELIVERY_PHASE_EXISTING,
+  DEFAULT_DELIVERY_PHASE_NEW,
+  RELEASE_HANDOVER_CHECKLIST,
+  PHASE_HOME_MODULE,
+  DEVELOPMENT_MODULES,
+  REQUIREMENT_ANALYSIS_MODULES,
+  DELIVERY_PLANNING_MODULES,
+  PLANNING_SUBMODULES,
+  QA_UAT_MODULES,
+  RELEASE_HANDOVER_MODULES,
+  PHASE_NAV_MODULES,
+  DELIVERY_PHASE_TRANSITIONS,
+  coerceDeliveryPhase,
+  isModuleAllowedForPhase,
+  phaseHomeModule,
+  canTransitionDeliveryPhase,
+  listForwardPhases,
+};

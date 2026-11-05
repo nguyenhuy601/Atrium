@@ -2,15 +2,15 @@
    SOCKETCONTEXT.JSX - SOCKET.IO MANAGEMENT
    Quản lý WebSocket connection cho realtime features
    - Chat realtime
-   - Online users tracking  
+   - Online users tracking
    - Voice chat signaling
    - Notifications realtime
-   
-   Kết nối đến: chat-system-service (port 4002)
+
+   Kết nối: API Gateway hoặc socket-service (VITE_SOCKET_DIRECT_URL) + namespace /chat — không qua chat-service :3006
 ======================================== */
 
 // Import hooks để build context
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 // Import Socket.IO client để kết nối WebSocket
 // io: function tạo socket connection
@@ -19,6 +19,9 @@ import { io } from 'socket.io-client';
 // Import useAuth để lấy user info và token
 // Cần token để authenticate socket connection
 import { useAuth } from './AuthContext';
+import { getResolvedBearerToken } from '../utils/tokenStorage';
+import { isLandingEmbedActive } from '../utils/landingEmbedMode';
+import { resolveAppOrigin } from '../utils/browserOrigin';
 
 // Tạo SocketContext
 const SocketContext = createContext(null);
@@ -30,7 +33,7 @@ const SocketContext = createContext(null);
    Component nào cần realtime features → dùng hook này
    VD: ChatPage cần emit message và listen new messages
 ======================================== */
-export const useSocket = () => {
+function useSocket() {
   const context = useContext(SocketContext);
   
   if (!context) {
@@ -38,28 +41,139 @@ export const useSocket = () => {
   }
   
   return context;
-};
+}
+
+// Export useSocket để dùng trong components
+export { useSocket };
 
 /* ========================================
    SOCKET SERVER URL
-   - Lấy từ .env file: VITE_SOCKET_URL
-   - Fallback: http://localhost:4002
-   - Production: https://your-api.com/socket
+   - Dev: mặc định cùng origin Vite (5173) + proxy /socket.io → :3017 (vite.config.js). VITE_SOCKET_URL không dùng trừ khi VITE_SOCKET_USE_GATEWAY=true.
+   - VITE_SOCKET_DIRECT_URL: nối thẳng socket-service (vd. http://127.0.0.1:3017), bỏ qua proxy Vite.
+   - VITE_SOCKET_URL + VITE_SOCKET_USE_GATEWAY: test Socket qua API Gateway trong dev.
+   - Production: VITE_SOCKET_URL hoặc mặc định http://localhost:3000
+   - Namespace /chat → khớp socket-service (io.of('/chat'))
 ======================================== */
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:4002';
+const DIRECT_RAW = import.meta.env.VITE_SOCKET_DIRECT_URL;
+const DIRECT = DIRECT_RAW && String(DIRECT_RAW).trim() ? String(DIRECT_RAW).trim() : '';
+const GATEWAY_URL_RAW = import.meta.env.VITE_SOCKET_URL;
+const GATEWAY_URL =
+  GATEWAY_URL_RAW && String(GATEWAY_URL_RAW).trim() ? String(GATEWAY_URL_RAW).trim() : '';
+const USE_GATEWAY_SOCKET =
+  import.meta.env.VITE_SOCKET_USE_GATEWAY === '1' ||
+  import.meta.env.VITE_SOCKET_USE_GATEWAY === 'true';
+const DEV_GATEWAY_PORT = String(import.meta.env.VITE_GATEWAY_PORT || '3000').trim();
+
+const SOCKET_NAMESPACE = '/chat';
+const SOCKET_IO_PATH = '/socket.io';
+
+/**
+ * Dev: ưu tiên cùng origin với Vite (vd. http://localhost:5173) — GET /socket.io được vite proxy → :3017,
+ * tránh 404 khi gateway :3000 chưa proxy /socket.io hoặc SOCKET_SERVICE_URL sai.
+ * Bật qua gateway trong dev: VITE_SOCKET_USE_GATEWAY=true + VITE_SOCKET_URL=http://localhost:3000
+ * Hoặc: VITE_SOCKET_DIRECT_URL=http://127.0.0.1:3017 (bỏ qua proxy Vite).
+ * Production: gateway hoặc VITE_SOCKET_URL / mặc định :3000.
+ */
+function getDevSocketBaseUrl() {
+  if (typeof window === 'undefined' || !window.location?.origin) {
+    return 'http://127.0.0.1:3017';
+  }
+  return window.location.origin;
+}
+
+/** Socket qua gateway — same-origin (Nginx https://atrium.dev), không :3000 trên host LAN. */
+function getAutoGatewayBaseUrl() {
+  const fromBrowser = resolveAppOrigin();
+  if (fromBrowser) return fromBrowser;
+  if (typeof window === 'undefined' || !window.location) {
+    return `http://127.0.0.1:${DEV_GATEWAY_PORT || '3000'}`;
+  }
+  const protocol = window.location.protocol || 'http:';
+  const hostname = window.location.hostname || '127.0.0.1';
+  return `${protocol}//${hostname}:${DEV_GATEWAY_PORT || '3000'}`;
+}
+
+const SOCKET_BASE_URL =
+  DIRECT ||
+  (USE_GATEWAY_SOCKET && !GATEWAY_URL ? getAutoGatewayBaseUrl() : '') ||
+  (import.meta.env.DEV && !USE_GATEWAY_SOCKET ? getDevSocketBaseUrl() : '') ||
+  GATEWAY_URL ||
+  getAutoGatewayBaseUrl() ||
+  (import.meta.env.DEV ? 'http://127.0.0.1:3017' : 'http://localhost:3000');
+
+/** Base URL (origin) + namespace `/chat` cho socket-service. */
+function toNamespaceUrl(baseUrl, namespace) {
+  const trimmed = String(baseUrl || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return namespace;
+  return `${trimmed}${namespace.startsWith('/') ? '' : '/'}${namespace}`;
+}
+
+/**
+ * IMPORTANT:
+ * - `namespace` là `/chat`
+ * - `path` của Engine.IO phải luôn là `/socket.io`
+ * Nếu nhét `/chat` vào pathname mà không set `path`, client có thể gọi `/chat/socket.io` → 404.
+ */
+const SOCKET_NAMESPACE_URL =
+  import.meta.env.DEV && !DIRECT && !USE_GATEWAY_SOCKET
+    ? SOCKET_NAMESPACE // same-origin (Vite proxy /socket.io)
+    : toNamespaceUrl(SOCKET_BASE_URL, SOCKET_NAMESPACE);
+
+if (import.meta.env.DEV) {
+  console.log('🔌 [Socket] Configuration:');
+  let socketModeLabel = 'default';
+  if (DIRECT) socketModeLabel = 'direct (VITE_SOCKET_DIRECT_URL)';
+  else if (USE_GATEWAY_SOCKET && GATEWAY_URL) {
+    socketModeLabel = 'via gateway (VITE_SOCKET_USE_GATEWAY + VITE_SOCKET_URL)';
+  } else if (USE_GATEWAY_SOCKET && import.meta.env.DEV) {
+    socketModeLabel = 'via gateway (auto from browser origin/host)';
+  } else if (typeof window !== 'undefined' && window.location?.origin === SOCKET_BASE_URL) {
+    socketModeLabel = 'same-origin + Vite proxy /socket.io → :3017';
+  } else if (import.meta.env.DEV) {
+    socketModeLabel = 'direct (dev fallback → 127.0.0.1:3017)';
+  }
+  console.log('   Mode:', socketModeLabel);
+  console.log('   Base URL:', SOCKET_BASE_URL);
+  console.log('   Namespace URL:', SOCKET_NAMESPACE_URL);
+  console.log('   Engine.IO path:', SOCKET_IO_PATH);
+  if (DIRECT) {
+    console.log('   VITE_SOCKET_DIRECT_URL:', DIRECT);
+  } else if (USE_GATEWAY_SOCKET && GATEWAY_URL) {
+    console.log('   VITE_SOCKET_URL:', GATEWAY_URL);
+  } else if (USE_GATEWAY_SOCKET && import.meta.env.DEV) {
+    console.log('   VITE_SOCKET_URL:', '(auto from window.location.origin/hostname)');
+    console.log('   VITE_GATEWAY_PORT:', DEV_GATEWAY_PORT || '3000');
+  } else if (GATEWAY_URL && !import.meta.env.DEV) {
+    console.log('   VITE_SOCKET_URL:', GATEWAY_URL);
+  } else if (import.meta.env.DEV) {
+    console.log(
+      '   (dev: VITE_SOCKET_URL bị bỏ qua trừ khi VITE_SOCKET_USE_GATEWAY=true; cần socket-service :3017 hoặc proxy Vite)'
+    );
+  } else {
+    console.log('   VITE_SOCKET_URL:', '(default http://localhost:3000)');
+  }
+  console.log('');
+}
 
 /* ========================================
    SOCKETPROVIDER COMPONENT
    Wrap trong main.jsx (bên trong AuthProvider)
    Tự động connect socket khi user login
 ======================================== */
-export const SocketProvider = ({ children }) => {
+function SocketProvider({ children }) {
   /* ----- GET USER INFO TỪ AUTHCONTEXT ----- */
   
   // Lấy user và isAuthenticated từ AuthContext
   // Cần user để gửi user info qua socket
   // Chỉ connect socket khi isAuthenticated = true
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, accessToken } = useAuth();
+
+  /** Chỉ id ổn định — tránh reconnect mỗi render khi object `user` đổi tham chiếu */
+  const socketUserKey = useMemo(() => {
+    if (!user) return '';
+    const v = user.userId ?? user._id ?? user.id;
+    return v != null && v !== '' ? String(v).trim() : '';
+  }, [user]);
   
   /* ----- STATE MANAGEMENT ----- */
   
@@ -68,6 +182,9 @@ export const SocketProvider = ({ children }) => {
   
   // connected: trạng thái kết nối (true/false)
   const [connected, setConnected] = useState(false);
+  
+  // connectionError: lỗi kết nối (null hoặc error object)
+  const [connectionError, setConnectionError] = useState(null);
   
   // onlineUsers: danh sách user IDs đang online
   // Server emit 'users:online' → update list này
@@ -85,21 +202,23 @@ export const SocketProvider = ({ children }) => {
      → Re-run khi user login/logout
   ======================================== */
   useEffect(() => {
-    // Chỉ connect khi user đã login
-    if (isAuthenticated && user) {
-      // Lấy token từ localStorage để authenticate
-      const token = localStorage.getItem('token');
+    // Chỉ connect khi user đã login và đã có id ổn định
+    const token = getResolvedBearerToken();
+    if (isAuthenticated && socketUserKey && token) {
+      // accessToken trong deps — reconnect sau auto-refresh JWT (handshake auth không tự cập nhật)
       
       /* ----- TẠO SOCKET CONNECTION ----- */
-      const newSocket = io(SOCKET_URL, {
+      const newSocket = io(SOCKET_NAMESPACE_URL, {
         // auth: gửi token lên server để xác thực
         // Server sẽ verify token và lấy user info
         auth: { token },
         
-        // transports: thử websocket trước, fallback sang polling
-        // websocket: nhanh hơn, realtime hơn
-        // polling: backup nếu websocket bị chặn (firewall)
-        transports: ['websocket', 'polling'],
+        // Polling trước → ổn định qua API Gateway (HTTP proxy), rồi upgrade WebSocket (server.on('upgrade')).
+        // Thử websocket trước dễ gây cảnh báo Firefox khi reload / React StrictMode (socket cũ bị hủy giữa chừng).
+        transports: ['polling', 'websocket'],
+
+        // Engine.IO path (phải là /socket.io) — giúp chạy đúng khi URL là /chat (namespace)
+        path: SOCKET_IO_PATH,
         
         // reconnection: true = auto reconnect nếu disconnect
         reconnection: true,
@@ -115,26 +234,57 @@ export const SocketProvider = ({ children }) => {
       
       // Event: 'connect' - khi kết nối thành công
       newSocket.on('connect', () => {
-        // In socket ID ra console để debug
-        console.log('Socket connected:', newSocket.id);
+        console.log('✅ [Socket] Connected successfully');
+        console.log('   Socket ID:', newSocket.id);
+        console.log('   URL:', SOCKET_NAMESPACE_URL);
+        console.log('   Path:', SOCKET_IO_PATH);
+        console.log('   Transport:', newSocket.io.engine.transport.name);
         
-        // Set connected = true → components biết socket ready
         setConnected(true);
+        setConnectionError(null); // Clear error khi connect success
       });
 
       // Event: 'disconnect' - khi mất kết nối
-      newSocket.on('disconnect', () => {
-        console.log('Socket disconnected');
+      newSocket.on('disconnect', (reason) => {
+        console.warn('⚠️ [Socket] Disconnected');
+        console.warn('   Reason:', reason);
         
-        // Set connected = false
-        // Socket sẽ tự động reconnect (vì reconnection: true)
         setConnected(false);
+        
+        // Nếu disconnect vì server error → log chi tiết
+        if (reason === 'io server disconnect') {
+          console.error('   Server forced disconnect. Check server logs.');
+          setConnectionError(new Error('Server forced disconnect'));
+        } else if (reason === 'io client disconnect') {
+          console.log('   Client initiated disconnect');
+          setConnectionError(null);
+        }
       });
 
-      // Event: 'error' - khi có lỗi socket
+      // Event: 'connect_error' - lỗi khi kết nối
+      newSocket.on('connect_error', (error) => {
+        console.error('❌ [Socket] Connection Error');
+        console.error('   Message:', error.message);
+        console.error('   Data:', error.data);
+        console.error('   Trying to connect to:', SOCKET_NAMESPACE_URL);
+        console.error('   Path:', SOCKET_IO_PATH);
+        console.error('');
+        console.error('   📋 Debugging checklist:');
+        console.error('   1. socket-service đang chạy? — curl http://localhost:3017/health');
+        console.error('   2. Dev: Vite proxy /socket.io → :3017 (client/.env VITE_SOCKET_PROXY_TARGET nếu cần đổi target)');
+        console.error('   3. Hoặc nối thẳng: VITE_SOCKET_DIRECT_URL=http://127.0.0.1:3017');
+        console.error('   4. Socket qua gateway (dev): VITE_SOCKET_USE_GATEWAY=true + VITE_SOCKET_URL + api-gateway SOCKET_SERVICE_URL');
+        console.error('   5. CORS / log socket-service (namespace /chat)');
+        
+        setConnectionError(error);
+      });
+
+      // Event: 'error' - khi có lỗi socket (auth errors, etc.)
       newSocket.on('error', (error) => {
-        console.error('Socket error:', error);
-        // Có thể show toast notification ở đây
+        console.error('❌ [Socket] Socket Error');
+        console.error('   Error:', error);
+        
+        setConnectionError(error);
       });
 
       /* ===== ONLINE USERS TRACKING ===== */
@@ -142,21 +292,40 @@ export const SocketProvider = ({ children }) => {
       // Event: 'users:online' - server gửi list users online
       // Chạy khi connect hoặc khi có user join/leave
       newSocket.on('users:online', (users) => {
-        // users: array of user IDs ['user1', 'user2', ...]
-        setOnlineUsers(users);
+        const list = Array.isArray(users) ? users.map((id) => String(id)) : [];
+        setOnlineUsers(list);
       });
 
       // Event: 'user:connected' - có user mới online
       newSocket.on('user:connected', (userId) => {
-        // Thêm userId vào onlineUsers
-        // Set: loại bỏ duplicates
-        setOnlineUsers((prev) => [...new Set([...prev, userId])]);
+        const id = String(userId);
+        setOnlineUsers((prev) => [...new Set([...prev.map(String), id])]);
       });
 
       // Event: 'user:disconnected' - có user offline
       newSocket.on('user:disconnected', (userId) => {
-        // Remove userId khỏi onlineUsers
-        setOnlineUsers((prev) => prev.filter((id) => id !== userId));
+        const id = String(userId);
+        setOnlineUsers((prev) => prev.map(String).filter((x) => x !== id));
+      });
+
+      // Wave 3c — snapshot presence (Redis vh:presence + in-memory sockets)
+      newSocket.on('presence:batch', (payload = {}) => {
+        const users = Array.isArray(payload.users)
+          ? payload.users
+          : payload.userId
+            ? [{ userId: payload.userId, status: payload.status }]
+            : [];
+        if (!users.length) return;
+        setOnlineUsers((prev) => {
+          const set = new Set(prev.map(String));
+          for (const row of users) {
+            const id = String(row?.userId || '').trim();
+            if (!id) continue;
+            if (row.status === 'online') set.add(id);
+            else set.delete(id);
+          }
+          return [...set];
+        });
       });
 
       // Lưu socket instance vào state
@@ -171,9 +340,10 @@ export const SocketProvider = ({ children }) => {
         // Clear socket state
         setSocket(null);
         setConnected(false);
+        setConnectionError(null);
       };
     }
-  }, [isAuthenticated, user]); // Re-run khi user login/logout
+  }, [isAuthenticated, socketUserKey, accessToken]); // Re-run khi login/logout, đổi user, hoặc refresh access token
 
   /* ========================================
      HELPER FUNCTION: emit()
@@ -189,6 +359,9 @@ export const SocketProvider = ({ children }) => {
   ======================================== */
   const emit = useCallback(
     (event, data) => {
+      if (isLandingEmbedActive()) {
+        return;
+      }
       // Chỉ emit khi socket connected
       if (socket && connected) {
         socket.emit(event, data);
@@ -205,8 +378,8 @@ export const SocketProvider = ({ children }) => {
      Listen event từ server
      
      Cách dùng:
-     on('message:received', (message) => {
-       console.log('New message:', message);
+     on('room:new_message', (message) => {
+       console.log('New org room message:', message);
      });
      
      Dùng trong component với useEffect
@@ -252,10 +425,12 @@ export const SocketProvider = ({ children }) => {
      Sau đó socket sẽ nhận events của room đó
   ======================================== */
   const joinRoom = useCallback(
-    (roomId) => {
-      emit('room:join', { roomId });
+    (roomId, organizationId = null) => {
+      const payload = { roomId };
+      if (organizationId) payload.organizationId = String(organizationId);
+      emit('room:join', payload);
     },
-    [emit] // Phụ thuộc emit function
+    [emit]
   );
 
   /* ========================================
@@ -276,18 +451,22 @@ export const SocketProvider = ({ children }) => {
      Provide cho components con
   ======================================== */
   const value = {
-    socket,         // Socket instance (để custom operations)
-    connected,      // Connection status: true/false
-    onlineUsers,    // Array of online user IDs
-    emit,           // Function: emit(event, data)
-    on,             // Function: on(event, callback)
-    off,            // Function: off(event, callback)
-    joinRoom,       // Function: joinRoom(roomId)
-    leaveRoom,      // Function: leaveRoom(roomId)
+    socket,           // Socket instance (để custom operations)
+    connected,        // Connection status: true/false
+    connectionError,  // Connection error: null hoặc error object
+    onlineUsers,      // Array of online user IDs
+    emit,             // Function: emit(event, data)
+    on,               // Function: on(event, callback)
+    off,              // Function: off(event, callback)
+    joinRoom,         // Function: joinRoom(roomId)
+    leaveRoom,        // Function: leaveRoom(roomId)
   };
 
   return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;
-};
+}
+
+// Export SocketProvider để dùng trong main.jsx
+export { SocketProvider };
 
 /* ========================================
    CÁCH DÙNG TRONG COMPONENT:
@@ -309,10 +488,10 @@ export const SocketProvider = ({ children }) => {
          setMessages(prev => [...prev, msg]);
        };
        
-       on('message:received', handleMessage);
+       on('room:new_message', handleMessage);
        
        // Cleanup: off listener
-       return () => off('message:received', handleMessage);
+       return () => off('room:new_message', handleMessage);
      }, [on, off]);
      
      // Send message

@@ -1,0 +1,374 @@
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
+import { MoreHorizontal } from 'lucide-react';
+import { useAppStrings } from '../../locales/appStrings';
+import { memberUserId } from '../../utils/adminUserUtils';
+import { adminUserHubLink } from '../../utils/adminHubLinks';
+import { useAdminActionGate } from '../../hooks/useAdminActionGate';
+import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
+
+const MENU_WIDTH = 220;
+const GAP = 4;
+const SAFE_TOP = 8;
+const SAFE_BOTTOM = 8;
+const MENU_MIN_HEIGHT = 120;
+const MENU_HEIGHT_ESTIMATE = 480;
+
+/**
+ * Khung menu luôn nằm trong viewport. Chiều cao nội dung lớn hơn khung thì
+ * vùng cuộn bên trong (không phải khung fixed) nhận overflow.
+ */
+function computeMenuPos(btnRect, menuH, menuW = MENU_WIDTH) {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const viewportMax = Math.max(MENU_MIN_HEIGHT, vh - SAFE_TOP - SAFE_BOTTOM);
+  const natural = Math.min(Math.max(menuH || MENU_HEIGHT_ESTIMATE, MENU_MIN_HEIGHT), viewportMax);
+
+  let left = btnRect.right - menuW;
+  left = Math.max(SAFE_TOP, Math.min(left, vw - menuW - SAFE_TOP));
+
+  const spaceBelow = Math.max(0, vh - SAFE_BOTTOM - (btnRect.bottom + GAP));
+  const spaceAbove = Math.max(0, btnRect.top - GAP - SAFE_TOP);
+
+  let placeAbove = false;
+  if (spaceBelow >= natural) placeAbove = false;
+  else if (spaceAbove >= natural) placeAbove = true;
+  else placeAbove = spaceAbove > spaceBelow;
+
+  const available = placeAbove ? spaceAbove : spaceBelow;
+  const maxHeight = Math.max(
+    Math.min(MENU_MIN_HEIGHT, viewportMax),
+    Math.min(natural, available, viewportMax)
+  );
+
+  let top = placeAbove ? btnRect.top - GAP - maxHeight : btnRect.bottom + GAP;
+  const maxTop = Math.max(SAFE_TOP, vh - SAFE_BOTTOM - maxHeight);
+  top = Math.min(Math.max(SAFE_TOP, top), maxTop);
+
+  return {
+    top,
+    left,
+    maxHeight,
+    placement: placeAbove ? 'above' : 'below',
+  };
+}
+
+function enabledMenuItems(menuEl) {
+  return Array.from(menuEl?.querySelectorAll('[role="menuitem"]:not([disabled])') || []);
+}
+
+/**
+ * Menu "..." gom thao tác admin theo nhóm.
+ * variant `user` = list nhân sự; `account` = list tài khoản (chỉ route /accounts/*, Khóa cuối).
+ */
+export default function AdminUserActionsMenu({
+  member,
+  onViewDetail,
+  onRequestDelete,
+  disableDelete = false,
+  variant = 'user',
+}) {
+  const { t } = useAppStrings();
+  const { can } = useAdminActionGate();
+  const canUpdate = can(RBAC_GRANT.EMPLOYEE_UPDATE);
+  const canDisable = can(RBAC_GRANT.EMPLOYEE_DISABLE);
+  const canResetPassword = can(RBAC_GRANT.EMPLOYEE_RESET_PASSWORD);
+  const canDelete = can(RBAC_GRANT.EMPLOYEE_DELETE) && !disableDelete && typeof onRequestDelete === 'function';
+  const canAssignOrgRole = can(RBAC_GRANT.ORG_ROLE_UPDATE);
+  const canAssignPosition = can(RBAC_GRANT.EMPLOYEE_UPDATE);
+  const userId = memberUserId(member);
+  const [open, setOpen] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0, maxHeight: 320 });
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+  const scrollRef = useRef(null);
+
+  const placeMenu = () => {
+    if (!btnRef.current || !menuRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    const menuEl = menuRef.current;
+    // scrollHeight của vùng cuộn đã là chiều cao nội dung đầy đủ, kể cả khi đang bị maxHeight.
+    const naturalH = Math.max(scrollRef.current?.scrollHeight || menuEl.scrollHeight, MENU_MIN_HEIGHT);
+    setPos(computeMenuPos(rect, naturalH, menuEl.offsetWidth || MENU_WIDTH));
+    setReady(true);
+  };
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setReady(false);
+      return undefined;
+    }
+    placeMenu();
+    const onReposition = (event) => {
+      const target = event?.target;
+      const scrollEl = scrollRef.current;
+      const menuEl = menuRef.current;
+      // Cuộn trong popup không được đo lại / đổi maxHeight — nếu không scrollTop bị kéo về 0.
+      if (
+        target
+        && (target === scrollEl || target === menuEl || scrollEl?.contains(target) || menuEl?.contains(target))
+      ) {
+        return;
+      }
+      placeMenu();
+    };
+    window.addEventListener('resize', onReposition);
+    window.addEventListener('scroll', onReposition, true);
+    return () => {
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => {
+      if (btnRef.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      setOpen(false);
+      btnRef.current?.focus();
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (open && ready) enabledMenuItems(menuRef.current)[0]?.focus();
+  }, [open, ready]);
+
+  const handleMenuKeyDown = (event) => {
+    const items = enabledMenuItems(menuRef.current);
+    if (!items.length) return;
+    const current = items.indexOf(document.activeElement);
+    let next = -1;
+    if (event.key === 'ArrowDown') next = (current + 1) % items.length;
+    else if (event.key === 'ArrowUp') next = (current - 1 + items.length) % items.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = items.length - 1;
+    else if (event.key === 'Tab') {
+      setOpen(false);
+      return;
+    } else return;
+    event.preventDefault();
+    items[next]?.focus();
+  };
+
+  const toggle = () => {
+    if (!btnRef.current) return;
+    if (open) {
+      setOpen(false);
+      setReady(false);
+      return;
+    }
+    const rect = btnRef.current.getBoundingClientRect();
+    setPos(computeMenuPos(rect, MENU_HEIGHT_ESTIMATE));
+    setReady(false);
+    setOpen(true);
+  };
+
+  const q = `?userId=${encodeURIComponent(userId)}`;
+
+  const itemClass = (danger) =>
+    `block w-full px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-muted focus-visible:bg-muted focus-visible:outline-none motion-reduce:transition-none ${
+      danger ? 'font-medium text-destructive' : 'text-foreground'
+    }`;
+
+  const ItemLink = ({ to, children, danger }) => (
+    <Link to={to} role="menuitem" tabIndex={-1} className={itemClass(danger)} onClick={() => setOpen(false)}>
+      {children}
+    </Link>
+  );
+
+  const ItemButton = ({ onClick, children, danger, disabled = false }) => (
+    <button
+      type="button"
+      role="menuitem"
+      tabIndex={-1}
+      disabled={disabled}
+      className={`${itemClass(danger)} ${
+        disabled ? 'cursor-not-allowed opacity-50 hover:bg-transparent' : ''
+      }`}
+      onClick={() => {
+        if (disabled) return;
+        setOpen(false);
+        onClick?.();
+      }}
+    >
+      {children}
+    </button>
+  );
+
+  const Group = ({ label, children }) => (
+    <div role="group" aria-label={label} className="border-t border-border py-1 first:border-t-0">
+      <p aria-hidden="true" className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      {children}
+    </div>
+  );
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        title={t('adminUsers.moreActions')}
+        aria-label={t('adminUsers.moreActions')}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={(e) => {
+          e.stopPropagation();
+          toggle();
+        }}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-muted-foreground transition-colors duration-150 hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+      >
+        <MoreHorizontal className="h-4 w-4" aria-hidden />
+      </button>
+      {open && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              ref={menuRef}
+              role="menu"
+              aria-label={t('adminUsers.moreActions')}
+              onKeyDown={handleMenuKeyDown}
+              className="fixed z-[10040] w-[220px] overflow-hidden rounded-xl border border-border bg-card shadow-xl motion-safe:animate-fade-in-fast"
+              style={{
+                top: pos.top,
+                left: pos.left,
+                maxHeight: pos.maxHeight,
+                visibility: ready ? 'visible' : 'hidden',
+                pointerEvents: ready ? 'auto' : 'none',
+              }}
+            >
+              <div
+                ref={scrollRef}
+                className="min-h-0 overflow-y-auto overscroll-contain py-1"
+                style={{ maxHeight: pos.maxHeight }}
+                onWheel={(event) => event.stopPropagation()}
+              >
+              {variant === 'account' ? (
+                <>
+                  <Group label={t('adminUsers.menuGroupInfo')}>
+                    <ItemLink to={`/app/admin/accounts/detail${q}`}>{t('adminDomains.accounts.detail')}</ItemLink>
+                    <ItemLink to={`/app/admin/accounts/login-history${q}`}>
+                      {t('adminDomains.accounts.loginHistory')}
+                    </ItemLink>
+                  </Group>
+                  {canUpdate || canResetPassword || canDisable ? (
+                    <Group label={t('adminUsers.menuGroupAccount')}>
+                      {canUpdate ? (
+                        <ItemLink to={adminUserHubLink('/app/admin/accounts/verification', userId, 'resend')}>
+                          {t('adminDomains.accounts.resendVerification')}
+                        </ItemLink>
+                      ) : null}
+                      {canUpdate ? (
+                        <ItemLink to={adminUserHubLink('/app/admin/accounts/access', userId, 'activate')}>
+                          {t('adminDomains.accounts.activate')}
+                        </ItemLink>
+                      ) : null}
+                      {canResetPassword ? (
+                        <>
+                          <ItemLink to={adminUserHubLink('/app/admin/accounts/password', userId, 'reset')}>
+                            {t('adminDomains.accounts.resetPassword')}
+                          </ItemLink>
+                          <ItemLink to={adminUserHubLink('/app/admin/accounts/password', userId, 'force')}>
+                            {t('adminDomains.accounts.forcePassword')}
+                          </ItemLink>
+                          <ItemLink to={adminUserHubLink('/app/admin/accounts/password', userId, 'set')}>
+                            {t('adminDomains.accounts.setPassword')}
+                          </ItemLink>
+                        </>
+                      ) : null}
+                      {canDisable ? (
+                        <ItemLink to={adminUserHubLink('/app/admin/accounts/access', userId, 'revoke')}>
+                          {t('adminDomains.accounts.revokeSessions')}
+                        </ItemLink>
+                      ) : null}
+                    </Group>
+                  ) : null}
+                  {canDisable ? (
+                    <Group label={t('adminUsers.menuGroupDanger')}>
+                      <ItemLink danger to={adminUserHubLink('/app/admin/accounts/access', userId, 'lock')}>
+                        {t('adminDomains.accounts.lock')}
+                      </ItemLink>
+                    </Group>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <Group label={t('adminUsers.menuGroupInfo')}>
+                    <ItemButton onClick={() => onViewDetail?.(member)}>{t('adminUsers.viewDetail')}</ItemButton>
+                    {canUpdate ? (
+                      <ItemLink to={adminUserHubLink('/app/admin/users/people-ops', userId, 'edit')}>
+                        {t('adminUsers.editInfo')}
+                      </ItemLink>
+                    ) : null}
+                  </Group>
+                  <Group label={t('adminUsers.menuGroupAccount')}>
+                    <ItemLink to={`/app/admin/accounts/detail${q}`}>{t('adminDomains.accounts.detail')}</ItemLink>
+                    {canDisable ? (
+                      <ItemLink danger to={adminUserHubLink('/app/admin/accounts/access', userId, 'lock')}>
+                        {t('adminDomains.accounts.lock')}
+                      </ItemLink>
+                    ) : null}
+                    {canResetPassword ? (
+                      <>
+                        <ItemLink to={adminUserHubLink('/app/admin/accounts/password', userId, 'reset')}>
+                          {t('adminDomains.accounts.resetPassword')}
+                        </ItemLink>
+                        <ItemLink to={adminUserHubLink('/app/admin/accounts/password', userId, 'force')}>
+                          {t('adminDomains.accounts.forcePassword')}
+                        </ItemLink>
+                      </>
+                    ) : null}
+                  </Group>
+                  {canAssignOrgRole || canAssignPosition || canUpdate ? (
+                    <Group label={t('adminUsers.menuGroupAccess')}>
+                      {canAssignOrgRole ? (
+                        <ItemLink to={`/app/admin/rbac/org-roles/assign${q}`}>
+                          {t('adminUsers.assignRole')}
+                        </ItemLink>
+                      ) : null}
+                      {canAssignPosition ? (
+                        <ItemLink to={`/app/admin/rbac/positions/assign${q}`}>
+                          {t('adminUsers.assignPosition')}
+                        </ItemLink>
+                      ) : null}
+                      {canUpdate ? (
+                        <ItemLink to={adminUserHubLink('/app/admin/users/people-ops', userId, 'assign-org')}>
+                          {t('adminDomains.users.assignOrg')}
+                        </ItemLink>
+                      ) : null}
+                    </Group>
+                  ) : null}
+                  <Group label={t('adminUsers.menuGroupSecurity')}>
+                    <ItemLink to={`/app/admin/accounts/login-history${q}`}>
+                      {t('adminDomains.accounts.loginHistory')}
+                    </ItemLink>
+                  </Group>
+                  {canDelete ? (
+                    <Group label={t('adminUsers.menuGroupDanger')}>
+                      <ItemButton danger onClick={() => onRequestDelete?.(member)}>
+                        {t('adminDomains.users.delete')}
+                      </ItemButton>
+                    </Group>
+                  ) : null}
+                </>
+              )}
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+    </>
+  );
+}

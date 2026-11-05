@@ -1,0 +1,99 @@
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { FIGMA_PAGE_SHELL } from '../../components/Layout/figmaPageClasses';
+import OrganizationSettingsPanel from '../../components/Organization/OrganizationSettingsPanel';
+import useOrganizationDetail from '../../hooks/useOrganizationDetail';
+import { useAppStrings } from '../../locales/appStrings';
+import { mapLegacyAdminTabToPath, buildCommunicateChannelsPath } from '../../utils/suitePathUtils';
+import { readSingleOrgModeFlag } from '../../utils/singleCompanyMode';
+
+const SETTINGS_TAB_TO_ADMIN = {
+  general: 'general',
+  security: 'security',
+  structure: 'structure',
+  roles: 'roles',
+};
+
+/**
+ * Cài đặt workspace full màn hình: sidebar app + 2 cột (mục | nội dung) trong OrganizationSettingsPanel.
+ * Đường dẫn: /app/collaborate/organizations/:orgId/settings?tab=roles
+ * Single-org: redirect sang /app/admin
+ */
+export default function OrganizationSettingsPage() {
+  const { t } = useAppStrings();
+  const shell = `flex h-[100dvh] overflow-hidden ${FIGMA_PAGE_SHELL} text-foreground`;
+  const mutedTextCls = 'text-muted-foreground';
+  const { orgId } = useParams();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const initialTab = searchParams.get('tab') || undefined;
+  const singleOrg = readSingleOrgModeFlag();
+
+  const {
+    organization,
+    loading,
+    reload: refreshOrganization,
+  } = useOrganizationDetail(orgId, { enabled: !singleOrg && Boolean(orgId) });
+
+  const organizationHomePath = orgId
+    ? buildCommunicateChannelsPath()
+    : '/app/collaborate/workspaces';
+
+  if (singleOrg) {
+    const mapped = SETTINGS_TAB_TO_ADMIN[initialTab] || initialTab || 'overview';
+    return <Navigate to={mapLegacyAdminTabToPath(mapped)} replace />;
+  }
+
+  const handleOrganizationUpdated = () => {
+    refreshOrganization().catch(() => {});
+  };
+
+  if (!orgId) {
+    return (
+      <div className={shell}>
+        <main className={`flex flex-1 items-center justify-center ${mutedTextCls}`}>
+          {t('organizationSettings.missingOrgId')}
+        </main>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className={shell}>
+        <main className={`flex flex-1 items-center justify-center ${mutedTextCls}`}>
+          {t('organizationSettings.loading')}
+        </main>
+      </div>
+    );
+  }
+
+  if (!organization) {
+    return (
+      <div className={shell}>
+        <main className={`flex flex-1 flex-col items-center justify-center gap-3 ${mutedTextCls}`}>
+          <p>{t('organizationSettings.notFound')}</p>
+          <button
+            type="button"
+            onClick={() => navigate('/app/collaborate/workspaces')}
+            className="text-primary hover:underline"
+          >
+            {t('organizationSettings.backOrgs')}
+          </button>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div className={shell}>
+      <OrganizationSettingsPanel
+        organization={organization}
+        initialTab={initialTab}
+        suiteLayout
+        onBack={() => navigate(organizationHomePath)}
+        onOrganizationUpdated={handleOrganizationUpdated}
+        onOrganizationDeleted={() => navigate('/app/collaborate/workspaces')}
+      />
+    </div>
+  );
+}

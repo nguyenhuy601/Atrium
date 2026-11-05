@@ -1,0 +1,273 @@
+/**
+ * Rank org members for wizard intake role suggest (PO / PM / BA / Tech Lead).
+ * Boost: Position match + verified CV capability + prior role / verified project experience.
+ * No CV raw / experience.work in output.
+ */
+
+const { scorePositionMatch } = require('./positionCandidateMatch');
+const { scoreVerifiedCapability } = require('./capabilityMatch');
+const {
+  orgPositionMatchesRole,
+  preferredOrgPositionCodes,
+} = require('./orgPositionSuggestMatch');
+
+const INTAKE_LEAD_ROLE_KEYS = Object.freeze([
+  'product_owner',
+  'project_manager',
+  'business_analyst',
+  'tech_lead',
+]);
+
+const PRIOR_ROLE_BOOST = 12;
+
+function normalizeRoleToken(raw) {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_');
+}
+
+function verifiedExperienceMatchesRole(verifiedCapability, projectRoleKey) {
+  const key = normalizeRoleToken(projectRoleKey);
+  if (!key) return false;
+  const rows = Array.isArray(verifiedCapability?.projectExperiences)
+    ? verifiedCapability.projectExperiences
+    : [];
+  return rows.some((row) => {
+    if (String(row?.status || '') !== 'verified') return false;
+    const role = normalizeRoleToken(row.role);
+    if (!role) return false;
+    return role === key || role.includes(key) || key.includes(role);
+  });
+}
+
+function parseIntakeRoleKeys(raw) {
+  const parts = Array.isArray(raw)
+    ? raw
+    : String(raw || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+  return [...new Set(parts.map((k) => String(k).trim().toLowerCase()).filter(Boolean))];
+}
+
+function isExactIntakeRoleKeys(keys) {
+  const set = new Set(parseIntakeRoleKeys(keys));
+  return INTAKE_LEAD_ROLE_KEYS.every((k) => set.has(k)) && set.size === INTAKE_LEAD_ROLE_KEYS.length;
+}
+
+/** 1–N vai trò dự án (không khóa cứng 4 lead). */
+function isAllowedIntakeRoleKeys(keys) {
+  const parsed = parseIntakeRoleKeys(keys);
+  if (!parsed.length || parsed.length > MAX_INTAKE_SUGGEST_ROLES) return false;
+  return parsed.every((k) => STAFFING_ROLE_KEY.test(k));
+}
+
+function resolveRequestedIntakeRoleKeys(raw) {
+  if (!isAllowedIntakeRoleKeys(raw)) return null;
+  return parseIntakeRoleKeys(raw);
+}
+
+const STAFFING_ROLE_KEY = /^[a-z][a-z0-9_]{0,63}$/;
+const MAX_INTAKE_SUGGEST_ROLES = 12;
+
+/** Một vai trò dự án (developer, tech_lead, …) cho bước phân công. */
+function resolveStaffingMatchRoleKey(raw) {
+  const parsed = parseIntakeRoleKeys(raw);
+  if (parsed.length !== 1) return null;
+  const key = parsed[0];
+  if (!STAFFING_ROLE_KEY.test(key)) return null;
+  return [key];
+}
+
+function parseRoleSuggestOffset(raw) {
+  if (raw == null || raw === '') return 0;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) {
+    const err = new Error('offset không hợp lệ');
+    err.statusCode = 400;
+    err.errorCode = 'VALIDATION_REQUIRED';
+    throw err;
+  }
+  return n;
+}
+
+function sliceRoleSuggestPage(items = [], { offset = 0, limit = 3 } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const total = list.length;
+  const off = Math.max(0, Math.floor(Number(offset) || 0));
+  const lim = Math.max(1, Math.floor(Number(limit) || 3));
+  const page = list.slice(off, off + lim);
+  return {
+    items: page,
+    hasMore: off + page.length < total,
+    total,
+  };
+}
+
+function parseRoleSuggestFitAvailable(raw, defaultValue = false) {
+  if (raw == null || raw === '') return defaultValue;
+  if (raw === true || raw === false) return raw;
+  const s = String(raw).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y'].includes(s)) return true;
+  if (['0', 'false', 'no', 'n'].includes(s)) return false;
+  return defaultValue;
+}
+
+function isRoleSuggestFit(item = {}) {
+  const reasons = Array.isArray(item.suggestReasons) ? item.suggestReasons : [];
+  return reasons.includes('position_preferred') || reasons.includes('prior_role');
+}
+
+function isRoleSuggestUnderCap(item = {}) {
+  if (String(item.availability || '').toLowerCase() === 'overallocated') return false;
+  if (item.allocatedPct == null || item.allocatedPct === '') return true;
+  const pct = Number(item.allocatedPct);
+  if (!Number.isFinite(pct)) return true;
+  return pct < 100;
+}
+
+function filterRoleSuggestFitAvailable(items = []) {
+  return (Array.isArray(items) ? items : []).filter(
+    (row) => isRoleSuggestFit(row) && isRoleSuggestUnderCap(row)
+  );
+}
+
+function rankByOrgPosition(input, roleKey) {
+  const position = input.orgPosition || null;
+  const preferred = orgPositionMatchesRole(position, roleKey);
+  const cap = input.verifiedCapability || null;
+  const isVerified = Boolean(cap && String(cap.verificationStatus || '') === 'verified');
+  const hasPriorRole = Boolean(input.hasPriorRole);
+  const suggestReasons = [];
+  if (preferred) suggestReasons.push('position_preferred');
+  if (hasPriorRole) suggestReasons.push('prior_role');
+
+  return {
+    userId: String(input.userId || ''),
+    displayName: String(input.displayName || '').trim() || String(input.userId || '').slice(-6),
+    jobTitle: '',
+    positionName: String(position?.positionName || '').trim(),
+    positionKey: String(position?.positionCode || '').trim() || null,
+    score: (preferred ? 15 : 0) + (hasPriorRole ? PRIOR_ROLE_BOOST : 0),
+    suggestReasons: [...new Set(suggestReasons)],
+    priorRoleKeys: hasPriorRole ? [roleKey] : [],
+    yearsExperience: isVerified && cap.yearsExperience != null && Number.isFinite(Number(cap.yearsExperience))
+      ? Number(cap.yearsExperience)
+      : undefined,
+  };
+}
+
+function rankRoleSuggestCandidate(input = {}, { projectRoleKey, enabledPositionKeys } = {}) {
+  const roleKey = String(projectRoleKey || '').trim().toLowerCase();
+  if (preferredOrgPositionCodes(roleKey)) {
+    return rankByOrgPosition(input, roleKey);
+  }
+  const jobTitle = String(input.jobTitle || '').trim();
+  const cap = input.verifiedCapability || null;
+  const isVerified = Boolean(cap && String(cap.verificationStatus || '') === 'verified');
+  const verifiedCap = isVerified ? cap : null;
+
+  const positionMatch = scorePositionMatch({
+    jobTitle,
+    projectRoleKey: roleKey,
+    enabledPositionKeys,
+  });
+  const capabilityMatch = scoreVerifiedCapability({
+    verifiedCapability: verifiedCap,
+    projectRoleKey: roleKey,
+  });
+
+  const hasPriorRole = Boolean(input.hasPriorRole);
+  const hasVerifiedExp = verifiedExperienceMatchesRole(verifiedCap, roleKey);
+  const priorBoost = hasPriorRole || hasVerifiedExp ? PRIOR_ROLE_BOOST : 0;
+
+  const suggestReasons = [];
+  if (positionMatch.preferred) suggestReasons.push('position_preferred');
+  if (isVerified) suggestReasons.push('cv_verified');
+  if (hasPriorRole || hasVerifiedExp) suggestReasons.push('prior_role');
+
+  const out = {
+    userId: String(input.userId || ''),
+    displayName: String(input.displayName || '').trim() || String(input.userId || '').slice(-6),
+    jobTitle,
+    positionKey: positionMatch.matchKey || null,
+    score: Math.round((positionMatch.boost || 0) + (capabilityMatch.boost || 0) + priorBoost),
+    suggestReasons: [...new Set(suggestReasons)],
+    priorRoleKeys: hasPriorRole ? [roleKey] : [],
+  };
+  if (isVerified && verifiedCap.yearsExperience != null && Number.isFinite(Number(verifiedCap.yearsExperience))) {
+    out.yearsExperience = Number(verifiedCap.yearsExperience);
+  }
+  return out;
+}
+
+/** Public whitelist — never include capability nested / experience.work / email. */
+function toRoleSuggestPublicItem(ranked = {}) {
+  const out = {
+    userId: String(ranked.userId || ''),
+    displayName: String(ranked.displayName || '').trim() || String(ranked.userId || '').slice(-6),
+    jobTitle: String(ranked.jobTitle || '').trim(),
+    positionName: String(ranked.positionName || '').trim(),
+    positionKey: ranked.positionKey || null,
+    score: Number(ranked.score) || 0,
+    suggestReasons: Array.isArray(ranked.suggestReasons) ? ranked.suggestReasons.filter(Boolean) : [],
+    priorRoleKeys: Array.isArray(ranked.priorRoleKeys) ? ranked.priorRoleKeys.filter(Boolean) : [],
+  };
+  if (ranked.yearsExperience != null && Number.isFinite(Number(ranked.yearsExperience))) {
+    out.yearsExperience = Number(ranked.yearsExperience);
+  }
+  if (ranked.allocatedPct != null && Number.isFinite(Number(ranked.allocatedPct))) {
+    out.allocatedPct = Math.round(Number(ranked.allocatedPct) * 100) / 100;
+  }
+  if (ranked.availablePct != null && Number.isFinite(Number(ranked.availablePct))) {
+    out.availablePct = Math.round(Number(ranked.availablePct) * 100) / 100;
+  }
+  if (ranked.availableHours != null && ranked.availableHours !== '' && Number.isFinite(Number(ranked.availableHours))) {
+    out.availableHours = Math.round(Number(ranked.availableHours) * 100) / 100;
+  }
+  const availability = String(ranked.availability || '').trim().toLowerCase();
+  if (availability === 'available' || availability === 'partial' || availability === 'overallocated') {
+    out.availability = availability;
+  }
+  return out;
+}
+
+function pinAssigneeFirst(items = [], assigneeUserId) {
+  const id = String(assigneeUserId || '').trim();
+  if (!id) return Array.isArray(items) ? items : [];
+  const list = Array.isArray(items) ? items.slice() : [];
+  const idx = list.findIndex((row) => String(row?.userId || '') === id);
+  if (idx <= 0) return list;
+  const [hit] = list.splice(idx, 1);
+  list.unshift(hit);
+  return list;
+}
+
+function sortRoleSuggestItems(items = []) {
+  return [...items].sort((a, b) => {
+    if ((b.score || 0) !== (a.score || 0)) return (b.score || 0) - (a.score || 0);
+    return String(a.displayName || '').localeCompare(String(b.displayName || ''), 'vi');
+  });
+}
+
+module.exports = {
+  INTAKE_LEAD_ROLE_KEYS,
+  PRIOR_ROLE_BOOST,
+  parseIntakeRoleKeys,
+  isExactIntakeRoleKeys,
+  isAllowedIntakeRoleKeys,
+  resolveRequestedIntakeRoleKeys,
+  resolveStaffingMatchRoleKey,
+  parseRoleSuggestOffset,
+  sliceRoleSuggestPage,
+  parseRoleSuggestFitAvailable,
+  isRoleSuggestFit,
+  isRoleSuggestUnderCap,
+  filterRoleSuggestFitAvailable,
+  verifiedExperienceMatchesRole,
+  rankRoleSuggestCandidate,
+  toRoleSuggestPublicItem,
+  pinAssigneeFirst,
+  sortRoleSuggestItems,
+};

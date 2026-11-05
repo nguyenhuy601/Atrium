@@ -1,0 +1,67 @@
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { fetchProjectHubProject } from '../../hub/useProjectHubQueries';
+import { queryKeys } from '../../../../lib/queryKeys';
+
+/**
+ * Project hub capabilities for Phase 1 analysis / planning UI gates.
+ */
+export default function useProjectCapabilities(projectId) {
+  const pid = String(projectId || '').trim();
+  const { data: project, isLoading, error } = useQuery({
+    queryKey: queryKeys.projectHub.project(pid),
+    queryFn: () => fetchProjectHubProject(pid),
+    enabled: Boolean(pid),
+    staleTime: 30_000,
+  });
+
+  const caps = useMemo(() => {
+    const c = project?.capabilities || {};
+    const viewerProjectRoleKeys = Array.isArray(c.viewerProjectRoleKeys)
+      ? c.viewerProjectRoleKeys
+      : Array.isArray(project?.viewerProjectRoleKeys)
+        ? project.viewerProjectRoleKeys
+        : [];
+    return {
+      canViewAnalysis: Boolean(c.canViewAnalysis),
+      canEditAnalysis: Boolean(c.canEditAnalysis),
+      canImportAnalysis: Boolean(c.canImportAnalysis),
+      canBaAuthorAnalysis: Boolean(c.canBaAuthorAnalysis),
+      /** '*' | string[] — kinds được tạo/sửa artifact (SoT BE). */
+      analysisAuthorKinds:
+        c.analysisAuthorKinds === '*' || c.analysisAuthorKinds === 'all'
+          ? '*'
+          : Array.isArray(c.analysisAuthorKinds)
+            ? c.analysisAuthorKinds
+            : undefined,
+      canManageTrace:
+        c.canManageTrace != null
+          ? Boolean(c.canManageTrace)
+          : Array.isArray(c.permissions) && c.permissions.includes('analysis:manage_trace'),
+      canReviewAnalysisBa: Boolean(c.canReviewAnalysisBa),
+      canReviewAnalysisTech: Boolean(c.canReviewAnalysisTech),
+      canReviewAnalysisPo: Boolean(c.canReviewAnalysisPo),
+      viewerProjectRoleKeys,
+      /** Project có ít nhất 1 member với analysis:tech_review — cổng Tech bắt buộc (DEC D6). */
+      hasAnalysisTechReviewer: Boolean(c.hasAnalysisTechReviewer),
+      hasPlanningTechReviewer: Boolean(c.hasPlanningTechReviewer),
+      canChangeDeliveryPhase: Boolean(c.canChangeDeliveryPhase),
+      canCutSrs: Boolean(c.canCutSrs),
+      canViewPlanning: Boolean(c.canViewPlanning),
+      canEditPlanning: Boolean(c.canEditPlanning),
+      canSubmitPlanning:
+        c.canSubmitPlanning != null
+          ? Boolean(c.canSubmitPlanning)
+          : Array.isArray(c.permissions) && c.permissions.includes('planning:submit_review'),
+      canReviewPlanning: Boolean(c.canReviewPlanning),
+      canReviewPlanningTech: Boolean(c.canReviewPlanningTech),
+      canReviewPlanningPm: Boolean(c.canReviewPlanningPm),
+      canReviewPlanningPo: Boolean(c.canReviewPlanningPo),
+      canCutPlanningBaseline: Boolean(c.canCutPlanningBaseline),
+      canPublishPlanningWbs: Boolean(c.canPublishPlanningWbs),
+      permissions: Array.isArray(c.permissions) ? c.permissions : [],
+    };
+  }, [project]);
+
+  return { project, capabilities: caps, isLoading, error };
+}

@@ -1,32 +1,137 @@
-const mongoose = require('mongoose');
+const { mongoose } = require('@enterprise/shared/config/mongo');
+
+const joinFormFieldSchema = new mongoose.Schema(
+  {
+    id: { type: String, required: true, trim: true },
+    label: { type: String, required: true, maxlength: 300 },
+    type: {
+      type: String,
+      enum: ['short_text', 'long_text', 'single_choice', 'radio', 'checkbox'],
+      required: true,
+    },
+    required: { type: Boolean, default: false },
+    options: [{ type: String, maxlength: 200 }],
+  },
+  { _id: false }
+);
+
+const joinApplicationFormSettingsSchema = new mongoose.Schema(
+  {
+    enabled: { type: Boolean, default: false },
+    formVersion: { type: Number, default: 1, min: 1 },
+    defaultRoleOnApprove: {
+      type: String,
+      enum: ['member', 'admin'],
+      default: 'member',
+    },
+    fields: { type: [joinFormFieldSchema], default: [] },
+  },
+  { _id: false }
+);
 
 const organizationSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: [true, 'Organization name is required'],
+      required: true,
       trim: true,
-      minlength: 2,
-      maxlength: 100,
     },
     description: {
       type: String,
-      trim: true,
-      maxlength: 500,
+      maxlength: 1000,
+      default: '',
+    },
+    ownerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      // CẤM populate User — model User không đăng ký trong organization-service.
+      ref: 'User',
     },
     logo: {
       type: String,
       default: null,
     },
-    owner: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
+    slug: {
+      type: String,
+      trim: true,
+      lowercase: true,
+    },
+    status: {
+      type: String,
+      enum: ['PENDING', 'ACTIVE', 'SUSPENDED', 'ARCHIVED'],
+      default: 'ACTIVE',
+    },
+    type: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    teamSize: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    industry: {
+      type: String,
+      trim: true,
+      default: '',
     },
     settings: {
-      allowMemberInvite: { type: Boolean, default: false },
-      requireApproval: { type: Boolean, default: true },
-      maxMembers: { type: Number, default: 1000 },
+      allowPublicJoin: {
+        type: Boolean,
+        default: false,
+      },
+      requireApproval: {
+        type: Boolean,
+        default: true,
+      },
+      /**
+       * Allowlist domain email (không có @). Rỗng = không chặn (dev/UAT).
+       * Ví dụ: ['atrium.dev', 'gmail.com', 'congty.vn']
+       */
+      allowedEmailDomains: {
+        type: [String],
+        default: [],
+      },
+      joinApplicationForm: {
+        type: joinApplicationFormSettingsSchema,
+        default: () => ({}),
+      },
+      /** Phase 1 — org default who can discover projects + information levels */
+      projectVisibilityPolicy: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null,
+      },
+      /**
+       * Requirement Access Policy (persona → visibility + actions).
+       * Must be Mixed — nested settings schema is strict and would strip unknown keys.
+       */
+      requirementAccessPolicy: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null,
+      },
+      /** Phase 2.0 — company size + enabled master catalog keys */
+      companySize: {
+        type: String,
+        trim: true,
+        default: 'startup',
+      },
+      masterData: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null,
+      },
+    },
+    provisioning: {
+      structure: {
+        status: {
+          type: String,
+          enum: ['pending', 'running', 'ready', 'failed'],
+          default: 'ready',
+        },
+        startedAt: { type: Date, default: null },
+        completedAt: { type: Date, default: null },
+        error: { type: String, default: '' },
+      },
     },
     isActive: {
       type: Boolean,
@@ -38,6 +143,16 @@ const organizationSchema = new mongoose.Schema(
   }
 );
 
+// Indexes
+organizationSchema.index({ ownerId: 1 });
+organizationSchema.index({ name: 1 });
+organizationSchema.index({ isActive: 1 });
+organizationSchema.index({ slug: 1 }, { unique: true, sparse: true });
+organizationSchema.index({ status: 1 });
+
 const Organization = mongoose.model('Organization', organizationSchema);
 
 module.exports = Organization;
+
+
+
