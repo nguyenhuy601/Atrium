@@ -1,7 +1,7 @@
 ---
 name: query-optimization
 description: >-
-  Optimizes VoiceHub service queries: avoid SELECT *, fix N+1, add indexes carefully within service DB ownership.
+  Optimizes Atrium service queries: avoid SELECT *, fix N+1, add indexes carefully within service DB ownership.
 ---
 
 # query optimization

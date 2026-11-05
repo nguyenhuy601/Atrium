@@ -1,5 +1,5 @@
-const SINGLE_ORG_FLAG_KEY = 'voicehub:single-org-mode';
-const COMPANY_SNAPSHOT_KEY = 'voicehub:company-snapshot';
+const SINGLE_ORG_FLAG_KEY = 'atrium:single-org-mode';
+const COMPANY_SNAPSHOT_KEY = 'atrium:company-snapshot';
 
 export function readSingleOrgModeFlag() {
   if (typeof window === 'undefined') return false;

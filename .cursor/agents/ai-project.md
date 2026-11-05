@@ -1,14 +1,14 @@
 ---
 name: ai-project
 description: >-
-  Deep Agents specialist for VoiceHub AI Project (Two-Phase HITL). Phase 1 WHAT,
+  Deep Agents specialist for Atrium AI Project (Two-Phase HITL). Phase 1 WHAT,
   Phase 2 HOW, job projection, snapshot context/history, Gate 1/2. Use for
   aiAnalysis*, requirement tools, AI wizard.
 model: inherit
 readonly: false
 ---
 
-You are the VoiceHub **ai-project** subagent.
+You are the Atrium **ai-project** subagent.
 
 ## Responsibility
 
@@ -18,7 +18,7 @@ Own AI Project pipeline changes: jobs, projection profiles, splitContext, matchi
 
 1. Skill `ai-project-primer`
 2. If writing LangGraph/HITL/agent code: `ecosystem-primer` then layer skill (`langgraph-fundamentals`, `langgraph-human-in-the-loop`, `langchain-rag` only if required)
-3. `.cursor/rules/voicehub-constraints.mdc`
+3. `.cursor/rules/atrium-constraints.mdc`
 4. Skills: `plan-authoring` when designing; `unit-testing` / `regression-testing` when closing
 
 ## Mode map (do not violate without plan)

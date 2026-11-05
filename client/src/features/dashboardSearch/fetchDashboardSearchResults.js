@@ -75,7 +75,7 @@ function notificationMatchesFilter(mapped, subfilterId) {
 function loadLocalCalendarRows() {
   try {
     const raw =
-      localStorage.getItem('voicehub:calendar:localCustom') || localStorage.getItem('calendar:events');
+      localStorage.getItem('atrium:calendar:localCustom') || localStorage.getItem('calendar:events');
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];

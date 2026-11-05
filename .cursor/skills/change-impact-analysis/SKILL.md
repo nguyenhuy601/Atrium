@@ -3,7 +3,7 @@ name: change-impact-analysis
 description: >-
   Produces blast-radius Impact Reports (modules, APIs, DB, FE, tests, deploy)
   for change requests. Use before plan-authoring §2 Files Affected, or when
-  assessing multi-service VoiceHub changes.
+  assessing multi-service Atrium changes.
 ---
 
 # Change impact analysis
@@ -20,7 +20,7 @@ description: >-
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc` (scope, MS boundaries)
+- `.cursor/rules/atrium-constraints.mdc` (scope, MS boundaries)
 - `.cursor/rules/deep-agents-dispatch.mdc` (agent: `researcher`) when designing
 
 ## Input

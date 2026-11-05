@@ -37,7 +37,7 @@ function deriveEmailKey(masterBuf) {
   return crypto.hkdfSync(
     'sha256',
     masterBuf,
-    Buffer.from('voicehub-field'),
+    Buffer.from('atrium-field'),
     Buffer.from('kid:v1'),
     32
   );

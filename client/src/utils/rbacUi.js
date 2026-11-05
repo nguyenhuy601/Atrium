@@ -3,7 +3,7 @@
  * SoT: GET /permissions/system (rbacPermissions / MASTER_PERMISSIONS).
  */
 
-export const RBAC_GRANTS_CHANGED_EVENT = 'voicehub:rbac-grants-changed';
+export const RBAC_GRANTS_CHANGED_EVENT = 'atrium:rbac-grants-changed';
 
 /** Org Permission packs may keep Create Project only (Wave B). */
 export const ORG_ALLOWED_PROJECT_GRANTS = Object.freeze(['project.project.create']);

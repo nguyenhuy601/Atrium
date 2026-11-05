@@ -1,4 +1,4 @@
-# Quy ước tầng HTTP (VoiceHub client)
+# Quy ước tầng HTTP (Atrium client)
 
 ## Hai instance Axios (cố ý tách — không gộp interceptor một PR)
 

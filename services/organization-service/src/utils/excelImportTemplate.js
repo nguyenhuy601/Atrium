@@ -165,7 +165,7 @@ async function buildWorkbookBufferFromLists({ deptNames = [], domains = [], jobT
   const jobTitleList = buildJobTitleSnapshot(jobTitles);
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'VoiceHub';
+  wb.creator = 'Atrium';
   const ws = wb.addWorksheet('resource_import', { views: [{ state: 'frozen', ySplit: 2 }] });
   const lists = wb.addWorksheet('lists');
   const notes = wb.addWorksheet('README');
@@ -241,7 +241,7 @@ async function buildWorkbookBufferFromLists({ deptNames = [], domains = [], jobT
   applyListValidation(ws, COL.primaryDomain, `lists!$B$2:$B$${domainEnd}`, false);
   applyListValidation(ws, COL.orgRole, `lists!$C$2:$C$${roleEnd}`, true);
 
-  notes.addRow(['Ghi chú template Excel HR (VoiceHub)']);
+  notes.addRow(['Ghi chú template Excel HR (Atrium)']);
   notes.addRow([]);
   notes.addRow([
     'Mẫu & cấu trúc cty',

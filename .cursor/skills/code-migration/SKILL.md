@@ -1,7 +1,7 @@
 ---
 name: code-migration
 description: >-
-  Migrates VoiceHub code between patterns or modules within scope (API client patterns, folder moves). Use for deliberate migrations with regression plan.
+  Migrates Atrium code between patterns or modules within scope (API client patterns, folder moves). Use for deliberate migrations with regression plan.
 ---
 
 # code migration

@@ -10,8 +10,8 @@ export const SUITE = {
   COLLABORATE: 'COLLABORATE',
 };
 
-export const SUITE_STORAGE_KEY = 'voicehub:current-suite';
-export const LAST_ORG_ID_KEY = 'voicehub:last-organization-id';
+export const SUITE_STORAGE_KEY = 'atrium:current-suite';
+export const LAST_ORG_ID_KEY = 'atrium:last-organization-id';
 
 const SUITE_SEGMENT = {
   [SUITE.COMMUNICATE]: 'communicate',

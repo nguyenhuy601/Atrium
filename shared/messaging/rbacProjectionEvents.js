@@ -3,7 +3,7 @@
  * role-permission-service consume → UserRole bindings + permission cache invalidate.
  */
 
-const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'voicehub.topic';
+const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'atrium.topic';
 
 /** @readonly */
 const RBAC_PROJECTION_EVENT_TYPES = {
@@ -41,10 +41,10 @@ const CATALOG = [
 ];
 
 const RBAC_PROJECTION_QUEUE =
-  process.env.RABBITMQ_RBAC_PROJECTION_QUEUE || 'voicehub.rbac.projection';
+  process.env.RABBITMQ_RBAC_PROJECTION_QUEUE || 'atrium.rbac.projection';
 const RBAC_PROJECTION_DLQ = `${RBAC_PROJECTION_QUEUE}.dlq`;
 const RBAC_CACHE_INVALIDATE_QUEUE =
-  process.env.RABBITMQ_RBAC_CACHE_INVALIDATE_QUEUE || 'voicehub.rbac.cache.invalidate';
+  process.env.RABBITMQ_RBAC_CACHE_INVALIDATE_QUEUE || 'atrium.rbac.cache.invalidate';
 
 const BINDING_KEYS = Object.values(RBAC_PROJECTION_EVENT_TYPES);
 

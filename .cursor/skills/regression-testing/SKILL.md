@@ -1,7 +1,7 @@
 ---
 name: regression-testing
 description: >-
-  Closes VoiceHub plans by running the plan Test section: unit, smoke/integration, FE build, security scripts when applicable; reports pass/fail/skip with blockers. Never fake pass.
+  Closes Atrium plans by running the plan Test section: unit, smoke/integration, FE build, security scripts when applicable; reports pass/fail/skip with blockers. Never fake pass.
 ---
 
 # regression testing
@@ -16,7 +16,7 @@ At start of design-only work.
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 - Skill `unit-testing` (buffer-only / no leftover test files)
 
 ## Input

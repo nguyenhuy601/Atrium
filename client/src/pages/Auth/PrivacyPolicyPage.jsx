@@ -30,7 +30,7 @@ function PrivacyPolicyPage() {
           <div className={FIGMA_LEGAL_LOGO_ICON}>
             <Zap size={20} className="text-white" aria-hidden />
           </div>
-          <span className={FIGMA_LEGAL_LOGO_TEXT}>VoiceHub</span>
+          <span className={FIGMA_LEGAL_LOGO_TEXT}>Atrium</span>
         </div>
 
         <div className={FIGMA_LEGAL_TITLE_ROW}>

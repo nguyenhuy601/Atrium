@@ -96,8 +96,8 @@ function mountSwagger(app) {
         var el = document.createElement('div');
         el.id = 'vh-openapi-downloads';
         el.className = 'download-openapi';
-        el.innerHTML = '<a href="/api/docs.json" download="voicehub-openapi.json">Download OpenAPI JSON</a>'
-          + '<a href="/api/docs.yaml" download="voicehub-openapi.yaml">Download OpenAPI YAML</a>';
+        el.innerHTML = '<a href="/api/docs.json" download="atrium-openapi.json">Download OpenAPI JSON</a>'
+          + '<a href="/api/docs.yaml" download="atrium-openapi.yaml">Download OpenAPI YAML</a>';
         bar.parentNode.insertBefore(el, bar.nextSibling);
       }, 500);
     });
@@ -114,7 +114,7 @@ function mountSwagger(app) {
     '/api/docs',
     swaggerUi.serve,
     swaggerUi.setup(spec, {
-      customSiteTitle: 'VoiceHub API Docs',
+      customSiteTitle: 'Atrium API Docs',
       customCss,
       customJs: '/api/docs-assets/download-links.js',
       swaggerOptions: {

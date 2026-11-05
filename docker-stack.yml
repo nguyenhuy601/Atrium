@@ -667,7 +667,7 @@ services:
       FRIEND_SERVICE_URL: ${FRIEND_SERVICE_URL}
       SOCKET_SERVICE_URL: ${SOCKET_SERVICE_URL}
       NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL}
-      CORS_ORIGIN: ${CORS_ORIGIN:-https://voicehub.local}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://atrium.dev}
       VOICE_SIGNAL_PATH: /voice-socket
       MEDIASOUP_LISTEN_IP: ${MEDIASOUP_LISTEN_IP:-0.0.0.0}
       MEDIASOUP_ANNOUNCED_IP: ${MEDIASOUP_ANNOUNCED_IP}
@@ -957,10 +957,10 @@ volumes:
   # Reuse Compose-extra volume names so existing models/objects survive cutover.
   ollama_data:
     external: true
-    name: voicehub-extra_ollama_data
+    name: atrium-extra_ollama_data
   minio_data:
     external: true
-    name: voicehub-extra_minio_data
+    name: atrium-extra_minio_data
   qdrant_data:
     external: true
-    name: voicehub-extra_qdrant_data
+    name: atrium-extra_qdrant_data

@@ -1,7 +1,7 @@
 ---
 name: code-review
 description: >-
-  Reviews VoiceHub diffs for correctness, clean code, contracts, ownership, security, and testability. Structured findings with severity — never only looks fine. Use for PR/diff review requests.
+  Reviews Atrium diffs for correctness, clean code, contracts, ownership, security, and testability. Structured findings with severity — never only looks fine. Use for PR/diff review requests.
 ---
 
 # code review
@@ -18,7 +18,7 @@ Writing a new feature from scratch.
 
 - `.cursor/rules/deep-agents-dispatch.mdc` (agent: `reviewer`)
 - `.cursor/rules/clean-code.mdc`
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

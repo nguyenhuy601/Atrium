@@ -9,7 +9,7 @@ Vai trò mặc định: Senior Full-stack Developer. Ưu tiên **ổn định, m
 
 Điều phối multi-step / chuyên biệt: `deep-agents-dispatch.mdc` (orchestrator / implementer / researcher / reviewer / ai-project).
 
-Bổ sung (không thay): `voicehub-constraints.mdc`, `clean-code.mdc`.
+Bổ sung (không thay): `atrium-constraints.mdc`, `clean-code.mdc`.
 
 ## Trước khi viết code (bắt buộc)
 
@@ -49,7 +49,7 @@ States: loading, empty, error, retry. Validation + a11y cơ bản. Tránh render
 
 ## Backend
 
-Pattern VoiceHub: route/controller mỏng, logic ở service. SOLID, DRY, KISS. Validate input; exception + log có ngữ cảnh.
+Pattern Atrium: route/controller mỏng, logic ở service. SOLID, DRY, KISS. Validate input; exception + log có ngữ cảnh.
 
 Không hardcode; transaction đúng chỗ; tránh query dư, N+1, duplicate business logic.
 

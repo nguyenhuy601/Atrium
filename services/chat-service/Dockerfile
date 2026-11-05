@@ -1,5 +1,5 @@
 # Build context: repo root
-#   docker build -f services/chat-service/Dockerfile -t voicehub-chat-service:latest .
+#   docker build -f services/chat-service/Dockerfile -t atrium-chat-service:latest .
 FROM node:20-alpine
 
 WORKDIR /app

@@ -72,10 +72,10 @@ function SettingsPage() {
   const [roleDeleteConfirm, setRoleDeleteConfirm] = useState(null);
   const [userRole, setUserRole] = useState('admin'); // 'admin', 'manager', 'user'
   const [organizationForm, setOrganizationForm] = useState({
-    name: 'VoiceHub Tech',
+    name: 'Atrium Tech',
     description: 'Leading technology company focused on communication solutions.',
-    website: 'https://voicehub.com',
-    contactEmail: 'contact@voicehub.com',
+    website: 'https://atrium.com',
+    contactEmail: 'contact@atrium.com',
   });
   const [userProfileForm, setUserProfileForm] = useState({
     fullName: '',
@@ -449,7 +449,7 @@ function SettingsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `voicehub-audit-${Date.now()}.txt`;
+    link.download = `atrium-audit-${Date.now()}.txt`;
     link.click();
     URL.revokeObjectURL(url);
     toast.success(t('settingsPage.toastExportAudit'));
@@ -468,14 +468,14 @@ function SettingsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `voicehub-invoice-${Date.now()}.txt`;
+    link.download = `atrium-invoice-${Date.now()}.txt`;
     link.click();
     URL.revokeObjectURL(url);
     toast.success(t('settingsPage.toastExportInvoice'));
   };
 
   const handleContactBilling = () => {
-    window.location.href = `mailto:billing@voicehub.com?subject=${encodeURIComponent(t('settingsPage.billingMailSubject'))}`;
+    window.location.href = `mailto:billing@atrium.com?subject=${encodeURIComponent(t('settingsPage.billingMailSubject'))}`;
   };
 
   const adminTabs = useMemo(

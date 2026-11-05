@@ -1,7 +1,7 @@
 ---
 name: requirement-decomposition
 description: >-
-  Decomposes requirements into Module, Feature, Requirement, Task hierarchies for VoiceHub microservices. Use for epics and multi-service work before plan-authoring.
+  Decomposes requirements into Module, Feature, Requirement, Task hierarchies for Atrium microservices. Use for epics and multi-service work before plan-authoring.
 ---
 
 # requirement decomposition
@@ -16,7 +16,7 @@ Tiny bugfix with known file.
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 
@@ -24,7 +24,7 @@ Structured or raw requirement
 
 ## Workflow
 
-1. Map to VoiceHub modules/services (client, gateway, services/*).
+1. Map to Atrium modules/services (client, gateway, services/*).
 2. Break Module → Feature → Requirement → Task.
 3. Tag ownership per service; mark cross-service deps.
 4. Feed tasks into plan-authoring section 4.

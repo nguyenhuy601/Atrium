@@ -81,7 +81,7 @@ function computeDesktopPosition(anchorRef, collapsed) {
   return { left, bottom, width: panelW };
 }
 
-export default function VoiceHubAIPanel({ onClose, anchorRef, collapsed = false }) {
+export default function AtriumAIPanel({ onClose, anchorRef, collapsed = false }) {
   const { t } = useAppStrings();
   const { locale } = useLocale();
   const TIME_LOCALE_EN = 'en-US';

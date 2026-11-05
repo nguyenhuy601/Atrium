@@ -293,7 +293,7 @@ export default function OrganizationTeamGrid({
           }).length
         : 0;
   const primaryRole = cards.find((card) => card.role)?.role || t('workspace.memberRole');
-  const orgInitial = String(organizationName || 'VoiceHub').trim().charAt(0).toUpperCase() || 'V';
+  const orgInitial = String(organizationName || 'Atrium').trim().charAt(0).toUpperCase() || 'V';
   const metrics = [
     {
       key: 'teams',

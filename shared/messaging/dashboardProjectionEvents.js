@@ -18,7 +18,7 @@ const DASHBOARD_PROJECTION_EVENT_TYPES = {
 };
 
 const DASHBOARD_PROJECTION_QUEUE =
-  process.env.RABBITMQ_DASHBOARD_PROJECTION_QUEUE || 'voicehub.dashboard.projection';
+  process.env.RABBITMQ_DASHBOARD_PROJECTION_QUEUE || 'atrium.dashboard.projection';
 const DASHBOARD_PROJECTION_DLQ = `${DASHBOARD_PROJECTION_QUEUE}.dlq`;
 
 const BINDING_KEYS = [...new Set(Object.values(DASHBOARD_PROJECTION_EVENT_TYPES))];

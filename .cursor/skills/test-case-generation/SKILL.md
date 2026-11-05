@@ -1,7 +1,7 @@
 ---
 name: test-case-generation
 description: >-
-  Generates VoiceHub test cases from requirements and business rules: happy, negative, boundary, permission, concurrency. Prefer for QA Agent. Does not modify product code.
+  Generates Atrium test cases from requirements and business rules: happy, negative, boundary, permission, concurrency. Prefer for QA Agent. Does not modify product code.
 ---
 
 # test case generation

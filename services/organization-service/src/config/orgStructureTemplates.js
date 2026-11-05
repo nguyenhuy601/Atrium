@@ -129,10 +129,10 @@ const ORG_STRUCTURE_TEMPLATES = {
       },
     ],
   },
-  /** Huy: tương thích VoiceHub hiện tại Branch→Khối→Department→Team */
+  /** Huy: tương thích Atrium hiện tại Branch→Khối→Department→Team */
   'enterprise-compat': {
     id: 'enterprise-compat',
-    label: 'VoiceHub Legacy Compat',
+    label: 'Atrium Legacy Compat',
     description: 'Branch → Khối → Department → Team (map 1:1 data hiện có).',
     levels: [
       { key: 'branch', label: 'Branch', order: 1, enabled: true, allowsChildren: true },

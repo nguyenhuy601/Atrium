@@ -1,7 +1,7 @@
 ---
 name: api-design
 description: >-
-  Designs or changes VoiceHub REST APIs using resource+method conventions, validation, errors, authz, pagination, and gateway/client alignment. Prefer extending existing routes over new paths.
+  Designs or changes Atrium REST APIs using resource+method conventions, validation, errors, authz, pagination, and gateway/client alignment. Prefer extending existing routes over new paths.
 ---
 
 # api design
@@ -18,7 +18,7 @@ UI-only work; socket-only when HTTP unchanged.
 
 - `.cursor/rules/restful-api-design.mdc`
 - `.cursor/rules/deep-agents-dispatch.mdc` (agent: `implementer` or `researcher`)
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

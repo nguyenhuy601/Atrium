@@ -1,7 +1,7 @@
 ---
 name: secret-scan
 description: >-
-  Checks VoiceHub changes for leaked secrets, tokens, and unsafe .env handling. Use before commits touching credentials or config.
+  Checks Atrium changes for leaked secrets, tokens, and unsafe .env handling. Use before commits touching credentials or config.
 ---
 
 # secret scan
@@ -16,7 +16,7 @@ Unrelated UI text.
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

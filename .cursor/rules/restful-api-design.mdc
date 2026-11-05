@@ -4,11 +4,11 @@ globs: services/**/routes/**/*.{js,ts},services/**/controllers/**/*.{js,ts},api-
 alwaysApply: false
 ---
 
-# REST API clean — VoiceHub
+# REST API clean — Atrium
 
 Khi thiết kế hoặc sửa HTTP API (route / controller / `client/src/services/api`): ưu tiên **resource + HTTP method**, không thêm verb giả trong path.
 
-Bổ sung (không thay) quy tắc «không thêm REST route mới khi gộp được» trong `voicehub-constraints.mdc`.
+Bổ sung (không thay) quy tắc «không thêm REST route mới khi gộp được» trong `atrium-constraints.mdc`.
 
 ## Nguyên tắc
 

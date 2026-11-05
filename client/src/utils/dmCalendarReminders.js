@@ -1,6 +1,6 @@
-/** Local calendar events liên quan DM (voicehub:calendar:localCustom) */
+/** Local calendar events liên quan DM (atrium:calendar:localCustom) */
 
-export const LOCAL_CUSTOM_KEY = 'voicehub:calendar:localCustom';
+export const LOCAL_CUSTOM_KEY = 'atrium:calendar:localCustom';
 const LOCAL_STORAGE_LEGACY = 'calendar:events';
 
 function migrateLegacyLocal() {

@@ -62,7 +62,7 @@ import { toastNetworkAware } from '../../lib/network/toastNetworkAware.js';
 
 ensureNetworkControllerStarted();
 
-// Đồng bộ với services/api.js — https://voicehub.local luôn dùng /api same-origin.
+// Đồng bộ với services/api.js — https://atrium.dev luôn dùng /api same-origin.
 const API_URL = resolveApiBaseUrl();
 
 // Create axios instance

@@ -9,9 +9,9 @@ export function LandingScaledShell({ children }) {
   const inv = 100 / s;
   return (
     <div
-      className={`voicehub-landing-embed relative w-full overflow-hidden rounded-2xl border ${
+      className={`atrium-landing-embed relative w-full overflow-hidden rounded-2xl border ${
         isDarkMode
-          ? 'voicehub-landing-embed--dark border-cyan-500/25 bg-[#050810]'
+          ? 'atrium-landing-embed--dark border-cyan-500/25 bg-[#050810]'
           : 'border-slate-200 bg-slate-100'
       }`}
       style={{ height: 'min(28rem, 55vh)', maxHeight: '520px' }}

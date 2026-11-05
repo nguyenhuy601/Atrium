@@ -81,7 +81,7 @@ function getDevSocketBaseUrl() {
   return window.location.origin;
 }
 
-/** Socket qua gateway — same-origin (Nginx https://voicehub.local), không :3000 trên host LAN. */
+/** Socket qua gateway — same-origin (Nginx https://atrium.dev), không :3000 trên host LAN. */
 function getAutoGatewayBaseUrl() {
   const fromBrowser = resolveAppOrigin();
   if (fromBrowser) return fromBrowser;

@@ -17,7 +17,7 @@ import {
 } from '../utils/calendarUtils';
 
 const LOCAL_STORAGE_LEGACY = 'calendar:events';
-const LOCAL_STORAGE_CUSTOM = 'voicehub:calendar:localCustom';
+const LOCAL_STORAGE_CUSTOM = 'atrium:calendar:localCustom';
 
 function migrateLegacyLocal() {
   try {

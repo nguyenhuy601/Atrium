@@ -8,6 +8,6 @@ export { default as Modal } from './Modal';
 export { default as ReviewNoteDialog } from './ReviewNoteDialog';
 export { default as NotificationModal } from './NotificationModal';
 export { default as Toast } from './Toast';
-export { default as VoiceHubToaster } from './VoiceHubToaster';
+export { default as AtriumToaster } from './AtriumToaster';
 export { default as NotificationBellBadge } from './NotificationBellBadge';
 

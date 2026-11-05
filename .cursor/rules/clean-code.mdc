@@ -1,11 +1,11 @@
 ---
-description: Clean Code khi viết/sửa VoiceHub — tên rõ, hàm nhỏ, không side-effect ẩn, diff tối thiểu
+description: Clean Code khi viết/sửa Atrium — tên rõ, hàm nhỏ, không side-effect ẩn, diff tối thiểu
 alwaysApply: true
 ---
 
-# Clean Code — VoiceHub
+# Clean Code — Atrium
 
-Áp dụng khi viết hoặc sửa code. Không thay `voicehub-constraints.mdc` (bảo mật, env, không đụng ngoài scope).
+Áp dụng khi viết hoặc sửa code. Không thay `atrium-constraints.mdc` (bảo mật, env, không đụng ngoài scope).
 
 ## Đặt tên
 
@@ -16,7 +16,7 @@ alwaysApply: true
 ## Hàm & module
 
 - **Một hàm ≈ một việc**; nếu cần comment “và sau đó…” → tách.
-- Controller/route: validate + gọi service + map HTTP. Business logic nằm **service** (đã có pattern VoiceHub).
+- Controller/route: validate + gọi service + map HTTP. Business logic nằm **service** (đã có pattern Atrium).
 - Tránh tham số boolean cờ hành vi kép (`save(x, true)`); dùng options object hoặc hai hàm rõ tên.
 - Early return thay vì nested `if` sâu.
 

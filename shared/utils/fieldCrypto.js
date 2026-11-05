@@ -29,12 +29,12 @@ function isEncryptionEnabled() {
 }
 
 function deriveFieldKey(masterBuf, kid) {
-  return crypto.hkdfSync('sha256', masterBuf, Buffer.from('voicehub-field'), Buffer.from(`kid:${kid}`), 32);
+  return crypto.hkdfSync('sha256', masterBuf, Buffer.from('atrium-field'), Buffer.from(`kid:${kid}`), 32);
 }
 
 /** HMAC blind index (phone lookup / unique) */
 function deriveBlindKey(masterBuf) {
-  return crypto.hkdfSync('sha256', masterBuf, Buffer.from('voicehub-blind'), Buffer.from('pii'), 32);
+  return crypto.hkdfSync('sha256', masterBuf, Buffer.from('atrium-blind'), Buffer.from('pii'), 32);
 }
 
 /**

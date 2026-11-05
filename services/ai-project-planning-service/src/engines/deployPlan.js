@@ -128,7 +128,7 @@ function phase4Checklist(envMatrix, mode) {
     },
     {
       id: 'CHK-NO-INAPP-CI',
-      title: 'CI/CD execute remains outside VoiceHub (checklist only)',
+      title: 'CI/CD execute remains outside Atrium (checklist only)',
       env: null,
     },
   ];

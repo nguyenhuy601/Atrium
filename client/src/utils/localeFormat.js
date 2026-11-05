@@ -48,7 +48,7 @@ export function formatRelativeTime(date, t) {
   return t('time.daysAgo', { n: days });
 }
 
-export const LOCALE_STORAGE_KEY = 'voicehub-locale';
+export const LOCALE_STORAGE_KEY = 'atrium-locale';
 
 /** Đọc locale từ localStorage (dùng ngoài React). */
 export function readStoredLocale() {

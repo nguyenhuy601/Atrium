@@ -4,7 +4,7 @@ import { resolveTaskAttachmentMime } from './taskBoardAttachmentMime';
 
 /**
  * Upload file đính kèm thẻ qua proxy same-origin (/messages/storage/upload).
- * Tránh PUT trực tiếp lên GCS/Firebase (403 CORS / Content-Type mismatch trên voicehub.local).
+ * Tránh PUT trực tiếp lên GCS/Firebase (403 CORS / Content-Type mismatch trên atrium.dev).
  * @returns {{ name: string, url: string, storagePath?: string, mimeType?: string }}
  */
 export async function uploadTaskBoardAttachment(file, onProgress, { t, locale = 'vi' } = {}) {

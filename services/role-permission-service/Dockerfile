@@ -1,5 +1,5 @@
 # Build context: repo root
-#   docker build -f services/role-permission-service/Dockerfile -t voicehub-role-permission-service:latest .
+#   docker build -f services/role-permission-service/Dockerfile -t atrium-role-permission-service:latest .
 FROM node:20-alpine
 
 WORKDIR /app

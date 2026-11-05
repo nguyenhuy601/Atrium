@@ -1,7 +1,7 @@
 ---
 name: integration-testing
 description: >-
-  Designs or runs integration tests across modules within a VoiceHub service or gateway path. Use when verifying controller-service-repository flows.
+  Designs or runs integration tests across modules within a Atrium service or gateway path. Use when verifying controller-service-repository flows.
 ---
 
 # integration testing
@@ -17,7 +17,7 @@ Pure unit of a single function.
 ## Related Rules
 
 - `.cursor/rules/deep-agents-dispatch.mdc` (agent: `reviewer`)
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

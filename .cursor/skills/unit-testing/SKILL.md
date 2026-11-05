@@ -1,7 +1,7 @@
 ---
 name: unit-testing
 description: >-
-  Adds or runs VoiceHub unit tests with node --test for shared and service policies/logic. Use when implementing unit coverage for changed logic.
+  Adds or runs Atrium unit tests with node --test for shared and service policies/logic. Use when implementing unit coverage for changed logic.
 ---
 
 # unit testing
@@ -16,7 +16,7 @@ Full E2E browser flows.
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

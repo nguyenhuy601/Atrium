@@ -1,7 +1,7 @@
 ---
 name: architecture-review
 description: >-
-  Reviews architecture/ADR documents for VoiceHub fitness: coupling, ownership, scalability, security. Not a code review — use code-review for diffs.
+  Reviews architecture/ADR documents for Atrium fitness: coupling, ownership, scalability, security. Not a code review — use code-review for diffs.
 ---
 
 # architecture review

@@ -1,7 +1,7 @@
 ---
 name: bug-fixing
 description: >-
-  Investigates and fixes VoiceHub bugs with minimal local changes: reproduce, narrow service, prove root cause, fix, verify. Prefer local fix over large refactors.
+  Investigates and fixes Atrium bugs with minimal local changes: reproduce, narrow service, prove root cause, fix, verify. Prefer local fix over large refactors.
 ---
 
 # bug fixing
@@ -16,7 +16,7 @@ Greenfield features.
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 - `.cursor/rules/swarm-compose-split.mdc`
 
 ## Input

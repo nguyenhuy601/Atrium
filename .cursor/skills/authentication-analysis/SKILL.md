@@ -1,7 +1,7 @@
 ---
 name: authentication-analysis
 description: >-
-  Analyzes VoiceHub authentication: JWT, gateway internal token, trust of x-user-id, bootstrap/internal routes. Use when touching auth-service or gateway auth forwarding.
+  Analyzes Atrium authentication: JWT, gateway internal token, trust of x-user-id, bootstrap/internal routes. Use when touching auth-service or gateway auth forwarding.
 ---
 
 # authentication analysis
@@ -16,7 +16,7 @@ Authorization-only RBAC catalog edits (use authorization-analysis).
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

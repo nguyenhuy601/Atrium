@@ -1,7 +1,7 @@
 ---
 name: documentation
 description: >-
-  Writes concise VoiceHub developer or user documentation when explicitly requested. Avoid unsolicited markdown files.
+  Writes concise Atrium developer or user documentation when explicitly requested. Avoid unsolicited markdown files.
 ---
 
 # documentation

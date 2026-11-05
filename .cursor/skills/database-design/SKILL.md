@@ -1,7 +1,7 @@
 ---
 name: database-design
 description: >-
-  Designs VoiceHub per-service schemas: entities, relationships, constraints, indexes, transactions, audit. Never shared DB across services.
+  Designs Atrium per-service schemas: entities, relationships, constraints, indexes, transactions, audit. Never shared DB across services.
 ---
 
 # database design

@@ -1,7 +1,7 @@
 {
   "name": "socket-service",
   "version": "1.0.0",
-  "description": "Realtime Socket.IO service for VoiceHub (DM chat, org chat, presence)",
+  "description": "Realtime Socket.IO service for Atrium (DM chat, org chat, presence)",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

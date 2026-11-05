@@ -1,7 +1,7 @@
 ---
 name: refactoring
 description: >-
-  Refactors VoiceHub code without changing behavior; includes FE page-removal cleanup per remove-page-cleanup rule. Use only when user requests refactor or page removal.
+  Refactors Atrium code without changing behavior; includes FE page-removal cleanup per remove-page-cleanup rule. Use only when user requests refactor or page removal.
 ---
 
 # refactoring
@@ -18,7 +18,7 @@ Mix large refactor into unrelated feature PR.
 
 - `.cursor/rules/clean-code.mdc`
 - `.cursor/rules/remove-page-cleanup.mdc`
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

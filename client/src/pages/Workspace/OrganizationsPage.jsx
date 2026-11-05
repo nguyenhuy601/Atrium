@@ -263,8 +263,8 @@ const DEMO_ORGANIZATIONS = [
   {
     _id: 'demo-org-vh',
     id: 'demo-org-vh',
-    name: 'VoiceHub Demo',
-    slug: 'voicehub-demo',
+    name: 'Atrium Demo',
+    slug: 'atrium-demo',
     role: 'admin',
   },
 ];

@@ -17,7 +17,7 @@ Already have clear AC and a one-file fix.
 ## Related Rules
 
 - `.cursor/rules/senior-dev-engineering.mdc`
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

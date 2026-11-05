@@ -1,5 +1,5 @@
 # Build context: repo root
-#   docker build -f services/notification-service/Dockerfile -t voicehub-notification-service:latest .
+#   docker build -f services/notification-service/Dockerfile -t atrium-notification-service:latest .
 FROM node:20-alpine
 
 WORKDIR /app

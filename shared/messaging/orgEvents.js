@@ -1,9 +1,9 @@
 /**
- * Wave 3A — Org domain events (RabbitMQ topic `voicehub.topic`).
+ * Wave 3A — Org domain events (RabbitMQ topic `atrium.topic`).
  * Routing key = event `type` (ví dụ `org.member.joined`).
  */
 
-const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'voicehub.topic';
+const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'atrium.topic';
 
 /** @readonly */
 const ORG_EVENT_TYPES = {
@@ -55,9 +55,9 @@ const CATALOG = [
   },
 ];
 
-const CHAT_QUEUE = process.env.RABBITMQ_ORG_EVENTS_CHAT_QUEUE || 'voicehub.org.events.chat';
+const CHAT_QUEUE = process.env.RABBITMQ_ORG_EVENTS_CHAT_QUEUE || 'atrium.org.events.chat';
 const NOTIFICATION_QUEUE =
-  process.env.RABBITMQ_ORG_EVENTS_NOTIFICATION_QUEUE || 'voicehub.org.events.notification';
+  process.env.RABBITMQ_ORG_EVENTS_NOTIFICATION_QUEUE || 'atrium.org.events.notification';
 const CHAT_DLQ = process.env.RABBITMQ_ORG_EVENTS_CHAT_DLQ || `${CHAT_QUEUE}.dlq`;
 const NOTIFICATION_DLQ =
   process.env.RABBITMQ_ORG_EVENTS_NOTIFICATION_DLQ || `${NOTIFICATION_QUEUE}.dlq`;

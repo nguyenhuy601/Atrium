@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://voicehub.local/schemas/release-manifest.schema.json",
-  "title": "VoiceHub Release Manifest",
+  "$id": "https://atrium.dev/schemas/release-manifest.schema.json",
+  "title": "Atrium Release Manifest",
   "type": "object",
   "required": ["releaseId", "commit", "createdAt", "registry", "owner", "services"],
   "additionalProperties": false,

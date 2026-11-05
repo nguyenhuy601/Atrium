@@ -1,12 +1,12 @@
 ---
 name: ai-project-primer
 description: >-
-  INVOKE FIRST for VoiceHub AI Project (Two-Phase HITL Planning) work — Phase 1
+  INVOKE FIRST for Atrium AI Project (Two-Phase HITL Planning) work — Phase 1
   WHAT / Phase 2 HOW, dedicated ai-project-planning-service, job projection,
   Gate 1/2, context+history control. Use before LangChain/Deep Agents skills.
 ---
 
-# AI Project primer (VoiceHub)
+# AI Project primer (Atrium)
 
 **Product name:** AI Project — Two-Phase Human-in-the-Loop Planning Architecture.
 
@@ -70,7 +70,7 @@ Không nhầm với các pipeline AI chat/task đã **gỡ** (`ai-task-service` 
 
 ## Constraints
 
-- `.cursor/rules/voicehub-constraints.mdc` — S2S clients trong `services/<name>/src/clients/`
+- `.cursor/rules/atrium-constraints.mdc` — S2S clients trong `services/<name>/src/clients/`
 - Swarm: build **chỉ** `ai-project-planning-service` khi đổi AI; không rebuild project vì AI
 - Ollama / Qdrant: Swarm (`docker-stack.yml`) — không nhét vào image project
 - Snapshot ingest ≠ LLM input; Run bind `snapshotId`

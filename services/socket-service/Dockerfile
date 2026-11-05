@@ -1,5 +1,5 @@
 # Build context: repo root
-#   docker build -f services/socket-service/Dockerfile -t voicehub-socket-service:latest .
+#   docker build -f services/socket-service/Dockerfile -t atrium-socket-service:latest .
 FROM node:20-alpine
 
 WORKDIR /app

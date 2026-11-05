@@ -13,7 +13,7 @@ export function isAuthRefreshDisabled() {
   const disabled = raw === '1' || raw === 'true' || raw === 'yes';
   if (disabled && import.meta.env.PROD) {
     console.warn(
-      '[VoiceHub] VITE_DISABLE_AUTH_REFRESH is enabled in production — expired sessions may not auto-refresh.'
+      '[Atrium] VITE_DISABLE_AUTH_REFRESH is enabled in production — expired sessions may not auto-refresh.'
     );
   }
   return disabled;
@@ -30,7 +30,7 @@ async function callRefreshEndpoint() {
         headers: {
           'Content-Type': 'application/json',
           // Header required by CSRF guard in refresh/logout flows.
-          'X-VoiceHub-Client': '1',
+          'X-Atrium-Client': '1',
         },
         timeout: 30000,
       }

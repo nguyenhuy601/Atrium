@@ -179,7 +179,7 @@ export default function TopHeader() {
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 lg:hidden"
             aria-label={t('nav.openMenu')}
             aria-expanded={mobileNavOpen}
-            aria-controls="voicehub-mobile-nav"
+            aria-controls="atrium-mobile-nav"
           >
             <PanelLeft size={18} strokeWidth={2} />
           </button>
@@ -191,7 +191,7 @@ export default function TopHeader() {
           </div>
           <div>
             <div className="text-[0.9375rem] font-bold leading-tight tracking-tight text-foreground">
-              VoiceHub
+              Atrium
             </div>
             <div className="flex items-center gap-0.5">
               <div

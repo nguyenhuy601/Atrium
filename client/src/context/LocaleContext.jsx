@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
-const STORAGE_KEY = 'voicehub-locale';
+const STORAGE_KEY = 'atrium-locale';
 
 const LocaleContext = createContext(null);
 

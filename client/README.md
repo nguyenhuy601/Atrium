@@ -1,4 +1,4 @@
-# VoiceHub — Frontend (`client/`)
+# Atrium — Frontend (`client/`)
 
 Ứng dụng web **React 18 + Vite 5**, gọi **API Gateway** qua prefix `/api` (dev: proxy trong [`vite.config.js`](vite.config.js)).
 
@@ -52,7 +52,7 @@ Tạo file `.env` trực tiếp trong thư mục `client/`:
 3. **`LocaleProvider`** (vi/en, `document.documentElement.lang`)  
 4. `AuthProvider`  
 5. `SocketProvider`  
-6. `App` + `VoiceHubToaster`
+6. `App` + `AtriumToaster`
 
 ---
 

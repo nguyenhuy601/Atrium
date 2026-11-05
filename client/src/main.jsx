@@ -32,7 +32,7 @@ import './index.css';
    cho tất cả components con qua Context API
 ======================================== */
 
-import VoiceHubToaster from './components/Shared/VoiceHubToaster';
+import AtriumToaster from './components/Shared/AtriumToaster';
 
 // Import AuthProvider để quản lý authentication state
 // File: ./context/AuthContext.jsx
@@ -135,7 +135,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
               {/* Toaster: hiển thị toast notifications
                   - Đặt ở đây để dùng được ở mọi nơi
                   - toast.success(), toast.error() ở bất kỳ component nào */}
-              <VoiceHubToaster />
+              <AtriumToaster />
             </SocketProvider>
             </WorkspaceSuiteProvider>
             </WorkspaceProvider>

@@ -4,7 +4,7 @@ const { logger } = require('@enterprise/shared');
 const { assertQuorumQueue } = require('@enterprise/shared/messaging/rabbitQuorum');
 const { runWithReconnect, waitForAmqpClose } = require('@enterprise/shared/messaging/rabbitReconnect');
 
-const QUEUE = process.env.RABBITMQ_NOTIFICATION_DISPATCH_QUEUE || 'voicehub.notification.dispatch';
+const QUEUE = process.env.RABBITMQ_NOTIFICATION_DISPATCH_QUEUE || 'atrium.notification.dispatch';
 const DLQ = process.env.RABBITMQ_NOTIFICATION_DISPATCH_DLQ || `${QUEUE}.dlq`;
 const MAX_RETRIES = Math.max(
   0,

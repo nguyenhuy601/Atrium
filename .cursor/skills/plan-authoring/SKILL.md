@@ -1,13 +1,13 @@
 ---
 name: plan-authoring
 description: >-
-  Authors VoiceHub technical plans using the mandatory Plan Standard (6 sections
+  Authors Atrium technical plans using the mandatory Plan Standard (6 sections
   with measurable DoD, classified files, review gates, test commands, risks).
   Use when creating or updating CreatePlan / .cursor/plans/*, feature design,
   or multi-step implementation plans.
 ---
 
-# Plan authoring (VoiceHub Plan Standard)
+# Plan authoring (Atrium Plan Standard)
 
 ## When to use
 
@@ -21,7 +21,7 @@ description: >-
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc` — Plan Standard (mandatory skeleton)
+- `.cursor/rules/atrium-constraints.mdc` — Plan Standard (mandatory skeleton)
 - Feed §2.5 from skill `change-impact-analysis`
 - Feed §3 from `architecture-analysis` / `api-design` / `service-boundary-analysis`
 - Feed §5 from `test-planning` / `test-case-generation`

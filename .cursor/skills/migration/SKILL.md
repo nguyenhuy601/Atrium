@@ -1,7 +1,7 @@
 ---
 name: migration
 description: >-
-  Plans and applies safe, reversible database/model migrations within a single VoiceHub service ownership boundary. Use when changing schemas, indexes, or data backfills.
+  Plans and applies safe, reversible database/model migrations within a single Atrium service ownership boundary. Use when changing schemas, indexes, or data backfills.
 ---
 
 # migration
@@ -17,7 +17,7 @@ Cross-service shared schema (forbidden).
 ## Related Rules
 
 - `.cursor/rules/deep-agents-dispatch.mdc` (agent: `implementer`); skills `database-design` / `migration`
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

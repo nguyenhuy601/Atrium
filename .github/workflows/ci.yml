@@ -1,4 +1,4 @@
-# CI — Continuous Integration (VoiceHub)
+# CI — Continuous Integration (Atrium)
 # branch push / PR→main: Lint → Test → Scan(fs) → Build (push=false) → ci-gate
 # main push:             Lint → Test → Scan(fs) → Build+Push → Scan(image) → Manifest → ci-gate
 # Không dual CI / không release.yml — publish chỉ trên main trong workflow này.
@@ -96,7 +96,7 @@ jobs:
           fetch-depth: 0
 
       - name: Security env (ci profile)
-        run: VOICEHUB_ENV_CHECK=ci bash devops/scripts/security/check-security-env.sh
+        run: ATRIUM_ENV_CHECK=ci bash devops/scripts/security/check-security-env.sh
 
       - name: Gitleaks
         uses: gitleaks/gitleaks-action@v2
@@ -369,7 +369,7 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           push: false
-          tags: voicehub-${{ matrix.image }}:ci
+          tags: atrium-${{ matrix.image }}:ci
           cache-from: type=gha,scope=ci-${{ matrix.image }}
           cache-to: type=gha,mode=min,scope=ci-${{ matrix.image }}
 
@@ -407,8 +407,8 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/voicehub/${{ matrix.image }}:${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/voicehub/${{ matrix.image }}:latest
+            ghcr.io/${{ github.repository_owner }}/atrium/${{ matrix.image }}:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/atrium/${{ matrix.image }}:latest
           cache-from: type=gha,scope=ci-${{ matrix.image }}
           cache-to: type=gha,mode=min,scope=ci-${{ matrix.image }}
       - name: Resolve digest
@@ -418,7 +418,7 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          REF="ghcr.io/${OWNER}/voicehub/${IMAGE}:${SHA}"
+          REF="ghcr.io/${OWNER}/atrium/${IMAGE}:${SHA}"
           DIGEST="$(docker buildx imagetools inspect "${REF}" --format '{{.Manifest.Digest}}' 2>/dev/null || true)"
           if [[ -z "${DIGEST}" || "${DIGEST}" != sha256:* ]]; then
             DIGEST="$(docker buildx imagetools inspect "${REF}" | awk '/Digest:/ {print $2; exit}')"
@@ -436,7 +436,7 @@ jobs:
           TRIVY_JAVA_DB_REPOSITORY: aquasec/trivy-java-db,ghcr.io/aquasecurity/trivy-java-db,public.ecr.aws/aquasecurity/trivy-java-db
         with:
           scan-type: image
-          image-ref: ghcr.io/${{ github.repository_owner }}/voicehub/${{ matrix.image }}:${{ github.sha }}
+          image-ref: ghcr.io/${{ github.repository_owner }}/atrium/${{ matrix.image }}:${{ github.sha }}
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
@@ -448,7 +448,7 @@ jobs:
           TRIVY_SKIP_JAVA_DB_UPDATE: "true"
         with:
           scan-type: image
-          image-ref: ghcr.io/${{ github.repository_owner }}/voicehub/${{ matrix.image }}:${{ github.sha }}
+          image-ref: ghcr.io/${{ github.repository_owner }}/atrium/${{ matrix.image }}:${{ github.sha }}
           severity: HIGH,CRITICAL
           exit-code: "1"
           ignore-unfixed: true
@@ -519,7 +519,7 @@ jobs:
 
           mkdir -p prev-manifest
           PREV_TAG="$(gh release list --limit 20 --json tagName,isDraft \
-            --jq '[.[] | select(.isDraft==false) | .tagName] | map(select(startswith("voicehub-R"))) | .[0] // empty' 2>/dev/null || true)"
+            --jq '[.[] | select(.isDraft==false) | .tagName] | map(select(startswith("atrium-R"))) | .[0] // empty' 2>/dev/null || true)"
           EXTRA=()
           if [[ -n "${PREV_TAG}" ]]; then
             echo "Previous release tag: ${PREV_TAG}"
@@ -527,7 +527,7 @@ jobs:
               EXTRA+=(--previous prev-manifest/release-manifest.json)
             fi
           else
-            echo "No previous voicehub-R* release found"
+            echo "No previous atrium-R* release found"
           fi
 
           node devops/scripts/release/generate-release-manifest.mjs \
@@ -580,8 +580,8 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          TAG="voicehub-${RELEASE_ID}"
-          TITLE="VoiceHub ${RELEASE_ID}"
+          TAG="atrium-${RELEASE_ID}"
+          TITLE="Atrium ${RELEASE_ID}"
           BODY="Immutable release for commit \`${SHA}\`.
 
           Deploy: \`bash devops/swarm/deploy-release.sh --release-id ${RELEASE_ID}\`

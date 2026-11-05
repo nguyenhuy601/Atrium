@@ -1,7 +1,7 @@
 const amqp = require('amqplib');
 const { randomUUID } = require('crypto');
 
-const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'voicehub.topic';
+const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'atrium.topic';
 const ROUTING_KEY = process.env.RABBITMQ_FRIEND_DM_ROUTING_KEY || 'friend.dm';
 
 let connection = null;

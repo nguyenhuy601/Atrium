@@ -1,5 +1,5 @@
 # Build context: repo root
-#   docker build -f services/voice-service/Dockerfile -t voicehub-voice-service:latest .
+#   docker build -f services/voice-service/Dockerfile -t atrium-voice-service:latest .
 # mediasoup yêu cầu Node >= 22
 # bookworm: bullseye-security apt 404 (ffmpeg/python3-pip) làm CI build exit 100
 FROM node:22-bookworm

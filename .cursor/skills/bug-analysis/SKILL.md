@@ -1,7 +1,7 @@
 ---
 name: bug-analysis
 description: >-
-  Triages VoiceHub bugs before fixing: severity, area, repro steps, suspected layer. Use before bug-fixing on unclear issues.
+  Triages Atrium bugs before fixing: severity, area, repro steps, suspected layer. Use before bug-fixing on unclear issues.
 ---
 
 # bug analysis

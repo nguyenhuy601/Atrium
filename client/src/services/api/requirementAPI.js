@@ -201,10 +201,10 @@ export const requirementAPI = {
         ? crypto.randomUUID()
         : `phase-run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
     const { idempotencyKey: _omit, ...restBody } = body || {};
-    // Account UI locale (voicehub-locale) → AI proposal language Vi/EN
+    // Account UI locale (atrium-locale) → AI proposal language Vi/EN
     let uiLocale = 'vi';
     try {
-      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('voicehub-locale') : null;
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('atrium-locale') : null;
       if (saved === 'en' || saved === 'vi') uiLocale = saved;
     } catch {
       /* ignore */

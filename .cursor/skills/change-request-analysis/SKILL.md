@@ -16,7 +16,7 @@ Initial greenfield requirement (use requirement-analysis).
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

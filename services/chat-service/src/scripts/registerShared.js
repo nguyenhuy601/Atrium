@@ -18,12 +18,12 @@ function findRepoRoot(fromDir) {
 }
 
 function registerShared() {
-  if (global.__VOICEHUB_SHARED_REGISTERED) return;
+  if (global.__ATRIUM_SHARED_REGISTERED) return;
 
   const repoRoot = findRepoRoot(__dirname);
   if (!repoRoot) {
     throw new Error(
-      '[registerShared] Không tìm thấy thư mục shared/ — chạy từ repo VoiceHub hoặc dùng Docker: docker compose exec chat-service npm run backfill:message-search'
+      '[registerShared] Không tìm thấy thư mục shared/ — chạy từ repo Atrium hoặc dùng Docker: docker compose exec chat-service npm run backfill:message-search'
     );
   }
 
@@ -56,7 +56,7 @@ function registerShared() {
     return origResolve.call(this, request, parent, isMain, options);
   };
 
-  global.__VOICEHUB_SHARED_REGISTERED = true;
+  global.__ATRIUM_SHARED_REGISTERED = true;
 }
 
 module.exports = { registerShared };

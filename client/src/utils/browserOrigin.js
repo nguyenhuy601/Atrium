@@ -1,5 +1,5 @@
 /**
- * URL API / signaling khi UI chạy sau reverse proxy (https://voicehub.local).
+ * URL API / signaling khi UI chạy sau reverse proxy (https://atrium.dev).
  * Tránh hardcode localhost:3000 hoặc :3000 trên hostname LAN.
  */
 
@@ -22,7 +22,7 @@ export function resolveApiBaseUrl() {
  * Origin cho Socket.IO gateway và voice signaling (mediasoup).
  * Ưu tiên trình duyệt đang mở (Nginx TLS), không gắn cổng gateway :3000.
  */
-/** Origin UI đang mở (vd. https://voicehub.local) — gửi kèm auth API để link email đúng host. */
+/** Origin UI đang mở (vd. https://atrium.dev) — gửi kèm auth API để link email đúng host. */
 export function getBrowserFrontendOrigin() {
   if (typeof window !== 'undefined' && window.location?.origin) {
     return String(window.location.origin).replace(/\/+$/, '');

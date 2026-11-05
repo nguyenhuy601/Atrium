@@ -124,7 +124,7 @@ async function buildSrsExportWorkbook({
   baseline = null,
 } = {}) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'VoiceHub';
+  wb.creator = 'Atrium';
   wb.created = new Date();
 
   const byKind = (k) => artifacts.filter((a) => String(a.kind || '').toUpperCase() === k);
@@ -466,7 +466,7 @@ async function buildSrsExportWorkbook({
     ['InScopeSummary', inScope.slice(0, 12).join('; ') || '(see 08_Scope)'],
     ['OutOfScopeSummary', outScope.slice(0, 12).join('; ') || '(see 08_Scope)'],
     ['ProductFunctionsSummary', bgSummary.join('; ') || '(see 02_BG / 05_FR)'],
-    ['References', 'ISO/IEC/IEEE 29148; VoiceHub Analysis workbook'],
+    ['References', 'ISO/IEC/IEEE 29148; Atrium Analysis workbook'],
   ]);
 
   const userCharRows = [];
@@ -523,7 +523,7 @@ async function buildSrsExportWorkbook({
 
   addSheet(wb, '18_StandardsCompliance', ['Key', 'Value'], [
     ['MappingStandard', 'ISO/IEC/IEEE 29148:2018 §9.6 (tailored)'],
-    ['WorkingRA', 'VoiceHub Analysis kinds BG/BR/BPM/FR/UC/NFR/SCOPE/INTERFACE/DATA/GLOSSARY/ASSUMPTION'],
+    ['WorkingRA', 'Atrium Analysis kinds BG/BR/BPM/FR/UC/NFR/SCOPE/INTERFACE/DATA/GLOSSARY/ASSUMPTION'],
     ['Verification', 'See 13_Verification + Planning Test Case catalog'],
     ['ChangeControl', 'Phase 2 Change Request after SRS baseline cut'],
     ['Note', 'Export-first sheets 15–18; authorable Analysis tabs may follow if BA needs'],

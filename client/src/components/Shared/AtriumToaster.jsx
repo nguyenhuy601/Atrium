@@ -5,7 +5,7 @@ import { TOAST_DURATION } from '../../utils/appToast';
 /**
  * react-hot-toast — style đồng bộ dark/light (figma surface).
  */
-export default function VoiceHubToaster() {
+export default function AtriumToaster() {
   const { isDarkMode } = useTheme();
 
   const baseStyle = isDarkMode

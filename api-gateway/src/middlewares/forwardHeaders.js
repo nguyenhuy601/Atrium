@@ -17,7 +17,7 @@ function isTrustProxyEnabled() {
 /**
  * Không có reverse proxy tin cậy phía trước (gọi thẳng :3000) → XFF / X-Real-IP do client tự đặt.
  * Xóa trước rate-limit và trước proxy (`xfwd` sẽ gắn IP socket thật cho downstream).
- * Có TRUST_PROXY=1 (Nginx voicehub.local) → Nginx sở hữu các header này, giữ nguyên.
+ * Có TRUST_PROXY=1 (Nginx atrium.dev) → Nginx sở hữu các header này, giữ nguyên.
  */
 function stripSpoofedForwardHeaders(req, res, next) {
   if (!isTrustProxyEnabled()) {

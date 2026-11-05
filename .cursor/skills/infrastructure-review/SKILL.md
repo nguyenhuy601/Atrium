@@ -1,7 +1,7 @@
 ---
 name: infrastructure-review
 description: >-
-  Reviews VoiceHub infra files (docker-stack, nginx, compose extra) for correctness vs Swarm/Compose split and LAN HTTPS. Use when changing infra configs.
+  Reviews Atrium infra files (docker-stack, nginx, compose extra) for correctness vs Swarm/Compose split and LAN HTTPS. Use when changing infra configs.
 ---
 
 # infrastructure review
@@ -17,7 +17,7 @@ Application-only PRs.
 ## Related Rules
 
 - `.cursor/rules/swarm-compose-split.mdc`
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

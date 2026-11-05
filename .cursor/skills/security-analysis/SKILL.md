@@ -1,7 +1,7 @@
 ---
 name: security-analysis
 description: >-
-  Broad VoiceHub security analysis covering authn/authz, validation, injection, uploads, secrets, tokens, sessions, RBAC, data exposure. Use for audits or sensitive features.
+  Broad Atrium security analysis covering authn/authz, validation, injection, uploads, secrets, tokens, sessions, RBAC, data exposure. Use for audits or sensitive features.
 ---
 
 # security analysis
@@ -16,7 +16,7 @@ Non-sensitive copy tweaks.
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 - `.cursor/rules/deep-agents-dispatch.mdc`; skill `authorization-analysis`
 
 ## Input

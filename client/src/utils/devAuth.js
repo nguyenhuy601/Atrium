@@ -7,7 +7,7 @@ export function isAutoLogoutDisabled() {
   const disabled = v === 'true' || v === '1' || v === 1;
   if (disabled && import.meta.env.PROD) {
     console.warn(
-      '[VoiceHub] VITE_DISABLE_AUTO_LOGOUT is enabled in production — session revocation may not apply on the client.'
+      '[Atrium] VITE_DISABLE_AUTO_LOGOUT is enabled in production — session revocation may not apply on the client.'
     );
   }
   return disabled;

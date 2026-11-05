@@ -1,4 +1,4 @@
-# CD — Continuous Delivery / Deployment (VoiceHub)
+# CD — Continuous Delivery / Deployment (Atrium)
 # Chuẩn: CI PASS (main publish + manifest) → Resolve Release → Promote
 # Wave 1: gate Environment + manual Swarm; Wave 2: self-hosted runners.
 #
@@ -111,7 +111,7 @@ jobs:
           }
 
           if [[ -n "${INPUT_RELEASE}" ]]; then
-            TAG="voicehub-${INPUT_RELEASE}"
+            TAG="atrium-${INPUT_RELEASE}"
             echo "Trying release tag ${TAG}"
             if gh release download "${TAG}" --pattern release-manifest.json --dir .release 2>/dev/null; then
               try_file .release/release-manifest.json || true
@@ -128,9 +128,9 @@ jobs:
           fi
 
           if [[ -z "${FOUND}" ]]; then
-            echo "Searching voicehub-R* releases for commit ${SHA}"
+            echo "Searching atrium-R* releases for commit ${SHA}"
             mapfile -t TAGS < <(gh release list --limit 40 --json tagName \
-              --jq '[.[] | .tagName] | map(select(startswith("voicehub-R"))) | .[]')
+              --jq '[.[] | .tagName] | map(select(startswith("atrium-R"))) | .[]')
             FALLBACK=""
             for TAG in "${TAGS[@]:-}"; do
               rm -f .release/candidate.json
@@ -149,7 +149,7 @@ jobs:
               fi
             done
             if [[ -z "${FOUND}" && -n "${FALLBACK}" ]]; then
-              echo "::warning::No exact SHA match; using newest voicehub-R* manifest"
+              echo "::warning::No exact SHA match; using newest atrium-R* manifest"
               cp "${FALLBACK}" .release/release-manifest.json
               FOUND=".release/release-manifest.json"
             fi
@@ -219,7 +219,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: development
-      url: https://voicehub.local
+      url: https://atrium.dev
     steps:
       - uses: actions/checkout@v4
         with:
@@ -233,7 +233,7 @@ jobs:
           SHA: ${{ needs.artifact-ready.outputs.sha }}
           RELEASE_ID: ${{ needs.artifact-ready.outputs.release_id }}
           OWNER: ${{ github.repository_owner }}
-          CD_ACTIVE: ${{ vars.VOICEHUB_CD_DEV_ACTIVE || 'false' }}
+          CD_ACTIVE: ${{ vars.ATRIUM_CD_DEV_ACTIVE || 'false' }}
         run: |
           set -euo pipefail
           node -e 'const m=require("./release-manifest.json"); console.log("release", m.releaseId, "commit", m.commit); console.log("services", Object.keys(m.services).length);'
@@ -247,12 +247,12 @@ jobs:
           Manual Swarm:
             bash devops/swarm/deploy-release.sh --manifest ./release-manifest.json --env development
             # hoặc:
-            VOICEHUB_RELEASE_MANIFEST=./release-manifest.json bash devops/swarm/deploy-stack.sh
+            ATRIUM_RELEASE_MANIFEST=./release-manifest.json bash devops/swarm/deploy-stack.sh
 
-          Wave 2: self-hosted + VOICEHUB_CD_DEV_ACTIVE=true
+          Wave 2: self-hosted + ATRIUM_CD_DEV_ACTIVE=true
           EOF
           if [[ "${CD_ACTIVE}" == "true" ]]; then
-            echo "::error::VOICEHUB_CD_DEV_ACTIVE=true nhưng job vẫn chạy trên ubuntu-latest — gắn self-hosted (Wave 2)."
+            echo "::error::ATRIUM_CD_DEV_ACTIVE=true nhưng job vẫn chạy trên ubuntu-latest — gắn self-hosted (Wave 2)."
             exit 1
           fi
           echo "delivery_gate=recorded deployed=false"
@@ -275,8 +275,8 @@ jobs:
           cat <<EOF
           === Smoke development ===
           releaseId=${RELEASE_ID} SHA=${SHA}
-          1) VOICEHUB_ENV_CHECK=ci bash devops/scripts/security/check-security-env.sh
-          2) devops/nginx/verify-lan-https.ps1 -BaseUrl https://voicehub.local
+          1) ATRIUM_ENV_CHECK=ci bash devops/scripts/security/check-security-env.sh
+          2) devops/nginx/verify-lan-https.ps1 -BaseUrl https://atrium.dev
           EOF
 
   deploy-staging:
@@ -299,7 +299,7 @@ jobs:
           SHA: ${{ needs.artifact-ready.outputs.sha }}
           RELEASE_ID: ${{ needs.artifact-ready.outputs.release_id }}
           OWNER: ${{ github.repository_owner }}
-          CD_ACTIVE: ${{ vars.VOICEHUB_CD_STAGING_ACTIVE || 'false' }}
+          CD_ACTIVE: ${{ vars.ATRIUM_CD_STAGING_ACTIVE || 'false' }}
         run: |
           set -euo pipefail
           node -e 'const m=require("./release-manifest.json"); for (const [k,v] of Object.entries(m.services)) console.log(k, v.digest);'
@@ -309,7 +309,7 @@ jobs:
           Pin digests from manifest (không :latest)
 
           Manual:
-            VOICEHUB_ENV_CHECK=staging bash devops/scripts/security/check-security-env.sh
+            ATRIUM_ENV_CHECK=staging bash devops/scripts/security/check-security-env.sh
             bash devops/swarm/deploy-release.sh --release-id ${RELEASE_ID} --env staging
 
           Rollback: bash devops/swarm/deploy-release.sh --release-id <previous> --env staging
@@ -335,7 +335,7 @@ jobs:
           cat <<EOF
           === Smoke staging ===
           releaseId=${RELEASE_ID} SHA=${SHA}
-          - VOICEHUB_ENV_CHECK=staging bash devops/scripts/security/check-security-env.sh
+          - ATRIUM_ENV_CHECK=staging bash devops/scripts/security/check-security-env.sh
           - devops/swarm/voice-staging-smoke.md
           EOF
 
@@ -356,7 +356,7 @@ jobs:
           SHA: ${{ needs.artifact-ready.outputs.sha }}
           RELEASE_ID: ${{ needs.artifact-ready.outputs.release_id }}
           OWNER: ${{ github.repository_owner }}
-          CD_ACTIVE: ${{ vars.VOICEHUB_CD_PROD_ACTIVE || 'false' }}
+          CD_ACTIVE: ${{ vars.ATRIUM_CD_PROD_ACTIVE || 'false' }}
         run: |
           set -euo pipefail
           node -e 'const m=require("./release-manifest.json"); console.log(JSON.stringify({releaseId:m.releaseId,commit:m.commit,services:Object.keys(m.services).length},null,2));'

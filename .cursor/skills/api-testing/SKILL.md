@@ -1,7 +1,7 @@
 ---
 name: api-testing
 description: >-
-  Tests VoiceHub HTTP APIs for status codes, auth, validation, and contract alignment. Use after api-design/implement changes.
+  Tests Atrium HTTP APIs for status codes, auth, validation, and contract alignment. Use after api-design/implement changes.
 ---
 
 # api testing

@@ -67,7 +67,7 @@ function addSheet(wb, name, columns, rows = []) {
 
 async function buildRequirementAnalysisTemplateBuffer() {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'VoiceHub';
+  wb.creator = 'Atrium';
   wb.created = new Date();
 
   addSheet(wb, ANALYSIS_SHEETS.META, ANALYSIS_SHEET_COLUMNS[ANALYSIS_SHEETS.META], [

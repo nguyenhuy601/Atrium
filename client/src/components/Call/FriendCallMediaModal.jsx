@@ -785,7 +785,7 @@ export default function FriendCallMediaModal() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `voicehub-call-${Date.now()}.${ext}`;
+        a.download = `atrium-call-${Date.now()}.${ext}`;
         a.click();
         URL.revokeObjectURL(url);
         toast.success(t('friendChat.callRecordSaved'));

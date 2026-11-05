@@ -1,7 +1,7 @@
 ---
 name: requirement-traceability
 description: >-
-  Builds Req to AC to API to Test traceability matrices for VoiceHub releases or audits. Use for large releases needing coverage proof.
+  Builds Req to AC to API to Test traceability matrices for Atrium releases or audits. Use for large releases needing coverage proof.
 ---
 
 # requirement traceability
@@ -16,7 +16,7 @@ Small single-task fixes.
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 - `.cursor/rules/deep-agents-dispatch.mdc` (agent: `reviewer`)
 
 ## Input

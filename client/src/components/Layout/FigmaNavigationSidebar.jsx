@@ -47,7 +47,7 @@ import {
   getDefaultPathForSuite,
 } from '../../utils/suitePathUtils';
 import { COMPANY_SPACE_LEVEL } from '../../utils/companySpaceLevel';
-import VoiceHubAIPanel from './VoiceHubAIPanel';
+import AtriumAIPanel from './AtriumAIPanel';
 import { VH_NAV_CHEVRON } from '../../motion/classes';
 import useMotionPresence from '../../motion/useMotionPresence';
 import { VH_MOTION_BASE_MS } from '../../motion/tokens';
@@ -639,7 +639,7 @@ export default function FigmaNavigationSidebar({
         />
       ) : null}
       <div
-        id="voicehub-mobile-nav"
+        id="atrium-mobile-nav"
         role={mobileNavOpen ? 'dialog' : undefined}
         aria-modal={mobileNavOpen ? true : undefined}
         aria-label={t('nav.mainMenu')}
@@ -810,7 +810,7 @@ export default function FigmaNavigationSidebar({
             >
               <Bot size={14} className="shrink-0 text-orange-500" />
               <div className="flex-1 text-left">
-                <div className="text-[0.7812rem] font-semibold text-orange-500">@VoiceHubAI</div>
+                <div className="text-[0.7812rem] font-semibold text-orange-500">@AtriumAI</div>
                 <div className="mt-px text-[0.625rem] text-orange-400/60">
                   {t('nav.aiSmartAssistant')}
                 </div>
@@ -824,7 +824,7 @@ export default function FigmaNavigationSidebar({
       </nav>
 
       {showAIPanel ? (
-        <VoiceHubAIPanel
+        <AtriumAIPanel
           onClose={() => setShowAIPanel(false)}
           anchorRef={aiButtonRef}
           collapsed={railCollapsed}

@@ -31,7 +31,7 @@ Khi **gỡ** một page, route hoặc feature UI (ví dụ landing, màn marketi
 
 4. **Verify**
    - `cd client && npm run build` — bắt buộc pass trước khi báo xong.
-   - Hard refresh dev (`https://voicehub.local`) — không `ReferenceError`, route `/` và guest `/app/*` đúng hành vi mong muốn.
+   - Hard refresh dev (`https://atrium.dev`) — không `ReferenceError`, route `/` và guest `/app/*` đúng hành vi mong muốn.
 
 ## Ví dụ lỗi cần tránh
 

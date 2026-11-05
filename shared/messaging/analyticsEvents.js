@@ -3,7 +3,7 @@
  * ETL consume → analytics store riêng; report-service chỉ đọc warehouse.
  */
 
-const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'voicehub.topic';
+const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'atrium.topic';
 
 /** @readonly */
 const ANALYTICS_EVENT_TYPES = {
@@ -55,7 +55,7 @@ const CATALOG = [
 ];
 
 const ANALYTICS_ETL_QUEUE =
-  process.env.RABBITMQ_ANALYTICS_ETL_QUEUE || 'voicehub.analytics.etl';
+  process.env.RABBITMQ_ANALYTICS_ETL_QUEUE || 'atrium.analytics.etl';
 const ANALYTICS_ETL_DLQ = `${ANALYTICS_ETL_QUEUE}.dlq`;
 
 const BINDING_KEYS = Object.values(ANALYTICS_EVENT_TYPES);

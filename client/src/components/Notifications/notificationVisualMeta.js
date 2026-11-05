@@ -13,7 +13,7 @@ import {
 
 /**
  * Visual language Inbox — học Slack Activity (icon theo loại + semantic color),
- * dùng token VoiceHub (primary / success / warning / destructive / info / ai).
+ * dùng token Atrium (primary / success / warning / destructive / info / ai).
  */
 
 const VISUAL = {
@@ -191,7 +191,7 @@ export function resolveNotificationVisual(notif) {
   if (ui === 'message' || raw === 'message') return VISUAL.message;
   if (ui === 'file' || raw === 'document') return VISUAL.file;
   // Legacy AI Task (`ai_proposal_pending`) and other AI labels → generic system visual.
-  if (raw.includes('ai') || kind === 'ai_proposal_pending' || title.includes('VoiceHubAI')) {
+  if (raw.includes('ai') || kind === 'ai_proposal_pending' || title.includes('AtriumAI')) {
     return VISUAL.system;
   }
   if (ui === 'system' || raw === 'system') return VISUAL.system;

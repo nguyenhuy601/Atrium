@@ -1,10 +1,10 @@
 /**
- * Scale-first A2/A3 — Task domain events (RabbitMQ topic voicehub.topic).
+ * Scale-first A2/A3 — Task domain events (RabbitMQ topic atrium.topic).
  * Additive contracts; không thay orgEvents / contract API HTTP.
  * Ownership Task API: project-service (không còn task-service split).
  */
 
-const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'voicehub.topic';
+const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'atrium.topic';
 
 /** @readonly */
 const TASK_DOMAIN_EVENT_TYPES = {
@@ -56,9 +56,9 @@ const CATALOG = [
 ];
 
 const TASK_EVENTS_PROJECT_QUEUE =
-  process.env.RABBITMQ_TASK_EVENTS_PROJECT_QUEUE || 'voicehub.task.events.project';
+  process.env.RABBITMQ_TASK_EVENTS_PROJECT_QUEUE || 'atrium.task.events.project';
 const TASK_EVENTS_ETL_QUEUE =
-  process.env.RABBITMQ_TASK_EVENTS_ETL_QUEUE || 'voicehub.task.events.etl';
+  process.env.RABBITMQ_TASK_EVENTS_ETL_QUEUE || 'atrium.task.events.etl';
 const TASK_EVENTS_PROJECT_DLQ = `${TASK_EVENTS_PROJECT_QUEUE}.dlq`;
 const TASK_EVENTS_ETL_DLQ = `${TASK_EVENTS_ETL_QUEUE}.dlq`;
 

@@ -127,7 +127,7 @@ async function warnIfNoInboundRtp(consumer, label, { recvState } = {}) {
       const hints = [
         'MEDIASOUP_ANNOUNCED_IP = dev WiFi IP (not 127.0.0.1 inside Docker)',
         'firewall UDP/TCP 40000-40100',
-        'hosts: only 1 entry for voicehub.local (dev may be 127.0.0.1; LAN dev is WiFi IP)',
+        'hosts: only 1 entry for atrium.dev (dev may be 127.0.0.1; LAN dev is WiFi IP)',
         'two tabs: enable mic per account (no shared mute)',
       ];
       if (recvState && recvState !== 'connected') {

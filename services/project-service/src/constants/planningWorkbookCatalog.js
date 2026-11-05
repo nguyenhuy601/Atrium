@@ -1,6 +1,6 @@
 /**
  * Planning workbook catalog — SoT cột / sheet (DEC D-WB1…D-WB4).
- * VoiceHub subset of PMBOK/ClickUp/Base fields — not full RA catalog.
+ * Atrium subset of PMBOK/ClickUp/Base fields — not full RA catalog.
  */
 
 const { PLANNING_ARTIFACT_KINDS } = require('./planningArtifact');

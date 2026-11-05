@@ -1,5 +1,5 @@
 # Build context: repo root
-#   docker build -f services/auth-service/Dockerfile -t voicehub-auth-service:latest .
+#   docker build -f services/auth-service/Dockerfile -t atrium-auth-service:latest .
 FROM node:20-alpine
 
 WORKDIR /app

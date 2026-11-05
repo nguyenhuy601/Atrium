@@ -90,7 +90,7 @@ class EmailService {
       const baseNormalized = String(base).replace(/\/+$/, '');
       const verificationUrl = `${baseNormalized}/verify-email#token=${encodeURIComponent(verificationToken)}`;
       const mailOptions = {
-        from: `"${process.env.EMAIL_FROM_NAME || 'VoiceChat App'}" <${process.env.EMAIL_USER}>`,
+        from: `"${process.env.EMAIL_FROM_NAME || 'Atrium'}" <${process.env.EMAIL_USER}>`,
         to: email,
         subject: 'Xác thực email của bạn',
         html: `
@@ -114,7 +114,7 @@ class EmailService {
               </div>
               <div class="content">
                 <p>Xin chào,</p>
-                <p>Cảm ơn bạn đã đăng ký tài khoản tại VoiceChat App!</p>
+                <p>Cảm ơn bạn đã đăng ký tài khoản tại Atrium!</p>
                 <p>Vui lòng click vào nút bên dưới để xác thực email của bạn:</p>
                 <p style="text-align: center;">
                   <a href="${verificationUrl}" class="button">Xác thực Email</a>
@@ -127,7 +127,7 @@ class EmailService {
                 <p>Nếu bạn không đăng ký tài khoản này, vui lòng bỏ qua email này.</p>
               </div>
               <div class="footer">
-                <p>© ${new Date().getFullYear()} VoiceChat App. All rights reserved.</p>
+                <p>© ${new Date().getFullYear()} Atrium. All rights reserved.</p>
               </div>
             </div>
           </body>
@@ -138,7 +138,7 @@ class EmailService {
           
           Xin chào,
           
-          Cảm ơn bạn đã đăng ký tài khoản tại VoiceChat App!
+          Cảm ơn bạn đã đăng ký tài khoản tại Atrium!
           
           Vui lòng click vào link sau để xác thực email của bạn:
           ${verificationUrl}
@@ -207,7 +207,7 @@ class EmailService {
       const resetUrl = `${baseNormalized}/reset-password#token=${encodeURIComponent(resetToken)}`;
 
       const mailOptions = {
-        from: `"${process.env.EMAIL_FROM_NAME || 'VoiceChat App'}" <${process.env.EMAIL_USER}>`,
+        from: `"${process.env.EMAIL_FROM_NAME || 'Atrium'}" <${process.env.EMAIL_USER}>`,
         to: email,
         subject: 'Đặt lại mật khẩu',
         html: `
@@ -232,7 +232,7 @@ class EmailService {
               </div>
               <div class="content">
                 <p>Xin chào,</p>
-                <p>Bạn đã yêu cầu đặt lại mật khẩu cho tài khoản VoiceChat App.</p>
+                <p>Bạn đã yêu cầu đặt lại mật khẩu cho tài khoản Atrium.</p>
                 <p>Click vào nút bên dưới để đặt lại mật khẩu:</p>
                 <p style="text-align: center;">
                   <a href="${resetUrl}" class="button">Đặt lại Mật khẩu</a>
@@ -251,7 +251,7 @@ class EmailService {
                 </div>
               </div>
               <div class="footer">
-                <p>© ${new Date().getFullYear()} VoiceChat App. All rights reserved.</p>
+                <p>© ${new Date().getFullYear()} Atrium. All rights reserved.</p>
               </div>
             </div>
           </body>
@@ -262,7 +262,7 @@ class EmailService {
           
           Xin chào,
           
-          Bạn đã yêu cầu đặt lại mật khẩu cho tài khoản VoiceChat App.
+          Bạn đã yêu cầu đặt lại mật khẩu cho tài khoản Atrium.
           
           Click vào link sau để đặt lại mật khẩu:
           ${resetUrl}
@@ -299,7 +299,7 @@ class EmailService {
       const verificationUrl = `${baseNormalized}/verify-email-change#token=${encodeURIComponent(verificationToken)}`;
 
       const mailOptions = {
-        from: `"${process.env.EMAIL_FROM_NAME || 'VoiceChat App'}" <${process.env.EMAIL_USER}>`,
+        from: `"${process.env.EMAIL_FROM_NAME || 'Atrium'}" <${process.env.EMAIL_USER}>`,
         to: email,
         subject: 'Xác thực email mới của bạn',
         html: `
@@ -308,7 +308,7 @@ class EmailService {
           <head><meta charset="utf-8"></head>
           <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
             <p>Xin chào,</p>
-            <p>Bạn vừa yêu cầu đổi email đăng nhập cho tài khoản VoiceHub.</p>
+            <p>Bạn vừa yêu cầu đổi email đăng nhập cho tài khoản Atrium.</p>
             <p>Vui lòng xác thực email mới bằng cách mở liên kết bên dưới:</p>
             <p><a href="${verificationUrl}" style="display:inline-block;padding:10px 18px;background:#2563eb;color:#fff;text-decoration:none;border-radius:8px;">Xác thực email mới</a></p>
             <p>Hoặc mở trực tiếp: <br/><span style="word-break:break-all;">${verificationUrl}</span></p>
@@ -342,7 +342,7 @@ class EmailService {
       const greet = nameParts.length ? nameParts.join(' ') : 'bạn';
 
       const mailOptions = {
-        from: `"${process.env.EMAIL_FROM_NAME || 'VoiceHub'}" <${process.env.EMAIL_USER}>`,
+        from: `"${process.env.EMAIL_FROM_NAME || 'Atrium'}" <${process.env.EMAIL_USER}>`,
         to: email,
         subject: `Lời mời nhận tài khoản — ${orgLabel}`,
         html: `
@@ -352,7 +352,7 @@ class EmailService {
           <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
             <div style="max-width:560px;margin:0 auto;padding:24px;">
               <h2 style="margin:0 0 12px;">Xin chào ${escapeHtml(greet)},</h2>
-              <p>Bạn được mời nhận tài khoản doanh nghiệp trên <strong>VoiceHub</strong> cho <strong>${escapeHtml(orgLabel)}</strong>.</p>
+              <p>Bạn được mời nhận tài khoản doanh nghiệp trên <strong>Atrium</strong> cho <strong>${escapeHtml(orgLabel)}</strong>.</p>
               <p>Nhấn nút bên dưới để xác nhận. Hệ thống sẽ tạo tài khoản bằng email này, sau đó chuyển bạn tới trang đăng nhập.</p>
               <p style="margin:28px 0;">
                 <a href="${escapeHtml(url)}" style="display:inline-block;padding:14px 28px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;text-decoration:none;border-radius:10px;font-weight:700;">
@@ -365,7 +365,7 @@ class EmailService {
           </body>
           </html>
         `,
-        text: `Xin chào ${greet}, bạn được mời nhận tài khoản ${orgLabel} trên VoiceHub. Xác nhận tại: ${url}`,
+        text: `Xin chào ${greet}, bạn được mời nhận tài khoản ${orgLabel} trên Atrium. Xác nhận tại: ${url}`,
       };
       return await this.transporter.sendMail(mailOptions);
     } catch (error) {
@@ -390,7 +390,7 @@ class EmailService {
       const greet = nameParts.length ? nameParts.join(' ') : 'bạn';
 
       const mailOptions = {
-        from: `"${process.env.EMAIL_FROM_NAME || 'VoiceHub'}" <${process.env.EMAIL_USER}>`,
+        from: `"${process.env.EMAIL_FROM_NAME || 'Atrium'}" <${process.env.EMAIL_USER}>`,
         to: email,
         subject: `Đặt mật khẩu tài khoản — ${orgLabel}`,
         html: `
@@ -400,7 +400,7 @@ class EmailService {
           <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
             <div style="max-width:560px;margin:0 auto;padding:24px;">
               <h2 style="margin:0 0 12px;">Xin chào ${escapeHtml(greet)},</h2>
-              <p>Tài khoản <strong>VoiceHub</strong> của bạn tại <strong>${escapeHtml(orgLabel)}</strong> đã được tạo (HR import).</p>
+              <p>Tài khoản <strong>Atrium</strong> của bạn tại <strong>${escapeHtml(orgLabel)}</strong> đã được tạo (HR import).</p>
               <p>Nhấn nút bên dưới để <strong>đặt mật khẩu lần đầu</strong>, rồi đăng nhập. Không gửi mật khẩu tạm trong email này.</p>
               <p style="margin:28px 0;">
                 <a href="${escapeHtml(url)}" style="display:inline-block;padding:14px 28px;background:linear-gradient(135deg,#ef4444,#b91c1c);color:#fff;text-decoration:none;border-radius:10px;font-weight:700;">
@@ -413,7 +413,7 @@ class EmailService {
           </body>
           </html>
         `,
-        text: `Xin chào ${greet}, tài khoản VoiceHub tại ${orgLabel} đã được tạo. Đặt mật khẩu tại: ${url}`,
+        text: `Xin chào ${greet}, tài khoản Atrium tại ${orgLabel} đã được tạo. Đặt mật khẩu tại: ${url}`,
       };
       return await this.transporter.sendMail(mailOptions);
     } catch (error) {
@@ -437,7 +437,7 @@ class EmailService {
       const roomLabel = String(roomId || '').trim();
 
       const mailOptions = {
-        from: `"${process.env.EMAIL_FROM_NAME || 'VoiceHub'}" <${process.env.EMAIL_USER}>`,
+        from: `"${process.env.EMAIL_FROM_NAME || 'Atrium'}" <${process.env.EMAIL_USER}>`,
         to: email,
         subject: `Lời mời vào phòng thoại${roomLabel ? ` — ${roomLabel}` : ''}`,
         html: `
@@ -446,7 +446,7 @@ class EmailService {
           <head><meta charset="utf-8"></head>
           <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;">
             <p>Xin chào,</p>
-            <p><strong>${escapeHtml(hostLabel)}</strong> mời bạn vào phòng thoại trên VoiceHub.</p>
+            <p><strong>${escapeHtml(hostLabel)}</strong> mời bạn vào phòng thoại trên Atrium.</p>
             <p>Mã phòng: <strong>${escapeHtml(roomLabel || '—')}</strong></p>
             <p><a href="${escapeHtml(url)}" style="display:inline-block;padding:12px 24px;background:#0ea5e9;color:#fff;text-decoration:none;border-radius:8px;">Tham gia phòng</a></p>
             <p>Hoặc mở link: <br/><span style="word-break:break-all;">${escapeHtml(url)}</span></p>

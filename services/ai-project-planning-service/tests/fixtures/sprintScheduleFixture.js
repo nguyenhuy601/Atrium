@@ -9,8 +9,8 @@ function deepClone(value) {
 function sprintFixture(overrides = {}) {
   const base = {
     pack: {
-      name: 'VoiceHub Demo',
-      overview: { name: 'VoiceHub Demo' },
+      name: 'Atrium Demo',
+      overview: { name: 'Atrium Demo' },
       businessGoals: [{ name: 'Giao Sprint 1' }],
       locale: 'vi',
     },

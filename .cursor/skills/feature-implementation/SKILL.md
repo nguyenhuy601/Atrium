@@ -1,7 +1,7 @@
 ---
 name: feature-implementation
 description: >-
-  Generic VoiceHub feature implementation workflow: analyze, inspect architecture, identify files, implement within FE/BE scope, validate, test, self-review. Use for features with clear AC/plan — not one skill per feature.
+  Generic Atrium feature implementation workflow: analyze, inspect architecture, identify files, implement within FE/BE scope, validate, test, self-review. Use for features with clear AC/plan — not one skill per feature.
 ---
 
 # feature implementation
@@ -19,7 +19,7 @@ Design-only; do not create a new skill per feature name.
 - `.cursor/rules/senior-dev-engineering.mdc`
 - `.cursor/rules/clean-code.mdc`
 - `.cursor/rules/deep-agents-dispatch.mdc` (agent: `implementer`)
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 - `.cursor/rules/enterprise-admin-ui.mdc`
 
 ## Input
@@ -31,7 +31,7 @@ AC/plan step, layer (FE/BE), service name if BE
 1. Analyze requirement (reuse BA outputs if present).
 2. Inspect existing architecture and contracts.
 3. Identify affected files; respect DO NOT MODIFY and service ownership.
-4. Implement with VoiceHub layers; FE: loading/empty/error/retry, i18n, design system.
+4. Implement with Atrium layers; FE: loading/empty/error/retry, i18n, design system.
 5. Validate locally (lint/build as available).
 6. Test via plan section 5 or regression-testing skill.
 7. Self-review against clean-code; optional reviewer agent.

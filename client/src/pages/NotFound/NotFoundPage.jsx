@@ -26,7 +26,7 @@ function NotFoundPage() {
           <div className={FIGMA_404_LOGO_ICON}>
             <Zap size={20} className="fill-primary-foreground text-primary-foreground" aria-hidden />
           </div>
-          <span className={FIGMA_404_LOGO_TEXT}>VoiceHub</span>
+          <span className={FIGMA_404_LOGO_TEXT}>Atrium</span>
         </div>
 
         <div className={FIGMA_404_CODE} aria-hidden>

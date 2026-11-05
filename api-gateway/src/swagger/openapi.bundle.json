@@ -1,11 +1,11 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "VoiceHub API",
+    "title": "Atrium API",
     "description": "Public HTTP surface qua API Gateway.\n\n- **Authorize**: Bearer JWT từ `POST /api/auth/login`\n- **Try it out** trên từng operation\n- Download: [/api/docs.json](/api/docs.json) · [/api/docs.yaml](/api/docs.yaml)\n- Internal S2S (`/internal/*`) không document trên UI này.",
     "version": "1.0.0",
     "contact": {
-      "name": "VoiceHub Team"
+      "name": "Atrium Team"
     },
     "license": {
       "name": "ISC"
@@ -14,7 +14,7 @@
   "servers": [
     {
       "url": "/",
-      "description": "Same-origin (Nginx / voicehub.local)"
+      "description": "Same-origin (Nginx / atrium.dev)"
     }
   ],
   "tags": [

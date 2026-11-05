@@ -1,7 +1,7 @@
 ---
 name: data-integrity-analysis
 description: >-
-  Analyzes data integrity within a VoiceHub service: invariants, orphans, consistency. Use when data corruption suspected.
+  Analyzes data integrity within a Atrium service: invariants, orphans, consistency. Use when data corruption suspected.
 ---
 
 # data integrity analysis

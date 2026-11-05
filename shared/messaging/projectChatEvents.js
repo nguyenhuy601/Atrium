@@ -4,7 +4,7 @@
  * Channel provision → org-service only (SSOT Channel; project-service không ghi Channel).
  */
 
-const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'voicehub.topic';
+const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'atrium.topic';
 
 /** @readonly */
 const PROJECT_CHAT_EVENT_TYPES = {
@@ -36,11 +36,11 @@ const CATALOG = [
 ];
 
 const CHAT_QUEUE =
-  process.env.RABBITMQ_PROJECT_CHAT_EVENTS_CHAT_QUEUE || 'voicehub.project.chat.events.chat';
+  process.env.RABBITMQ_PROJECT_CHAT_EVENTS_CHAT_QUEUE || 'atrium.project.chat.events.chat';
 const CHAT_DLQ = `${CHAT_QUEUE}.dlq`;
 
 const ORG_QUEUE =
-  process.env.RABBITMQ_PROJECT_CHAT_EVENTS_ORG_QUEUE || 'voicehub.project.chat.events.org';
+  process.env.RABBITMQ_PROJECT_CHAT_EVENTS_ORG_QUEUE || 'atrium.project.chat.events.org';
 const ORG_DLQ = `${ORG_QUEUE}.dlq`;
 
 /** Chat bind membership + work activity (không nhận provision). */

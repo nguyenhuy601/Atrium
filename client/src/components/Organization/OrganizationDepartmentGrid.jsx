@@ -5,7 +5,7 @@ import { buildDepartmentHubCards } from '../../utils/buildDepartmentHubCard';
 import { FIGMA_WS_GRID } from './figmaOrganizationClasses';
 import OrganizationDepartmentCard from './OrganizationDepartmentCard';
 
-const FAVORITES_KEY = 'voicehub:dept-favorites';
+const FAVORITES_KEY = 'atrium:dept-favorites';
 const ACTIVITY_ORDER = { hot: 0, active: 1, normal: 2, quiet: 3 };
 
 function loadFavoriteIds(organizationId) {
@@ -111,7 +111,7 @@ export default function OrganizationDepartmentGrid({
   const totalTeams = cards.reduce((sum, card) => sum + Number(card.teamCount || 0), 0);
   const totalOnline = cards.reduce((sum, card) => sum + Number(card.onlineCount || 0), 0);
   const totalUnread = cards.reduce((sum, card) => sum + Number(card.unread || 0), 0);
-  const orgInitial = String(organizationName || 'VoiceHub').trim().charAt(0).toUpperCase() || 'V';
+  const orgInitial = String(organizationName || 'Atrium').trim().charAt(0).toUpperCase() || 'V';
 
   const handleToggleStar = useCallback(
     (departmentId) => {

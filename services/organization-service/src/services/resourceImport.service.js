@@ -328,7 +328,7 @@ async function validateExcelForPreview({ organizationId, fileBuffer, actorTier }
 
   return {
     ok: true,
-    organizationName: String(organization.name || 'VoiceHub').trim(),
+    organizationName: String(organization.name || 'Atrium').trim(),
     normalizedRows: validation.normalizedRows,
     deptMap,
   };
@@ -485,7 +485,7 @@ async function processImportBatch({ organizationId, batchId }) {
   }
 
   const organization = await Organization.findById(organizationId).select('name').lean();
-  const organizationName = String(organization?.name || 'VoiceHub').trim();
+  const organizationName = String(organization?.name || 'Atrium').trim();
 
   const deptDocs = await Department.find({ organization: organizationId }).select('_id name').lean();
   const deptMap = new Map(
