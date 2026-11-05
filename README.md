@@ -6,7 +6,7 @@ Nền tảng **cộng tác nội bộ** (chat, voice/meeting, task, tài liệu,
 
 Đặc tả / luồng nghiệp vụ: [`docs/spec-pack/`](docs/spec-pack/), [`docs/luong nghiep vu/00-overview.md`](docs/luong%20nghiep%20vu/00-overview.md) (theo nhóm suite).
 
-**AI Project** (Two-Phase HITL): [`docs/ai-project/README.md`](docs/ai-project/README.md) · sơ đồ tổng quát [`docs/ai-project/diagrams/00-overview-poster.svg`](docs/ai-project/diagrams/00-overview-poster.svg).
+**AI Project** (Two-Phase HITL): [`docs/ai-project/README.md`](docs/ai-project/README.md) · sơ đồ quy trình [`docs/ai-project/diagrams/ai-operating-flow.jpg`](docs/ai-project/diagrams/ai-operating-flow.jpg).
 
 ---
 
@@ -201,7 +201,7 @@ UI admin: `/app/admin/*` (hub, users, structure, RBAC, …).
 | **`CORS_ORIGIN`** | Whitelist origin (có `https://atrium.dev` khi dev LAN) |
 | **`SINGLE_ORG_MODE`** | Một công ty / hạn chế tạo org công khai |
 
-Runbook: [`docs/security-runbook.md`](docs/security-runbook.md). Sau đổi secret: `bash devops/scripts/security/check-security-env.sh`.
+Runbook: [`docs/security-runbook.md`](docs/security-runbook.md). Thư mục `devops/` không nằm trong git. Trước deploy, xác nhận `.env` không có `RBAC_TEST_UNLOCK=true` và secret không còn placeholder (`change-me`, `your-secret-key`).
 
 ---
 
@@ -211,9 +211,8 @@ Runbook: [`docs/security-runbook.md`](docs/security-runbook.md). Sau đổi secr
 
 ```bash
 # .env root + service .env đã có (SINGLE_ORG_MODE, token, …)
-ATRIUM_ENV_CHECK=staging bash devops/scripts/security/check-security-env.sh   # hoặc env tương ứng
 bash devops/swarm/build-local-images.sh <service-name>   # chỉ service vừa sửa
-bash devops/swarm/deploy-stack.sh
+SKIP_SECURITY_ENV_CHECK=1 bash devops/swarm/deploy-stack.sh
 # hoặc: docker service update --force --update-parallelism 1 --update-order start-first atrium_<service>
 ```
 
@@ -252,6 +251,10 @@ Chi tiết Compose: [`docs/DOCKER-COMPOSE.md`](docs/DOCKER-COMPOSE.md).
 ## AI Project (hai giai đoạn, có người duyệt)
 
 Lập kế hoạch dự án có người duyệt: **WHAT** (SRS) → Gate 1 → **HOW** (WBS/lịch) → Gate 2 → tạo project.
+
+![Sơ đồ quy trình hoạt động AI Project — LangGraph, Two-phase HITL](docs/ai-project/diagrams/ai-operating-flow.jpg)
+
+Sơ đồ trên là **kiến trúc đề xuất**: vòng đời Input → Project Ready, LangGraph WHAT/HOW (kể cả subgraph), Hybrid RAG, Gate và materialize.
 
 ```mermaid
 flowchart LR
