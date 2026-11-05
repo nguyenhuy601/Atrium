@@ -9,9 +9,9 @@ const { logger } = require('@enterprise/shared');
 const { assertQuorumQueue } = require('@enterprise/shared/messaging/rabbitQuorum');
 const { runWithReconnect, waitForAmqpClose } = require('@enterprise/shared/messaging/rabbitReconnect');
 
-const QUEUE = process.env.RABBITMQ_TASK_FROM_FILE_QUEUE || 'voicehub.task.from_file';
+const QUEUE = process.env.RABBITMQ_TASK_FROM_FILE_QUEUE || 'atrium.task.from_file';
 const DLQ =
-  process.env.RABBITMQ_TASK_FROM_FILE_DLQ_QUEUE || `${process.env.RABBITMQ_TASK_FROM_FILE_QUEUE || 'voicehub.task.from_file'}.dlq`;
+  process.env.RABBITMQ_TASK_FROM_FILE_DLQ_QUEUE || `${process.env.RABBITMQ_TASK_FROM_FILE_QUEUE || 'atrium.task.from_file'}.dlq`;
 const MAX_TRANSIENT_RETRIES = Math.max(
   0,
   parseInt(process.env.TASK_FROM_FILE_MAX_RETRIES || '8', 10) || 8

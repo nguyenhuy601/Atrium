@@ -140,6 +140,10 @@ export const projectAPI = {
     apiClient.get(`/projects/${encodeURIComponent(projectId)}/members`, {
       skipPermissionDeniedToast: Boolean(config.skipPermissionDeniedToast),
       skipNotFoundToast: Boolean(config.skipNotFoundToast),
+      params: {
+        ...(config.view ? { view: config.view } : {}),
+        ...(config.weekKey ? { weekKey: config.weekKey } : {}),
+      },
     }),
 
   listMemberCandidates: (projectId, projectRoleKey) =>
@@ -678,6 +682,59 @@ export const projectAPI = {
   /** Start Delivery Planning after RA approved */
   startDeliveryPlanning: (projectId) =>
     apiClient.post(`/projects/${encodeURIComponent(projectId)}/phase1/start-planning`),
+
+  /** Execution Control — giám sát & điều chỉnh sau Gate2 */
+  listExecutionIssues: (projectId, params = {}) =>
+    apiClient.get(`/projects/${encodeURIComponent(projectId)}/execution-issues`, {
+      params: { status: params.status, view: params.view || 'summary' },
+    }),
+
+  getExecutionIssue: (projectId, issueId, params = {}) =>
+    apiClient.get(
+      `/projects/${encodeURIComponent(projectId)}/execution-issues/${encodeURIComponent(issueId)}`,
+      { params: { view: params.view || 'full' } }
+    ),
+
+  createExecutionIncident: (projectId, body = {}) =>
+    apiClient.post(`/projects/${encodeURIComponent(projectId)}/execution-incidents`, body),
+
+  listExecutionRisks: (projectId) =>
+    apiClient.get(`/projects/${encodeURIComponent(projectId)}/execution-risks`),
+
+  createExecutionRisk: (projectId, body = {}) =>
+    apiClient.post(`/projects/${encodeURIComponent(projectId)}/execution-risks`, body),
+
+  confirmExecutionRiskOccurred: (projectId, riskId, body = {}) =>
+    apiClient.post(
+      `/projects/${encodeURIComponent(projectId)}/execution-risks/${encodeURIComponent(riskId)}/confirm-occurred`,
+      body
+    ),
+
+  decideExecutionProposal: (projectId, proposalId, body = {}) =>
+    apiClient.post(
+      `/projects/${encodeURIComponent(projectId)}/execution-proposals/${encodeURIComponent(proposalId)}/decide`,
+      body
+    ),
+
+  saveExecutionProposal: (projectId, issueId, body = {}) =>
+    apiClient.post(
+      `/projects/${encodeURIComponent(projectId)}/execution-issues/${encodeURIComponent(issueId)}/proposals`,
+      body
+    ),
+
+  runExecutionFollowUp: (projectId, issueId) =>
+    apiClient.post(
+      `/projects/${encodeURIComponent(projectId)}/execution-issues/${encodeURIComponent(issueId)}/follow-up`
+    ),
+
+  scanExecutionControl: (projectId, body = {}) =>
+    apiClient.post(`/projects/${encodeURIComponent(projectId)}/execution-control/scan`, body),
+
+  confirmTaskRemaining: (projectId, taskId, remainingHours) =>
+    apiClient.patch(
+      `/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}/remaining`,
+      { remainingHours }
+    ),
 };
 
 export default projectAPI;

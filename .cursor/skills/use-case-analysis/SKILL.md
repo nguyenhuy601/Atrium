@@ -1,7 +1,7 @@
 ---
 name: use-case-analysis
 description: >-
-  Produces actor/flow/alternate/exception use cases for complex VoiceHub UX or API flows. Use when flows have multiple actors or branches.
+  Produces actor/flow/alternate/exception use cases for complex Atrium UX or API flows. Use when flows have multiple actors or branches.
 ---
 
 # use case analysis

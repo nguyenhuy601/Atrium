@@ -25,14 +25,10 @@ function scoreArtifactCompleteness(state, phase) {
   return scoreWhatCompleteness(state);
 }
 
+/** Parity HOW: succeeded ∧ outputValidated via toolExecutions (fallback toolResults). */
 function successfulWhatTools(state) {
-  const done = new Set();
-  for (const row of Array.isArray(state?.toolResults) ? state.toolResults : []) {
-    if (!row || row.error) continue;
-    const name = String(row.toolName || '').trim();
-    if (name) done.add(name);
-  }
-  return done;
+  const { succeededValidatedTools } = require('./toolExecutionContract');
+  return succeededValidatedTools(state);
 }
 
 /** Catalog tools that must succeed before WHAT emitReady. */
@@ -210,19 +206,21 @@ function routeAfterCompleteness(state, opts = {}) {
       stop === 'HOW_DEPENDENCY_NOT_SCHEDULE_READY' ||
       stop.startsWith('HOW_NO_ELIGIBLE');
   }
-  try {
-    const {
-      isWhatWaitingFrStopReason,
-      isWaitingFrConfirmOnly,
-    } = require('./computeEligibleWhatTools');
-    if (
-      isWhatWaitingFrStopReason(stop) ||
-      (score.phase === 'what' && isWaitingFrConfirmOnly(state))
-    ) {
-      deadlockStop = true;
+  if (!deadlockStop && score.phase === 'what') {
+    try {
+      const {
+        isWhatDeadlockStopReason,
+        detectWhatSelectDeadlock,
+      } = require('./computeEligibleWhatTools');
+      deadlockStop =
+        isWhatDeadlockStopReason(stop) ||
+        Boolean(detectWhatSelectDeadlock(state).deadlocked);
+    } catch {
+      deadlockStop =
+        stop === 'WHAT_NO_ELIGIBLE_PROGRESS' ||
+        stop === 'GRAPH_RECURSION_LIMIT' ||
+        stop.startsWith('WHAT_NO_ELIGIBLE');
     }
-  } catch {
-    if (stop === 'WHAT_WAITING_FR_CONFIRM') deadlockStop = true;
   }
   let hardToolStop = stop === 'TOOL_FAILED' || stop.startsWith('TOOL_FAILED:');
   if (!hardToolStop) {

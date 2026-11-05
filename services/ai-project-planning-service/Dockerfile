@@ -1,5 +1,5 @@
 # Build context: repo root
-#   docker build -f services/ai-project-planning-service/Dockerfile -t voicehub-ai-project-planning-service:latest .
+#   docker build -f services/ai-project-planning-service/Dockerfile -t atrium-ai-project-planning-service:latest .
 FROM node:20-alpine
 
 WORKDIR /app

@@ -76,7 +76,7 @@ import useGrantScopes from '../../hooks/useGrantScopes';
 import { PROJECT_CREATE_GRANT } from '../../lib/capabilities';
 import { localizedProjectRoleShortLabel } from '../../utils/projectRoleLocale';
 
-const COLLAPSE_KEY = 'voicehub:sidebar-collapsed';
+const COLLAPSE_KEY = 'atrium:sidebar-collapsed';
 
 function humanizeRoleKey(key) {
   return String(key || '')
@@ -146,7 +146,6 @@ const MODULE_ICONS = {
   board: LayoutGrid,
   timeline: GanttChart,
   changeRequests: FileSpreadsheet,
-  requirements: FileSpreadsheet,
   files: FileText,
   chat: MessageCircle,
   calendar: Calendar,
@@ -787,7 +786,7 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
         />
       ) : null}
       <div
-        id="voicehub-mobile-nav"
+        id="atrium-mobile-nav"
         role={mobileNavOpen ? 'dialog' : undefined}
         aria-modal={mobileNavOpen ? true : undefined}
         aria-label={t('nav.mainMenu')}

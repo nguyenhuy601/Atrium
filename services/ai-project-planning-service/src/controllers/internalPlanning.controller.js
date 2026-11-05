@@ -26,6 +26,7 @@ const {
 } = require('../contracts/runLineageContract');
 const { PlanningRun } = require('../run/PlanningRun.model');
 const { buildExecutionInterruptedError } = require('../run/executionInterrupted');
+const { serializeAgentPhaseError } = require('../run/serializeAgentPhaseError');
 const { publishGatePreview } = require('../engines/frUnderstanding/pipelineProgress');
 const { reduceProgressState } = require('../run/progressStateReducer');
 const {
@@ -550,7 +551,18 @@ async function processRunAsync(runId) {
       const {
         hydrateToolDataFromSnapshot,
       } = require('../knowledge/hydrateToolDataFromSnapshot');
-      const hydrated = await hydrateRunInputFromSnapshot(run);
+      const hydrateWallStarted = Date.now();
+      const hydrated = await hydrateRunInputFromSnapshot(run, {
+        projection: run.job === 'phase_how' ? 'how' : 'what',
+        packContentHash:
+          run.input?.packContentHash ||
+          run.packContentHash ||
+          null,
+      });
+      const hydrateMs =
+        hydrated.hydrateMs != null
+          ? Number(hydrated.hydrateMs)
+          : Math.max(0, Date.now() - hydrateWallStarted);
       let runtimeSnapshot = hydrated.snapshot || {};
       const runtimePack = hydrated.pack || {};
       // Semantic Contract: ensure canonicalRaw visible on snapshot for frUnderstanding/section input
@@ -672,6 +684,7 @@ async function processRunAsync(runId) {
           parentRunId,
           generationId,
           humanFeedback,
+          hydrateMs,
           frOpts: {
             ...whatFrOpts(run, cpState),
             ...(run.input?.frOpts || {}),
@@ -689,11 +702,18 @@ async function processRunAsync(runId) {
         });
       } else {
         const { runHowPhaseLangGraph } = require('../orchestration/runHowPhaseLangGraph');
+        const howInput = run.input && typeof run.input === 'object' ? run.input : {};
         phaseOut = await runHowPhaseLangGraph({
           ...commonPhaseOpts,
           toolData: cpState?.toolData || toolData,
-          resumeState: cpState,
+          resumeState: {
+            ...(cpState && typeof cpState === 'object' ? cpState : {}),
+            rerunTools: howInput.rerunTools,
+            forceRerunSet: howInput.forceRerunSet,
+          },
           wallStartedAt: run.startedAt || null,
+          rerunTools: howInput.rerunTools || null,
+          forceRerunSet: howInput.forceRerunSet || null,
         });
       }
       if (phaseOut?.paused) {
@@ -710,6 +730,7 @@ async function processRunAsync(runId) {
         container: phaseOut.container,
         frUnderstanding: phaseOut.frUnderstanding || null,
         proposalFragment: phaseOut.proposalFragment || null,
+        srsProposal: phaseOut.srsProposal || phaseOut.container?.analyses?.srsProposal || null,
         loop1Reuse,
         result: {
           phase: phaseOut.phase,
@@ -719,6 +740,7 @@ async function processRunAsync(runId) {
           feasibility: phaseOut.feasibility,
           frUnderstanding: phaseOut.frUnderstanding || null,
           proposalFragment: phaseOut.proposalFragment || null,
+          srsProposal: phaseOut.srsProposal || phaseOut.container?.analyses?.srsProposal || null,
           selective: Boolean(phaseOut.selective),
           loop1Reuse,
           corpusContentHash: phaseOut.corpusContentHash || null,
@@ -790,10 +812,21 @@ async function processRunAsync(runId) {
         error: phaseError,
       });
     } catch (error) {
-      const callbackError = {
-        code: error.code || 'AGENT_PHASE_FAILED',
-        message: error.message,
-      };
+      const callbackError = serializeAgentPhaseError(error);
+      if (callbackError.errors?.length) {
+        console.error(
+          '[planning] phase AggregateError runId=%s nested=%s',
+          runId,
+          JSON.stringify(callbackError.errors)
+        );
+      } else {
+        console.error(
+          '[planning] phase failed runId=%s code=%s message=%s',
+          runId,
+          callbackError.code,
+          callbackError.message
+        );
+      }
       const failedState = {
         job: run.job,
         snapshotId: run.snapshotId,
@@ -1206,7 +1239,7 @@ async function resumeRun(req, res) {
       if (!isInRunHitlKind(kind)) {
         return res.status(400).json({
           success: false,
-          message: 'kind must be clarify, edit_draft, wbs_confirm, or fr_confirm',
+          message: 'kind must be clarify, edit_draft, or wbs_confirm',
           errorCode: 'IN_RUN_HITL_KIND_INVALID',
         });
       }

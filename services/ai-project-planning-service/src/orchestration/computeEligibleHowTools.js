@@ -65,18 +65,40 @@ function dependencyAnalysisFlags(state) {
 }
 
 /**
+ * @param {object} state
+ * @returns {Set<string>}
+ */
+function forceRerunSetOf(state) {
+  const raw = state?.forceRerunSet;
+  if (Array.isArray(raw) && raw.length) {
+    return new Set(raw.map((n) => String(n || '').trim()).filter(Boolean));
+  }
+  return new Set();
+}
+
+/**
  * succeededValidatedTools + container fallback for WbsTool (ReAct loop guard).
- * DependencyTool: executionTerminal on container also counts as "done" for Risk soft-deps
- * (SKIPPED/FAILED/PARTIAL still unlock Risk; Schedule checks scheduleReady separately).
+ * DependencyTool: executionTerminal on container also counts as "done" for Risk/Schedule soft-deps
+ * (SKIPPED/FAILED/PARTIAL unlock both; schedulable edges are optional for Schedule).
+ *
+ * RULE-RR-03/04: when forceRerunSet is non-empty:
+ * - tools outside the set → treated as done (reuse)
+ * - tools inside the set → not done until succeededValidatedTools has them
+ *   (fresh HOW runs start with empty toolExecutions, so prior container artifacts do not skip re-run;
+ *    after re-success, they stay done so dependents e.g. Quality←Risk can unlock)
  * @param {object} state
  * @returns {Set<string>}
  */
 function howSucceededTools(state) {
-  const done = new Set(succeededValidatedTools(state));
-  if (!done.has('WbsTool') && hasWbsLeavesInContainer(state)) {
+  const rerun = forceRerunSetOf(state);
+  const catalog = howReactCatalogTools();
+  const executed = succeededValidatedTools(state);
+  const done = new Set(executed);
+
+  if (!rerun.has('WbsTool') && !done.has('WbsTool') && hasWbsLeavesInContainer(state)) {
     done.add('WbsTool');
   }
-  if (!done.has('DependencyTool')) {
+  if (!rerun.has('DependencyTool') && !done.has('DependencyTool')) {
     const flags = dependencyAnalysisFlags(state);
     if (flags.executionTerminal) done.add('DependencyTool');
     else {
@@ -89,7 +111,32 @@ function howSucceededTools(state) {
       }
     }
   }
+
+  if (rerun.size) {
+    for (const name of catalog) {
+      if (!rerun.has(name)) done.add(name);
+    }
+    for (const name of rerun) {
+      if (!executed.has(name)) done.delete(name);
+    }
+  }
   return done;
+}
+
+/**
+ * Force-rerun tools still missing a validated success in this graph state.
+ * @param {object} state
+ * @returns {string[]}
+ */
+function forceRerunPendingTools(state) {
+  const rerun = forceRerunSetOf(state);
+  if (!rerun.size) return [];
+  const executed = succeededValidatedTools(state);
+  const catalog = howReactCatalogTools();
+  const order = new Map(catalog.map((n, i) => [n, i]));
+  return [...rerun]
+    .filter((name) => !executed.has(name))
+    .sort((a, b) => (order.get(a) ?? 999) - (order.get(b) ?? 999));
 }
 
 /**
@@ -151,17 +198,10 @@ function computeEligibleHowTools(state, opts = {}) {
       }
     }
 
-    // Schedule requires dependency scheduleReady (not merely DependencyTool terminal).
-    if (toolName === 'ScheduleTool') {
-      const flags = dependencyAnalysisFlags(state);
-      if (!flags.scheduleReady) {
-        blocked.push({
-          toolName,
-          blockedBy: ['dependency_scheduleReady'],
-        });
-        continue;
-      }
-    }
+    // Schedule: DependencyTool terminal is enough. Schedulable edges optional —
+    // engine runs with edges when present, otherwise capacity/timeline without FS edges.
+    // Do not gate on dependency.scheduleReady (avoids HOW_DEPENDENCY_NOT_SCHEDULE_READY
+    // when LLM proposes only non-schedulable INTEGRATION deps).
 
     eligible.push(toolName);
   }
@@ -174,12 +214,14 @@ function isHowReadyForFinalize(state, opts = {}) {
     ? opts.required
     : ['WbsTool', 'DependencyTool', 'ScheduleTool'];
   const done = howSucceededTools(state);
-  return required.every((name) => done.has(name));
+  if (!required.every((name) => done.has(name))) return false;
+  // LangGraph termination: selective re-run goal unmet while forceRerun tools lack validated success.
+  if (forceRerunPendingTools(state).length) return false;
+  return true;
 }
 
 /**
  * LangGraph deadlock: nothing eligible/running and Gate2 required tools not satisfied.
- * Typical: Dependency terminal with scheduleReady=false → Schedule permanently blocked.
  *
  * @param {object} state
  * @param {{ maxAttempts?: number, catalog?: string[], required?: string[] }} [opts]
@@ -213,6 +255,8 @@ function detectHowSelectDeadlock(state, opts = {}) {
     };
   }
 
+  // Legacy: older runs may still carry dependency_scheduleReady blocks in state;
+  // map to the historical stop code for UI/compat. New eligibility no longer emits it.
   const done = howSucceededTools(state);
   const scheduleBlock = blocked.find(
     (b) =>
@@ -242,6 +286,8 @@ module.exports = {
   isHowDeadlockStopReason,
   hasWbsLeavesInContainer,
   howSucceededTools,
+  forceRerunSetOf,
+  forceRerunPendingTools,
   dependencyAnalysisFlags,
   DEFAULT_MAX_ATTEMPTS,
   STOP_HOW_NO_ELIGIBLE_PROGRESS,

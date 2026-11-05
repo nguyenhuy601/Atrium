@@ -3,10 +3,10 @@ const { logSecurityEvent } = require('../utils/securityEventLog');
 
 /**
  * Guard nhẹ chống CSRF cho các endpoint dựa vào HttpOnly cookie.
- * Yêu cầu FE gửi header `X-VoiceHub-Client: 1`.
+ * Yêu cầu FE gửi header `X-Atrium-Client: 1`.
  */
 function requireClientHeader(options = {}) {
-  const headerName = String(options.headerName || 'X-VoiceHub-Client').trim();
+  const headerName = String(options.headerName || 'X-Atrium-Client').trim();
   const expected = String(options.expected || '1').trim();
 
   return (req, res, next) => {

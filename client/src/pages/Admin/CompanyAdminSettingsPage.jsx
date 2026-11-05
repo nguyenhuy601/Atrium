@@ -12,12 +12,12 @@ export default function CompanyAdminSettingsPage() {
   const location = useLocation();
   const match = findAdminNavItem(location.pathname);
   const settingsTab = adminSettingsEmbedTabFromItem(match?.item);
-  const { organization, orgId, refreshOrganization } = useCompanyAdminContext();
+  const { organization, organizationLoading, orgId, refreshOrganization } = useCompanyAdminContext();
   const { isSystemAdmin } = useCompanyAdminAccess();
   const { hasGrant, scopeOf, loading } = useGrantScopes(orgId);
   const entries = useMemo(() => collectAdminRouteEntries(ADMIN_DOMAINS), []);
 
-  if (loading) return null;
+  if (loading || organizationLoading) return null;
 
   if (match?.item && !navItemIsAllowed(match.item, { hasGrant, scopeOf, isSystemAdmin })) {
     const decision = decideAdminRoute({

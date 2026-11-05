@@ -179,11 +179,15 @@ export const extraStrings = {
     },
     login: {
       title: 'Đăng nhập',
-      subtitle: 'Tiếp tục không gian làm việc VoiceHub của bạn.',
+      subtitle: 'Tiếp tục không gian làm việc Atrium của bạn.',
       email: 'Email',
       password: 'Mật khẩu',
       forgot: 'Quên mật khẩu?',
-      placeholderEmail: 'Tài khoản',
+      placeholderEmail: 'abc@email.com',
+      placeholderPwd: 'Mật khẩu',
+      errEmailRequired: 'Nhập email để đăng nhập.',
+      errEmailInvalid: 'Email cần có dạng ten@congty.com.',
+      errPasswordRequired: 'Nhập mật khẩu để đăng nhập.',
       nightOwlHint: 'Bấm mắt: ban đêm + đèn pin. Xoay theo chuột soi mật khẩu hoặc cú. Bấm lại để về ngày.',
       flashlightOn: 'Bật đèn pin',
       flashlightOff: 'Tắt đèn pin',
@@ -348,7 +352,7 @@ export const extraStrings = {
     firstLogin: {
       titleFull: 'Hoàn thiện tài khoản',
       titleProfile: 'Bổ sung thông tin cá nhân',
-      hint: 'Vui lòng cập nhật hồ sơ để tiếp tục sử dụng VoiceHub.',
+      hint: 'Vui lòng cập nhật hồ sơ để tiếp tục sử dụng Atrium.',
       fullName: 'Họ và tên',
       nameFromInvite: 'Đã lấy từ lời mời — không cần nhập lại.',
       email: 'Gmail / Email',
@@ -374,11 +378,11 @@ export const extraStrings = {
     },
     termsOfService: {
       title: 'Điều khoản dịch vụ',
-      subtitle: 'Điều kiện sử dụng nền tảng VoiceHub cho đội ngũ và doanh nghiệp.',
+      subtitle: 'Điều kiện sử dụng nền tảng Atrium cho đội ngũ và doanh nghiệp.',
       backToRegister: 'Quay lại đăng ký',
       s1h: '1. Phạm vi áp dụng',
       s1p:
-        'Điều khoản này điều chỉnh việc truy cập và sử dụng nền tảng VoiceHub cho mục đích làm việc nhóm, giao tiếp nội bộ và quản trị cộng tác doanh nghiệp.',
+        'Điều khoản này điều chỉnh việc truy cập và sử dụng nền tảng Atrium cho mục đích làm việc nhóm, giao tiếp nội bộ và quản trị cộng tác doanh nghiệp.',
       s2h: '2. Tài khoản người dùng',
       s2p:
         'Bạn chịu trách nhiệm về thông tin đăng nhập, hoạt động phát sinh từ tài khoản và việc bảo mật mật khẩu. Mọi hành vi sử dụng trái phép cần được thông báo ngay cho quản trị viên hệ thống.',
@@ -387,20 +391,20 @@ export const extraStrings = {
         'Người dùng không được phát tán nội dung vi phạm pháp luật, xâm phạm quyền riêng tư, quấy rối, gây gián đoạn dịch vụ hoặc khai thác lỗ hổng bảo mật của hệ thống.',
       s4h: '4. Dữ liệu và quyền sở hữu',
       s4p:
-        'Dữ liệu công việc do tổ chức của bạn tạo ra vẫn thuộc quyền quản lý của tổ chức. VoiceHub chỉ xử lý dữ liệu để cung cấp tính năng vận hành, đồng bộ và bảo mật theo phạm vi dịch vụ đã công bố.',
+        'Dữ liệu công việc do tổ chức của bạn tạo ra vẫn thuộc quyền quản lý của tổ chức. Atrium chỉ xử lý dữ liệu để cung cấp tính năng vận hành, đồng bộ và bảo mật theo phạm vi dịch vụ đã công bố.',
       s5h: '5. Giới hạn trách nhiệm',
       s5p:
-        'VoiceHub nỗ lực duy trì tính sẵn sàng và an toàn của hệ thống, tuy nhiên không cam kết dịch vụ luôn không gián đoạn trong mọi tình huống bất khả kháng, bảo trì hoặc sự cố hạ tầng bên thứ ba.',
+        'Atrium nỗ lực duy trì tính sẵn sàng và an toàn của hệ thống, tuy nhiên không cam kết dịch vụ luôn không gián đoạn trong mọi tình huống bất khả kháng, bảo trì hoặc sự cố hạ tầng bên thứ ba.',
       s6h: '6. Chấm dứt và cập nhật điều khoản',
       s6p:
         'Chúng tôi có thể tạm ngưng hoặc chấm dứt quyền truy cập khi phát hiện vi phạm nghiêm trọng. Điều khoản có thể được cập nhật theo nhu cầu vận hành và sẽ được thông báo trên nền tảng.',
       callout:
         'Nếu bạn có câu hỏi về điều khoản sử dụng, vui lòng liên hệ đội hỗ trợ qua email:',
-      calloutEmail: ' support@voicehub.com',
+      calloutEmail: ' support@atrium.com',
     },
     privacyPolicy: {
       title: 'Chính sách bảo mật',
-      subtitle: 'Cách VoiceHub thu thập, sử dụng và bảo vệ dữ liệu của bạn.',
+      subtitle: 'Cách Atrium thu thập, sử dụng và bảo vệ dữ liệu của bạn.',
       backToRegister: 'Quay lại đăng ký',
       s1h: '1. Dữ liệu chúng tôi thu thập',
       s1p:
@@ -410,7 +414,7 @@ export const extraStrings = {
         'Dữ liệu được sử dụng để xác thực người dùng, đồng bộ trải nghiệm, tăng cường bảo mật và cải thiện chất lượng dịch vụ. Chúng tôi không sử dụng dữ liệu ngoài phạm vi mục đích đã công bố.',
       s3h: '3. Bảo mật và lưu trữ',
       s3p:
-        'VoiceHub áp dụng các biện pháp kỹ thuật hợp lý để bảo vệ dữ liệu, bao gồm kiểm soát truy cập theo vai trò, mã hóa khi truyền tải và giám sát truy cập bất thường.',
+        'Atrium áp dụng các biện pháp kỹ thuật hợp lý để bảo vệ dữ liệu, bao gồm kiểm soát truy cập theo vai trò, mã hóa khi truyền tải và giám sát truy cập bất thường.',
       s4h: '4. Chia sẻ dữ liệu với bên thứ ba',
       s4p:
         'Chúng tôi chỉ chia sẻ dữ liệu khi cần thiết cho hạ tầng vận hành, tuân thủ pháp luật hoặc theo yêu cầu chính đáng của tổ chức sở hữu dữ liệu.',
@@ -421,7 +425,7 @@ export const extraStrings = {
       s6p:
         'Chính sách có thể được điều chỉnh để phản ánh thay đổi về tính năng, pháp lý hoặc tiêu chuẩn bảo mật, và sẽ được thông báo trước khi có hiệu lực.',
       callout: 'Mọi yêu cầu về quyền riêng tư vui lòng liên hệ:',
-      calloutEmail: ' privacy@voicehub.com',
+      calloutEmail: ' privacy@atrium.com',
     },
     settingsCapability: {
       title: 'Hồ sơ năng lực',
@@ -734,11 +738,14 @@ export const extraStrings = {
     },
     login: {
       title: 'Log in',
-      subtitle: 'Continue to your VoiceHub workspace.',
+      subtitle: 'Continue to your Atrium workspace.',
       email: 'Email',
       password: 'Password',
       forgot: 'Forgot password?',
-      placeholderEmail: 'Account',
+      placeholderEmail: 'you@company.com',
+      errEmailRequired: 'Enter your email to sign in.',
+      errEmailInvalid: 'Use an email like you@company.com.',
+      errPasswordRequired: 'Enter your password to sign in.',
       placeholderPwd: 'Password',
       hide: 'Hide password',
       show: 'Show password',
@@ -905,7 +912,7 @@ export const extraStrings = {
     firstLogin: {
       titleFull: 'Complete your account',
       titleProfile: 'Complete your profile',
-      hint: 'Please update your profile to continue using VoiceHub.',
+      hint: 'Please update your profile to continue using Atrium.',
       fullName: 'Full name',
       nameFromInvite: 'Taken from your invite — no need to re-enter.',
       email: 'Email',
@@ -931,11 +938,11 @@ export const extraStrings = {
     },
     termsOfService: {
       title: 'Terms of Service',
-      subtitle: 'Conditions for using the VoiceHub platform for teams and organizations.',
+      subtitle: 'Conditions for using the Atrium platform for teams and organizations.',
       backToRegister: 'Back to sign up',
       s1h: '1. Scope',
       s1p:
-        'These terms govern access to and use of VoiceHub for team collaboration, internal communication, and enterprise workflows.',
+        'These terms govern access to and use of Atrium for team collaboration, internal communication, and enterprise workflows.',
       s2h: '2. User accounts',
       s2p:
         'You are responsible for your credentials, activity under your account, and password security. Report unauthorized use to your system administrator immediately.',
@@ -944,7 +951,7 @@ export const extraStrings = {
         'You may not distribute unlawful content, violate privacy, harass others, disrupt the service, or exploit security vulnerabilities.',
       s4h: '4. Data and ownership',
       s4p:
-        'Work data created by your organization remains under its control. VoiceHub processes data only to deliver operations, sync, and security within the published service scope.',
+        'Work data created by your organization remains under its control. Atrium processes data only to deliver operations, sync, and security within the published service scope.',
       s5h: '5. Limitation of liability',
       s5p:
         'We strive for availability and safety but do not guarantee uninterrupted service in every case of force majeure, maintenance, or third-party infrastructure issues.',
@@ -952,11 +959,11 @@ export const extraStrings = {
       s6p:
         'We may suspend or terminate access for serious violations. Terms may be updated as needed and will be announced on the platform.',
       callout: 'Questions about these terms? Contact support at',
-      calloutEmail: ' support@voicehub.com',
+      calloutEmail: ' support@atrium.com',
     },
     privacyPolicy: {
       title: 'Privacy Policy',
-      subtitle: 'How VoiceHub collects, uses, and protects your data.',
+      subtitle: 'How Atrium collects, uses, and protects your data.',
       backToRegister: 'Back to sign up',
       s1h: '1. Data we collect',
       s1p:
@@ -977,7 +984,7 @@ export const extraStrings = {
       s6p:
         'We may update this policy to reflect product, legal, or security changes, with notice before they take effect.',
       callout: 'Privacy requests:',
-      calloutEmail: ' privacy@voicehub.com',
+      calloutEmail: ' privacy@atrium.com',
     },
     settingsCapability: {
       title: 'Capability profile',

@@ -214,7 +214,7 @@ const authService = {
       {
         skipAuthRefresh: true,
         withCredentials: true,
-        headers: { 'X-VoiceHub-Client': '1' },
+        headers: { 'X-Atrium-Client': '1' },
       }
     );
     const accessToken = response?.accessToken || response?.token || response?.data?.accessToken;

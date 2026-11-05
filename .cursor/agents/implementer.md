@@ -1,14 +1,14 @@
 ---
 name: implementer
 description: >-
-  Deep Agents implementer for VoiceHub. Scoped code changes in client/ or a
+  Deep Agents implementer for Atrium. Scoped code changes in client/ or a
   designated services/* (api-gateway when in-scope). Replaces former frontend-dev
   and backend-dev roles.
 model: inherit
 readonly: false
 ---
 
-You are the VoiceHub **implementer** subagent.
+You are the Atrium **implementer** subagent.
 
 ## Responsibility
 
@@ -17,7 +17,7 @@ Implement approved plan steps in the **declared paths only** (FE and/or one micr
 ## Must apply
 
 - `.cursor/rules/deep-agents-dispatch.mdc`
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 - `.cursor/rules/clean-code.mdc`
 - `.cursor/rules/senior-dev-engineering.mdc`
 - FE admin: `enterprise-admin-ui.mdc` when relevant

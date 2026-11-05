@@ -7,6 +7,20 @@ import { createElement } from 'react';
 import { localizedProjectRoleLabel } from '../../../../utils/projectRoleLocale';
 import { resolveDependencyDecisionStatus } from './dependencyDisplay';
 import { isEmptyScheduleDateValue } from './assignmentScheduleTrust.js';
+import {
+  isWbsContainerLevel,
+  resolveWbsEffectiveLevel,
+  resolveWbsUiDepth,
+} from './wbsCatalogEdit.js';
+import {
+  enrichGate2HitlSeedPayload,
+  isGate2RiskItemRow,
+  parseRelatedFrIdsEditorText,
+  patchGate2HitlField,
+  relatedFrIdsToEditorText,
+} from './gate2HitlEditPayload.js';
+
+export { isGate2RiskItemRow } from './gate2HitlEditPayload.js';
 
 function tr(t, key, fallback) {
   const value = typeof t === 'function' ? t(key) : '';
@@ -182,10 +196,16 @@ const WBS_LEVEL_LABELS = Object.freeze({
 });
 
 function wbsTitleIndent(row, _t, ctx = {}) {
-  // Indent by stamped depth; Level column remains the node-type signal.
+  // Prefer edited depth (stamped when Level changes) so "Sửa" updates indent live.
   const title = clip(row?.title || row?.name || '—', 140);
-  const depth = Math.max(0, Math.min(8, Number(row?.depth) || 0));
-  const expandable = Boolean(row?.hasChildren && row?.isWbsContainer);
+  const edited = ctx?.decision?.editedPayload;
+  const depth = resolveWbsUiDepth(row, edited);
+  const effectiveLevel = resolveWbsEffectiveLevel(row, edited);
+  const isContainer =
+    edited && Object.prototype.hasOwnProperty.call(edited, 'isWbsContainer')
+      ? Boolean(edited.isWbsContainer)
+      : Boolean(row?.isWbsContainer) || isWbsContainerLevel(effectiveLevel);
+  const expandable = Boolean(row?.hasChildren && isContainer);
   const expanded = expandable ? ctx.wbsExpanded !== false : true;
   const onToggle = typeof ctx.onToggleWbs === 'function' ? ctx.onToggleWbs : null;
   const warn =
@@ -219,8 +239,8 @@ function wbsTitleIndent(row, _t, ctx = {}) {
   );
 }
 
-function wbsLevelLabel(row, t) {
-  const level = String(row?.level || '').toLowerCase();
+function wbsLevelLabel(row, t, ctx = {}) {
+  const level = resolveWbsEffectiveLevel(row, ctx?.decision?.editedPayload);
   if (!level) return '—';
   const fallback = WBS_LEVEL_LABELS[level] || level;
   return tr(t, `requirements.gate2WbsLevel_${level}`, fallback);
@@ -277,16 +297,22 @@ const GATE2_SECTION_COLUMNS = {
       headerKey: 'requirements.gate2ColLevel',
       headerFallback: 'Level',
       field: 'level',
+      editor: 'select',
+      placeholderKey: 'requirements.gate2WbsPickLevel',
+      placeholderFallback: 'Chọn level',
       editable: true,
       defaultPx: 110,
       minPx: 72,
-      render: (r, t) => wbsLevelLabel(r, t),
+      render: (r, t, ctx) => wbsLevelLabel(r, t, ctx),
     },
     {
       key: 'role',
       headerKey: 'requirements.gate2ColRole',
       headerFallback: 'Role',
       field: 'suggestedRoleKey',
+      editor: 'select',
+      placeholderKey: 'requirements.gate2AssignPickRole',
+      placeholderFallback: 'Chọn vai trò',
       editable: true,
       defaultPx: 130,
       minPx: 80,
@@ -634,13 +660,71 @@ const GATE2_SECTION_COLUMNS = {
   risks: [
     COL_TITLE,
     {
+      key: 'trigger',
+      headerKey: 'requirements.gate2ColTrigger',
+      headerFallback: 'Trigger',
+      field: 'trigger',
+      editable: true,
+      isEditable: isGate2RiskItemRow,
+      defaultPx: 180,
+      minPx: 100,
+      render: (r) => clip(r.trigger || '—', 140),
+    },
+    {
+      key: 'probability',
+      headerKey: 'requirements.gate2ColProbability',
+      headerFallback: 'P (1–5)',
+      field: 'probability',
+      editable: true,
+      isEditable: isGate2RiskItemRow,
+      defaultPx: 72,
+      minPx: 56,
+      render: (r) => (r.probability != null ? String(r.probability) : '—'),
+    },
+    {
+      key: 'impact',
+      headerKey: 'requirements.gate2ColRiskImpact',
+      headerFallback: 'I (1–5)',
+      field: 'impact',
+      editable: true,
+      isEditable: isGate2RiskItemRow,
+      defaultPx: 72,
+      minPx: 56,
+      render: (r) => (r.impact != null ? String(r.impact) : '—'),
+    },
+    {
+      key: 'mitigation',
+      headerKey: 'requirements.gate2ColMitigation',
+      headerFallback: 'Mitigation',
+      field: 'mitigation',
+      editable: true,
+      isEditable: isGate2RiskItemRow,
+      defaultPx: 200,
+      minPx: 120,
+      render: (r) => clip(r.mitigation || r.summary || '—', 160),
+    },
+    {
+      key: 'relatedFrIds',
+      headerKey: 'requirements.gate2ColRelatedFr',
+      headerFallback: 'FR',
+      field: 'relatedFrIds',
+      editable: true,
+      isEditable: isGate2RiskItemRow,
+      defaultPx: 120,
+      minPx: 72,
+      render: (r) =>
+        Array.isArray(r.relatedFrIds) && r.relatedFrIds.length
+          ? r.relatedFrIds.join(', ')
+          : '—',
+    },
+    {
       key: 'level',
       headerKey: 'requirements.gate2ColLevel',
       headerFallback: 'Kind',
       field: 'level',
-      editable: true,
-      defaultPx: 110,
-      minPx: 72,
+      editable: false,
+      defaultPx: 100,
+      minPx: 64,
       render: (r) => {
         const kind = String(r.level || '').trim();
         const band = String(r.band || '').trim();
@@ -648,7 +732,6 @@ const GATE2_SECTION_COLUMNS = {
         return kind || band || '—';
       },
     },
-    COL_SUMMARY,
     COL_STATUS,
     COL_AUDIT_SOURCE,
   ],
@@ -809,6 +892,9 @@ const GATE2_SECTION_COLUMNS = {
       headerKey: 'requirements.gate2ColRole',
       headerFallback: 'Role',
       field: 'suggestedRoleKey',
+      editor: 'select',
+      placeholderKey: 'requirements.gate2AssignPickRole',
+      placeholderFallback: 'Chọn vai trò',
       editable: true,
       defaultPx: 140,
       minPx: 80,
@@ -859,9 +945,9 @@ export function getGate2ColumnsForSection(section, opts = {}) {
                 event.stopPropagation();
                 onOpenTcDetail(r);
               },
-              title: tr(t, 'requirements.gate2OpenTcDetail', 'Xem chi tiết Test Case'),
+              title: tr(t, 'requirements.gate2OpenTcDetail', 'Xem / sửa chi tiết Test Case'),
             },
-            tr(t, 'requirements.gate2OpenTcDetail', 'Xem chi tiết')
+            tr(t, 'requirements.gate2OpenTcDetail', 'Chi tiết TC')
           ),
       };
     });
@@ -954,6 +1040,7 @@ export function getGate2ColumnsForSection(section, opts = {}) {
 export function getGate2FieldValue(row, col, editedPayload) {
   const field = col?.field;
   if (!field) return '';
+  let value;
   if (editedPayload && Object.prototype.hasOwnProperty.call(editedPayload, field)) {
     const edited = editedPayload[field];
     // Do not let empty seeded dates mask enriched row start/due.
@@ -962,23 +1049,46 @@ export function getGate2FieldValue(row, col, editedPayload) {
       isEmptyScheduleDateValue(edited) &&
       !isEmptyScheduleDateValue(row?.[field])
     ) {
-      return row[field];
+      value = row[field];
+    } else {
+      value = edited;
     }
-    return edited;
+  } else {
+    value = row?.[field] ?? '';
   }
-  return row?.[field] ?? '';
+  // Closed-list fields: normalize so <select> matches option values.
+  if (field === 'level' || field === 'suggestedRoleKey') {
+    return String(value ?? '').trim().toLowerCase();
+  }
+  if (field === 'relatedFrIds') {
+    return relatedFrIdsToEditorText(value);
+  }
+  if (field === 'probability' || field === 'impact') {
+    return value == null || value === '' ? '' : String(value);
+  }
+  return value;
 }
 
 export function seedGate2EditedPayload(row, columns) {
   const payload = {};
   for (const col of columns || []) {
     if (!col?.editable || !col.field) continue;
+    if (typeof col.isEditable === 'function' && !col.isEditable(row)) continue;
     const value = getGate2FieldValue(row, col, null);
     // Omit blank schedule dates so later enrich / SoT can still display.
     if (
       (col.field === 'startDate' || col.field === 'dueDate') &&
       isEmptyScheduleDateValue(value)
     ) {
+      continue;
+    }
+    if (col.field === 'relatedFrIds') {
+      payload.relatedFrIds = parseRelatedFrIdsEditorText(value);
+      continue;
+    }
+    if (col.field === 'probability' || col.field === 'impact') {
+      const n = Number(value);
+      if (Number.isFinite(n)) payload[col.field] = n;
       continue;
     }
     payload[col.field] = value;
@@ -1006,11 +1116,11 @@ export function seedGate2EditedPayload(row, columns) {
   }
   if (row?.status) payload.status = String(row.status);
   payload.overload = Boolean(row?.overload);
-  return payload;
+  return enrichGate2HitlSeedPayload(row, payload);
 }
 
 export function patchGate2EditedPayload(prev, field, value) {
-  return { ...(prev && typeof prev === 'object' ? prev : {}), [field]: value };
+  return patchGate2HitlField(prev, field, value);
 }
 
 export function getGate2RowId(row, index = 0) {

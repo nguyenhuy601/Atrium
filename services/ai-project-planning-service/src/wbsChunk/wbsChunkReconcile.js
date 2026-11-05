@@ -25,6 +25,7 @@ function reconcileWbsChunks(units, context = {}) {
   const frUnits = Array.isArray(context.frUnits) ? context.frUnits : [];
   const stories = Array.isArray(context.stories) ? context.stories : [];
   const epics = Array.isArray(context.epics) ? context.epics : [];
+  const features = Array.isArray(context.features) ? context.features : [];
   const acceptedUnits = [];
   const rejectedSnapshotIds = [];
 
@@ -159,9 +160,107 @@ function reconcileWbsChunks(units, context = {}) {
     clarifications,
     needsReview,
   });
+  // Defense: re-stamp Story→Epic via Feature so chunk state without parentEpicId still nests.
+  // Observed production failure (run 6ae85813): ABS had Feature+14 stories, but chunk
+  // context arrived with features=[] and stories only kept parentId=FEATURE-* (no
+  // parentFeatureId) → materialize left Epic empty + Gate2 stub "lập lại" epic.
+  const epicIdSet = new Set(
+    epics.map((e) => String(e?.id || '').replace(/^c\d+-/i, '').trim()).filter(Boolean)
+  );
+  const soleEpicId = epicIdSet.size === 1 ? [...epicIdSet][0] : null;
+
+  function looksLikeFeatureId(raw) {
+    const id = String(raw || '').replace(/^c\d+-/i, '').trim();
+    return id && /^FEATURE[-_]/i.test(id) ? id : '';
+  }
+
+  function resolveStoryFeatureId(s) {
+    const explicit = String(s?.parentFeatureId || '').replace(/^c\d+-/i, '').trim();
+    if (explicit) return explicit;
+    return looksLikeFeatureId(s?.parentId) || looksLikeFeatureId(s?.parentFeatureId) || '';
+  }
+
+  // Recover Feature rows from durable chunk inputs when LangGraph state dropped them.
+  let featuresForTree = Array.isArray(features) ? [...features] : [];
+  if (!featuresForTree.length) {
+    const seen = new Set();
+    for (const unit of units || []) {
+      const fromInput = unit?.input?.features;
+      if (!Array.isArray(fromInput)) continue;
+      for (const f of fromInput) {
+        const fid = String(f?.id || '').trim();
+        if (!fid || seen.has(fid)) continue;
+        seen.add(fid);
+        featuresForTree.push(f);
+      }
+    }
+  }
+
+  const featureToEpic = new Map();
+  for (const f of featuresForTree) {
+    const fid = String(f?.id || '').replace(/^c\d+-/i, '').trim();
+    if (!fid) continue;
+    let pe = String(f?.parentEpicId || f?.parentId || '')
+      .replace(/^c\d+-/i, '')
+      .trim();
+    if (pe && !epicIdSet.has(pe)) pe = '';
+    if (!pe) pe = soleEpicId || '';
+    if (pe) {
+      f.parentEpicId = pe;
+      f.parentId = pe;
+    }
+    featureToEpic.set(fid, pe);
+  }
+  const haveFeature = new Set(featureToEpic.keys());
+  for (const s of stories) {
+    const pf = resolveStoryFeatureId(s);
+    if (!pf || haveFeature.has(pf)) continue;
+    let pe = String(s?.parentEpicId || '')
+      .replace(/^c\d+-/i, '')
+      .trim();
+    if (pe && !epicIdSet.has(pe)) pe = '';
+    if (!pe) pe = soleEpicId || '';
+    if (!pe) continue;
+    featuresForTree.push({
+      id: pf,
+      name: pf,
+      parentEpicId: pe,
+      parentId: pe,
+      sourceFrIds: Array.isArray(s.sourceFrIds)
+        ? s.sourceFrIds
+        : Array.isArray(s.fr)
+          ? s.fr
+          : [],
+    });
+    featureToEpic.set(pf, pe);
+    haveFeature.add(pf);
+  }
+  if ((!features || !features.length) && featuresForTree.length) {
+    console.warn(
+      '[wbs-chunk] reconcile synthesized features=%s (state.features was empty)',
+      featuresForTree.length
+    );
+  }
+  const storiesForTree = stories.map((s) => {
+    const pf = resolveStoryFeatureId(s) || null;
+    let pe = String(s?.parentEpicId || '')
+      .replace(/^c\d+-/i, '')
+      .trim() || null;
+    if (pe && !epicIdSet.has(pe)) pe = null;
+    if (!pe && pf) pe = featureToEpic.get(pf) || soleEpicId || null;
+    if (!pe && soleEpicId) pe = soleEpicId;
+    return {
+      ...s,
+      parentFeatureId: pf,
+      parentEpicId: pe,
+      parentId: pf || pe || s.parentId || null,
+    };
+  });
+
   const materialized = materializeWbsFromSotAndLeaves({
     epics,
-    stories,
+    features: featuresForTree,
+    stories: storiesForTree,
     leaves: safeLeaves,
     frUnits,
   });
@@ -177,7 +276,7 @@ function reconcileWbsChunks(units, context = {}) {
       unresolvedStoryIds,
       storyCount: stories.length,
       epicCount: epics.length,
-      featureCount: 0,
+      featureCount: Number(materialized.wbs?.featureCount) || features.length || 0,
       workPackageCount: 0,
       epicsWithoutStories: materialized.wbs?.epicsWithoutStories || [],
       uncoveredFrIds,

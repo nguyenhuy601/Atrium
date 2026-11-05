@@ -53,7 +53,12 @@ function parseDependsTargets(fr) {
   return [];
 }
 
-/** Weighted fraction of FRs that have description + ac + priority. */
+/** True when FR has usable prose (dedicated description or short title-only shape). */
+function hasDescriptionProse(fr) {
+  return fieldPresent(fr, 'description', ['desc', 'text', 'title', 'name']);
+}
+
+/** Weighted fraction of FRs that have description + ac + priority (coverage score only). */
 function computeCoverage(frs = []) {
   if (!frs.length) {
     return { score: null, completeCount: 0, total: 0, items: [] };
@@ -63,8 +68,12 @@ function computeCoverage(frs = []) {
   for (let i = 0; i < frs.length; i += 1) {
     const fr = frs[i];
     const id = frId(fr, i);
-    const hasDesc = fieldPresent(fr, 'description', ['desc']);
-    const hasAc = fieldPresent(fr, 'ac', ['acceptanceCriteria']);
+    const hasDesc = hasDescriptionProse(fr);
+    const hasAc = fieldPresent(fr, 'ac', [
+      'acceptanceCriteria',
+      'acceptance_condition',
+      'acceptance',
+    ]);
     const hasPriority = fieldPresent(fr, 'priority', []);
     const present = [hasDesc, hasAc, hasPriority].filter(Boolean).length;
     const score = present / 3;
@@ -103,17 +112,33 @@ function buildGaps(frs = []) {
     const fr = frs[i];
     const id = frId(fr, i);
     const title = normProse(fr.name || fr.title || id);
-    const missing = [];
-    if (!fieldPresent(fr, 'description', ['desc'])) missing.push('Description');
-    if (!fieldPresent(fr, 'ac', ['acceptanceCriteria'])) missing.push('Acceptance criteria');
-    if (!fieldPresent(fr, 'priority', [])) missing.push('Priority');
-    if (missing.length) {
+    // Hard gaps align Integrity Gate: Description (incl. title) + AC. Priority = soft gap only.
+    const missingHard = [];
+    if (!hasDescriptionProse(fr)) missingHard.push('Description');
+    if (
+      !fieldPresent(fr, 'ac', [
+        'acceptanceCriteria',
+        'acceptance_condition',
+        'acceptance',
+      ])
+    ) {
+      missingHard.push('Acceptance criteria');
+    }
+    if (missingHard.length) {
       push({
         type: 'incomplete',
         relatedFrIds: [id],
-        issue: `Requirement ${id} (${title}) missing: ${missing.join(', ')}`,
-        severity: missing.length >= 2 ? 'high' : 'medium',
-        recommendation: 'Complete Description, Acceptance Criteria, and Priority',
+        issue: `Requirement ${id} (${title}) missing: ${missingHard.join(', ')}`,
+        severity: missingHard.length >= 2 ? 'high' : 'medium',
+        recommendation: 'Complete Description and Acceptance Criteria',
+      });
+    } else if (!fieldPresent(fr, 'priority', [])) {
+      push({
+        type: 'incomplete_soft',
+        relatedFrIds: [id],
+        issue: `Requirement ${id} (${title}) missing: Priority`,
+        severity: 'low',
+        recommendation: 'Set Priority when known (does not block Gate1 integrity)',
       });
     }
     for (const target of parseDependsTargets(fr)) {

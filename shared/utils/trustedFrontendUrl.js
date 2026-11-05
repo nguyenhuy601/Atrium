@@ -1,6 +1,6 @@
 const { resolveFrontendUrl } = require('./resolveFrontendUrl');
 
-const LAN_DEV_ORIGIN = 'https://voicehub.local';
+const LAN_DEV_ORIGIN = 'https://atrium.dev';
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1']);
 
 function toOrigin(raw) {

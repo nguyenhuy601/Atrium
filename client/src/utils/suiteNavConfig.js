@@ -35,8 +35,8 @@ export const PROJECT_MODULE_KEYS = [
   'board',
   'timeline',
   'change-requests',
+  'execution-control',
   'test-cases',
-  'requirements',
   'files',
   'chat',
   'calendar',
@@ -85,6 +85,7 @@ export const HUB_TAB_TO_MODULE = {
   board: 'board',
   timeline: 'timeline',
   changeRequests: 'change-requests',
+  executionControl: 'execution-control',
   testCases: 'test-cases',
   chat: 'chat',
   members: 'members',
@@ -100,13 +101,13 @@ export const MODULE_TO_HUB_TAB = {
   board: 'board',
   timeline: 'timeline',
   'change-requests': 'changeRequests',
+  'execution-control': 'executionControl',
   'test-cases': 'testCases',
   chat: 'chat',
   members: 'members',
   files: 'files',
   activity: 'activity',
   settings: 'settings',
-  requirements: 'requirements',
   calendar: 'calendar',
   documents: 'documents',
 };
@@ -118,6 +119,7 @@ export function normalizeProjectModule(raw) {
   if (HUB_TAB_TO_MODULE[value]) return HUB_TAB_TO_MODULE[value];
   const lower = value.toLowerCase();
   if (lower === 'changerequests' || lower === 'change-requests') return 'change-requests';
+  if (lower === 'executioncontrol' || lower === 'execution-control') return 'execution-control';
   if (lower === 'testcases' || lower === 'test-cases') return 'test-cases';
   if (lower === 'deployevidence' || lower === 'deploy-evidence') return 'deploy-evidence';
   if (lower === 'releasenotes' || lower === 'release-notes') return 'release-notes';
@@ -298,12 +300,17 @@ export function getProjectsPostSelectNavItems(projectId, opts = {}) {
       PROJECT_MENU_GROUPS.WORK
     ),
     item(
+      'executionControl',
+      'workspace.projectHubTabExecutionControl',
+      'execution-control',
+      PROJECT_MENU_GROUPS.WORK
+    ),
+    item(
       'testCases',
       'workspace.phaseQaTestCasesTitle',
       'test-cases',
       PROJECT_MENU_GROUPS.WORK
     ),
-    item('requirements', 'nav.requirements', 'requirements', PROJECT_MENU_GROUPS.WORK),
     item('members', 'workspace.projectHubTabMembers', 'members', PROJECT_MENU_GROUPS.OPS),
     item('files', 'workspace.projectHubTabFiles', 'files', PROJECT_MENU_GROUPS.WORK),
     item('activity', 'workspace.projectHubTabReport', 'activity', PROJECT_MENU_GROUPS.OPS),

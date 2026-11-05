@@ -1,10 +1,10 @@
 /**
- * Wrapper react-hot-toast — cùng theme với <VoiceHubToaster /> trong main.jsx.
+ * Wrapper react-hot-toast — cùng theme với <AtriumToaster /> trong main.jsx.
  * Dùng notify.* khi muốn gộp duration/style mặc định; vẫn có thể import toast trực tiếp.
  */
 import toast from 'react-hot-toast';
 
-/** Shared with VoiceHubToaster toastOptions — keep in sync. */
+/** Shared with AtriumToaster toastOptions — keep in sync. */
 export const TOAST_DURATION = Object.freeze({
   default: 3400,
   success: 3000,

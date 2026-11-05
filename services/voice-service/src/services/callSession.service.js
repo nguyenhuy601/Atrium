@@ -23,7 +23,7 @@ function resolveChatServiceBaseUrl() {
   if (
     /:3000$/.test(base) ||
     base.includes('api-gateway') ||
-    base.includes('voicehub.local')
+    base.includes('atrium.dev')
   ) {
     const err = new Error(
       'CHAT_SERVICE_URL phải trỏ trực tiếp chat-service (S2S). Dùng CHAT_SERVICE_DIRECT_URL nếu cần override.'

@@ -1,7 +1,7 @@
 ---
 name: security-review
 description: >-
-  Security gate review for VoiceHub diffs: authn/authz, secrets, injection, token handling, sensitive logs. Use after auth/gateway/RBAC changes or when user requests security review.
+  Security gate review for Atrium diffs: authn/authz, secrets, injection, token handling, sensitive logs. Use after auth/gateway/RBAC changes or when user requests security review.
 ---
 
 # security review
@@ -17,7 +17,7 @@ Casual feature polish without security surface.
 ## Related Rules
 
 - `.cursor/rules/deep-agents-dispatch.mdc`; skill `authorization-analysis`
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 - `.cursor/rules/deep-agents-dispatch.mdc` (agent: `reviewer`)
 
 ## Input

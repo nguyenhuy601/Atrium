@@ -9,7 +9,7 @@
 // Import hooks để build context
 import { createContext, useContext, useLayoutEffect, useMemo, useState } from 'react';
 
-const FONT_SCALE_STORAGE_KEY = 'voicehub-font-scale';
+const FONT_SCALE_STORAGE_KEY = 'atrium-font-scale';
 const FONT_SCALE_REM = {
   normal: '100%',
   comfortable: '112.5%',

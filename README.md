@@ -1,16 +1,18 @@
-# VoiceHub
+# Atrium
 
 Nền tảng **cộng tác nội bộ** (chat, voice/meeting, task, tài liệu, thông báo) theo mô hình **microservices** — **API Gateway** là điểm vào REST duy nhất; **React (Vite)** gọi `/api`; realtime qua **Socket.IO**; họp thoại qua **mediasoup / WebRTC**.
 
-**Dev chuẩn (LAN):** [`https://voicehub.local`](https://voicehub.local) — Nginx TLS, không mở thẳng `localhost:3000` / `IP:port` trên máy client. Chi tiết: [`docs/lan-https-voicehub.local.md`](docs/lan-https-voicehub.local.md).
+**Dev chuẩn (LAN):** [`https://atrium.dev`](https://atrium.dev) — Nginx TLS, không mở thẳng `localhost:3000` / `IP:port` trên máy client. Chi tiết: [`docs/lan-https-atrium.dev.md`](docs/lan-https-atrium.dev.md).
 
 Đặc tả / luồng nghiệp vụ: [`docs/spec-pack/`](docs/spec-pack/), [`docs/luong nghiep vu/00-overview.md`](docs/luong%20nghiep%20vu/00-overview.md) (theo nhóm suite).
+
+**AI Project** (Two-Phase HITL): [`docs/ai-project/README.md`](docs/ai-project/README.md) · sơ đồ quy trình [`docs/ai-project/diagrams/ai-operating-flow.jpg`](docs/ai-project/diagrams/ai-operating-flow.jpg).
 
 ---
 
 ## Mục đích sản phẩm
 
-VoiceHub gom giao tiếp và làm việc của **một công ty** (và mạng lưới bạn bè cá nhân) vào một app:
+Atrium gom giao tiếp và làm việc của **một công ty** (và mạng lưới bạn bè cá nhân) vào một app:
 
 | Vùng | Người dùng làm gì |
 |------|-------------------|
@@ -32,24 +34,25 @@ flowchart LR
     SPA[React_Vite]
   end
   subgraph edge [Edge_dev]
-    NGX[Nginx_voicehub.local]
+    NGX[Nginx_atrium.dev]
   end
-  subgraph swarm [Docker_Swarm_app]
+  subgraph swarm [Docker_Swarm]
     GW[api-gateway]
-    MS[auth_user_org_chat_voice_...]
+    MS[auth_user_org_chat_voice_project_...]
+    AIPS[ai-project-planning]
     SOCK[socket-service]
-  end
-  subgraph extra [Compose_extra]
-    AI[ollama_minio_meili_workers]
+    INFRA[ollama_minio_qdrant]
   end
   SPA -->|HTTPS_same_origin| NGX
   NGX -->|/api_/socket.io_/uploads| GW
   GW --> MS
+  GW --> AIPS
   GW -->|WS_proxy| SOCK
-  MS -.->|overlay| AI
+  MS -->|S2S_AI| AIPS
+  AIPS -.->|overlay| INFRA
 ```
 
-1. **Browser** → `https://voicehub.local` (Nginx) → gateway `:3000` (`/api`, `/socket.io`, `/uploads`, voice signaling theo cấu hình).
+1. **Browser** → `https://atrium.dev` (Nginx) → gateway `:3000` (`/api`, `/socket.io`, `/uploads`, voice signaling theo cấu hình).
 2. **Gateway**: JWT → RBAC → proxy; gắn `x-gateway-internal-token`, `x-user-id`.
 3. **Service**: nghiệp vụ + Mongo / Redis / RabbitMQ.
 4. **S2S**: header internal token — [`docs/security-runbook.md`](docs/security-runbook.md).
@@ -76,9 +79,9 @@ Chi tiết: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/MIGRATION.md`
 | Edge / identity | `api-gateway`, `auth-service`, `user-service` |
 | Org / social | `organization-service`, `role-permission-service` |
 | Chat / realtime | `chat-service`, `socket-service` |
-| Work | `project-service`, `project-worker` |
+| Work | `project-service`, `project-worker` (pack, Gate HTTP, materialize) |
 | Voice | `voice-service` (mediasoup; UDP media publish ra host) |
-| AI | `ai-project-planning-service`, `ai-project-planning-llm-jobs-worker` |
+| AI Project | `ai-project-planning-service`, `ai-project-planning-llm-jobs-worker` |
 | Notify / webhook | `notification-service`, `notification-dispatch-worker`, `webhook-service`, `webhook-delivery-worker` |
 
 ### Compose extra (AI / storage)
@@ -89,10 +92,10 @@ Chi tiết: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/MIGRATION.md`
 
 | Thành phần | Ghi chú |
 |------------|---------|
-| **Nginx** `voicehub.local:443` | Dev LAN — [`devops/nginx/dev-https.conf`](devops/nginx/dev-https.conf) |
+| **Nginx** `atrium.dev:443` | Dev LAN — [`devops/nginx/dev-https.conf`](devops/nginx/dev-https.conf) |
 | **api-gateway** `:3000` | REST + proxy Socket.IO (ingress Swarm) |
 | **voice-service** | Signaling + UDP mediasoup (dải port theo `.env` / stack) |
-| Service khác | Chỉ mạng overlay `voicehub_enterprise-network` / `enterprise-network` |
+| Service khác | Chỉ mạng overlay `atrium_enterprise-network` / `enterprise-network` |
 
 Infra HA (staging): Mongo Atlas, Redis Sentinel, Rabbit cluster — xem [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -105,8 +108,8 @@ Infra HA (staging): Mongo Atlas, Redis Sentinel, Rabbit cluster — xem [`docs/A
 | Frontend | React 18, Vite, React Router (suite shell), Tailwind, Axios, Socket.IO client, mediasoup-client |
 | Backend | Node.js + Express (microservices); Python (webhook / một số worker) |
 | Dữ liệu / queue | MongoDB, Redis, RabbitMQ |
-| Media / AI | mediasoup, MinIO, Ollama, Qdrant |
-| Triển khai | **Swarm** app + **Compose extra**; Compose full stack vẫn có cho local |
+| Media / AI | mediasoup, MinIO, Ollama, kho vector (truy hồi ngữ nghĩa), **Alibaba Cloud API** (chat LLM AI Project) |
+| Triển khai | **Swarm** (app + infra AI); Compose full stack vẫn có cho local |
 
 Cấu hình: file **`.env`** (root + từng service). Không dùng `.env.example` làm luồng chuẩn.
 
@@ -115,7 +118,7 @@ Cấu hình: file **`.env`** (root + từng service). Không dùng `.env.example
 ## Cấu trúc thư mục
 
 ```
-VoiceHub/
+Atrium/
   api-gateway/              # JWT, RBAC, BFF bootstrap, proxy
   client/                   # SPA — suite Communicate / Collaborate / Me / Admin
   services/
@@ -195,10 +198,10 @@ UI admin: `/app/admin/*` (hub, users, structure, RBAC, …).
 | **`CHAT_INTERNAL_TOKEN`** | Chat internal |
 | **`NOTIFICATION_INTERNAL_TOKEN`** | Tạo notification nội bộ |
 | **`REALTIME_INTERNAL_TOKEN`** | `POST` publish → socket-service |
-| **`CORS_ORIGIN`** | Whitelist origin (có `https://voicehub.local` khi dev LAN) |
+| **`CORS_ORIGIN`** | Whitelist origin (có `https://atrium.dev` khi dev LAN) |
 | **`SINGLE_ORG_MODE`** | Một công ty / hạn chế tạo org công khai |
 
-Runbook: [`docs/security-runbook.md`](docs/security-runbook.md). Sau đổi secret: `bash devops/scripts/security/check-security-env.sh`.
+Runbook: [`docs/security-runbook.md`](docs/security-runbook.md). Thư mục `devops/` không nằm trong git. Trước deploy, xác nhận `.env` không có `RBAC_TEST_UNLOCK=true` và secret không còn placeholder (`change-me`, `your-secret-key`).
 
 ---
 
@@ -208,10 +211,9 @@ Runbook: [`docs/security-runbook.md`](docs/security-runbook.md). Sau đổi secr
 
 ```bash
 # .env root + service .env đã có (SINGLE_ORG_MODE, token, …)
-VOICEHUB_ENV_CHECK=staging bash devops/scripts/security/check-security-env.sh   # hoặc env tương ứng
 bash devops/swarm/build-local-images.sh <service-name>   # chỉ service vừa sửa
-bash devops/swarm/deploy-stack.sh
-# hoặc: docker service update --force --update-parallelism 1 --update-order start-first voicehub_<service>
+SKIP_SECURITY_ENV_CHECK=1 bash devops/swarm/deploy-stack.sh
+# hoặc: docker service update --force --update-parallelism 1 --update-order start-first atrium_<service>
 ```
 
 ### 2. Infra AI trên Swarm (Ollama / MinIO / Qdrant)
@@ -226,14 +228,14 @@ bash devops/swarm/dev-enable-profile.sh          # deploy + pull model
 ### 3. Edge HTTPS + frontend
 
 ```powershell
-# Cert + hosts — docs/lan-https-voicehub.local.md
-powershell -File devops/nginx/mkcert-setup.ps1 -HostName voicehub.local
+# Cert + hosts — docs/lan-https-atrium.dev.md
+powershell -File devops/nginx/mkcert-setup.ps1 -HostName atrium.dev
 # Chạy Nginx (dev-https.conf), rồi:
 cd client && npm install && npm run dev
-# Mở https://voicehub.local — VITE_API_URL=/api, VITE_SOCKET_USE_GATEWAY=true, HMR qua Nginx
+# Mở https://atrium.dev — VITE_API_URL=/api, VITE_SOCKET_USE_GATEWAY=true, HMR qua Nginx
 ```
 
-Verify: `powershell -File devops/nginx/verify-lan-https.ps1 -BaseUrl https://voicehub.local`
+Verify: `powershell -File devops/nginx/verify-lan-https.ps1 -BaseUrl https://atrium.dev`
 
 ### Compose full stack (tuỳ chọn)
 
@@ -243,6 +245,34 @@ docker compose up -d --build
 ```
 
 Chi tiết Compose: [`docs/DOCKER-COMPOSE.md`](docs/DOCKER-COMPOSE.md).
+
+---
+
+## AI Project (hai giai đoạn, có người duyệt)
+
+Lập kế hoạch dự án có người duyệt: **WHAT** (SRS) → Gate 1 → **HOW** (WBS/lịch) → Gate 2 → tạo project.
+
+![Sơ đồ quy trình hoạt động AI Project — LangGraph, Two-phase HITL](docs/ai-project/diagrams/ai-operating-flow.jpg)
+
+Sơ đồ trên là **kiến trúc đề xuất**: vòng đời Input → Project Ready, LangGraph WHAT/HOW (kể cả subgraph), Hybrid RAG, Gate và materialize.
+
+```mermaid
+flowchart LR
+  FE[Trinh_duyet] --> GW[API_Gateway]
+  GW --> PS[Dich_vu_Project]
+  PS -->|Cong_duyet_Pack| Pack[(Pack)]
+  PS -->|Khoi_chay_noi_bo| AI[Dich_vu_AI_Planning]
+  AI --> ORCH[Dieu_phoi_WHAT_HOW]
+  AI --> RAG[Truy_hoi_ngu_nghia]
+```
+
+| Thành phần | Việc làm |
+|------------|----------|
+| **Dịch vụ Project** | Pack, Gate 1/2, khởi chạy phân tích, tạo project từ kế hoạch đã duyệt |
+| **Dịch vụ AI Planning** | Điều phối agent WHAT/HOW, chat LLM (**Alibaba Cloud API**), công cụ phân tích, truy hồi ngữ nghĩa |
+| **Gate vs trong lần chạy** | Gate = duyệt Pack; trong lần chạy có thể tạm dừng hỏi người (không thay Gate) |
+
+Hub + sơ đồ: [`docs/ai-project/README.md`](docs/ai-project/README.md) · [`docs/ai-project/diagrams/`](docs/ai-project/diagrams/).
 
 ---
 
@@ -260,10 +290,11 @@ Chi tiết Compose: [`docs/DOCKER-COMPOSE.md`](docs/DOCKER-COMPOSE.md).
 | Tài liệu | Nội dung |
 |----------|----------|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Kiến trúc + realtime + HA phases |
+| [`docs/ai-project/README.md`](docs/ai-project/README.md) | AI Project Two-Phase HITL + sơ đồ |
 | [`docs/MIGRATION.md`](docs/MIGRATION.md) | Compose vs Swarm; stabilization |
 | [`docs/STRUCTURE.md`](docs/STRUCTURE.md) | Cây thư mục |
 | [`docs/README.md`](docs/README.md) | Hub `docs/` |
-| [`docs/lan-https-voicehub.local.md`](docs/lan-https-voicehub.local.md) | Dev HTTPS LAN |
+| [`docs/lan-https-atrium.dev.md`](docs/lan-https-atrium.dev.md) | Dev HTTPS LAN |
 | [`docs/DOCKER-COMPOSE.md`](docs/DOCKER-COMPOSE.md) | Compose infra/core/dev |
 | [`docs/security-runbook.md`](docs/security-runbook.md) | Token, header, sau deploy |
 | [`docs/SOCKET_LB.md`](docs/SOCKET_LB.md) | Socket / LB |

@@ -2,9 +2,15 @@
  * Phase 1 gate policy — Tech optional, SoD between stamps (DEC D6–D8).
  */
 
-const { hasPermission } = require('../utils/project/projectPermissionMatrix');
+const {
+  hasPermission,
+  unionPermissionsFromRoles,
+} = require('../utils/project/projectPermissionMatrix');
+const { createTtlCoalesceCache } = require('./ttlCoalesceCache');
 
 const GATE_SOD_ERROR = 'GATE_SOD_DENIED';
+const TECH_FLAGS_TTL_MS = 30_000;
+const techFlagsCache = createTtlCoalesceCache({ ttlMs: TECH_FLAGS_TTL_MS });
 
 function isGateSodEnabled() {
   const v = String(process.env.PHASE1_GATE_SOD_ENABLED || '').trim().toLowerCase();
@@ -14,23 +20,67 @@ function isGateSodEnabled() {
 }
 
 /**
+ * Batch “có tech reviewer trên project?” từ role docs (không N+1 resolve per member).
+ * @param {Array<{ key?: string, permissions?: string[] }>} roles
+ * @returns {{ hasAnalysisTechReviewer: boolean, hasPlanningTechReviewer: boolean }}
+ */
+function computeTechReviewerFlagsFromRoleDocs(roles = []) {
+  const perms = unionPermissionsFromRoles(roles);
+  return {
+    hasAnalysisTechReviewer: hasPermission(perms, 'analysis:tech_review'),
+    hasPlanningTechReviewer: hasPermission(perms, 'planning:tech_review'),
+  };
+}
+
+/**
+ * @param {string} projectId
+ * @param {{ ProjectMembership?: object, ProjectRole?: object }} [deps]
+ */
+async function projectTechReviewerFlagsUncached(projectId, deps = {}) {
+  const pid = String(projectId || '').trim();
+  if (!pid) {
+    return { hasAnalysisTechReviewer: false, hasPlanningTechReviewer: false };
+  }
+  const ProjectMembership = deps.ProjectMembership || require('../models/ProjectMembership');
+  const ProjectRole = deps.ProjectRole || require('../models/ProjectRole');
+  const memberships = await ProjectMembership.find({ projectId: pid }).select('projectRoleId').lean();
+  const roleIds = [
+    ...new Set(
+      (memberships || [])
+        .map((m) => m?.projectRoleId)
+        .filter(Boolean)
+        .map((id) => String(id))
+    ),
+  ];
+  const roles = roleIds.length
+    ? await ProjectRole.find({ _id: { $in: roleIds } }).select('key permissions').lean()
+    : [];
+  return computeTechReviewerFlagsFromRoleDocs(roles);
+}
+
+/**
+ * Process-local TTL + coalesce — 1 memberships query + 1 roles query per project cold miss.
+ * @param {string} projectId
+ * @param {{ ProjectMembership?: object, ProjectRole?: object }} [deps]
+ */
+async function projectTechReviewerFlags(projectId, deps = {}) {
+  const pid = String(projectId || '').trim();
+  if (!pid) {
+    return { hasAnalysisTechReviewer: false, hasPlanningTechReviewer: false };
+  }
+  if (deps.ProjectMembership || deps.ProjectRole) {
+    return projectTechReviewerFlagsUncached(pid, deps);
+  }
+  return techFlagsCache.getOrLoad(`techFlags:${pid}`, () => projectTechReviewerFlagsUncached(pid));
+}
+
+/**
  * @param {string} projectId
  * @returns {Promise<boolean>}
  */
 async function projectHasAnalysisTechReviewer(projectId) {
-  const ProjectMembership = require('../models/ProjectMembership');
-  const { resolveUserProjectPermissions } = require('../services/projectAccess.service');
-  const memberships = await ProjectMembership.find({ projectId }).select('userId').lean();
-  for (const m of memberships) {
-    const resolved = await resolveUserProjectPermissions({
-      userId: m.userId,
-      projectId,
-    });
-    if (hasPermission(resolved.permissions, 'analysis:tech_review')) {
-      return true;
-    }
-  }
-  return false;
+  const flags = await projectTechReviewerFlags(projectId);
+  return Boolean(flags.hasAnalysisTechReviewer);
 }
 
 /**
@@ -38,19 +88,12 @@ async function projectHasAnalysisTechReviewer(projectId) {
  * @param {string} projectId
  */
 async function projectHasPlanningTechReviewer(projectId) {
-  const ProjectMembership = require('../models/ProjectMembership');
-  const { resolveUserProjectPermissions } = require('../services/projectAccess.service');
-  const memberships = await ProjectMembership.find({ projectId }).select('userId').lean();
-  for (const m of memberships) {
-    const resolved = await resolveUserProjectPermissions({
-      userId: m.userId,
-      projectId,
-    });
-    if (hasPermission(resolved.permissions, 'planning:tech_review')) {
-      return true;
-    }
-  }
-  return false;
+  const flags = await projectTechReviewerFlags(projectId);
+  return Boolean(flags.hasPlanningTechReviewer);
+}
+
+function clearTechReviewerFlagsCache() {
+  techFlagsCache.clear();
 }
 
 /**
@@ -202,9 +245,14 @@ async function notifyAiHitlGateReviewers({
 module.exports = {
   GATE_SOD_ERROR,
   GATE_NOTIFY_PERM_ALIASES,
+  TECH_FLAGS_TTL_MS,
   isGateSodEnabled,
+  computeTechReviewerFlagsFromRoleDocs,
+  projectTechReviewerFlags,
+  projectTechReviewerFlagsUncached,
   projectHasAnalysisTechReviewer,
   projectHasPlanningTechReviewer,
+  clearTechReviewerFlagsCache,
   assertGateStampSoD,
   resolveGateNotifyPermission,
   userIdsWithProjectPermission,

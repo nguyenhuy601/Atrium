@@ -4,18 +4,16 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff, X } from 'lucide-react';
 import AuthPageLayout from '../../components/Auth/AuthPageLayout';
 import AuthMarketingAside from '../../components/Auth/AuthMarketingAside';
-import LoginFlashlightIcon from '../../components/Auth/LoginFlashlightIcon';
-import LoginFlashlightLayer from '../../components/Auth/LoginFlashlightLayer';
-import LoginOwlMascot from '../../components/Auth/LoginOwlMascot';
+import { AuthFigmaLoginMobileLogo } from '../../components/Auth/AuthFigmaLoginLayout';
 import OneTimeCredentialsModal from '../../components/Auth/OneTimeCredentialsModal';
 import BrandPageLoader from '../../components/Shared/BrandPageLoader';
-import { authInputSurface, authPrimaryButtonClass } from '../../components/Auth/authFieldClasses';
-import { FIGMA_TOGGLE_BTN } from '../../components/Auth/figmaAuthClasses';
-import { useLoginFlashlight } from '../../components/Auth/useLoginFlashlight';
+import { authInputError, authInputSurface, authPrimaryButtonClass } from '../../components/Auth/authFieldClasses';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useAppStrings } from '../../locales/appStrings';
 import { consumeOneTimeLoginCredentials } from '../../utils/oneTimeLoginCredentials';
+
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function LoginPage({ landingDemo = false } = {}) {
   const navigate = useNavigate();
@@ -24,42 +22,28 @@ function LoginPage({ landingDemo = false } = {}) {
   const { isDarkMode } = useTheme();
   const { t } = useAppStrings();
   const [formData, setFormData] = useState({ email: '', password: '' });
+  const [fieldErrors, setFieldErrors] = useState({ email: '', password: '' });
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oneTimeCreds, setOneTimeCreds] = useState(null);
   const [inviteForgotHint, setInviteForgotHint] = useState(null);
 
+  const emailInputRef = useRef(null);
   const passwordInputRef = useRef(null);
-  const flashlightBtnRef = useRef(null);
-  const owlRef = useRef(null);
-  const enableFlash = !landingDemo;
 
-  const {
-    isFlashlight,
-    isNightOwl,
-    passwordRevealed,
-    owlLit,
-    origin,
-    angleDeg,
-    toggleFlashlight,
-  } = useLoginFlashlight({
-    enabled: enableFlash,
-    originRef: flashlightBtnRef,
-  });
-
-  // Theme tối app + night-owl easter egg phải cùng một visualNight (tránh chữ tối trên nền tối).
-  const visualNight = Boolean(isNightOwl || isDarkMode);
+  const visualNight = Boolean(isDarkMode);
   const inputBase = authInputSurface(visualNight);
+  const inputInvalid = authInputError(visualNight);
   const linkCyan = visualNight ? 'text-cyan-300 hover:text-cyan-200' : 'text-cyan-700 hover:text-cyan-800';
-  const showPwdBtn = isFlashlight
-    ? 'text-amber-300 hover:bg-slate-800/80 hover:text-amber-200'
-    : visualNight
-      ? 'text-slate-200 hover:bg-slate-800/80 hover:text-white'
-      : 'text-slate-500 hover:bg-slate-200/80 hover:text-slate-800';
+  const showPwdBtn = visualNight
+    ? 'text-slate-200 hover:bg-slate-800/80 hover:text-white'
+    : 'text-slate-600 hover:bg-slate-200/80 hover:text-slate-900';
   const btnPrimary = authPrimaryButtonClass(visualNight);
-  const submitDisabled = loading;
-  const closeColor = visualNight ? 'text-slate-100' : 'text-slate-500';
-  // text-white (không slate) — auth-visual-night hoàn tác html.light .text-white → --text-primary
+  const closeColor = visualNight ? 'text-slate-100' : 'text-slate-700';
   const titleColor = visualNight ? 'text-white' : 'text-slate-900';
+  const labelColor = visualNight ? 'text-slate-100' : 'text-slate-800';
+  const hintColor = visualNight ? 'text-slate-300' : 'text-slate-600';
+  const errorColor = visualNight ? 'text-red-300' : 'text-red-700';
 
   useEffect(() => {
     const creds = consumeOneTimeLoginCredentials();
@@ -100,6 +84,22 @@ function LoginPage({ landingDemo = false } = {}) {
     }
   }, [landingDemo, authLoading, isAuthenticated, navigate, oneTimeCreds, inviteForgotHint]);
 
+  const clearFieldError = (field) => {
+    setFieldErrors((prev) => (prev[field] ? { ...prev, [field]: '' } : prev));
+  };
+
+  const validateFields = () => {
+    const email = formData.email.trim();
+    const next = { email: '', password: '' };
+    if (!email) next.email = t('login.errEmailRequired');
+    else if (!EMAIL_SHAPE.test(email)) next.email = t('login.errEmailInvalid');
+    if (!formData.password) next.password = t('login.errPasswordRequired');
+    setFieldErrors(next);
+    if (next.email) emailInputRef.current?.focus();
+    else if (next.password) passwordInputRef.current?.focus();
+    return !next.email && !next.password;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -108,18 +108,14 @@ function LoginPage({ landingDemo = false } = {}) {
       return;
     }
 
-    if (!formData.email || !formData.password) {
-      return;
-    }
+    if (!validateFields()) return;
 
     setLoading(true);
     try {
-      const success = await login(formData.email, formData.password);
-      if (success) {
+      const result = await login(formData.email.trim(), formData.password);
+      if (result?.ok) {
         navigate('/app');
       }
-    } catch (error) {
-      console.error('Login error:', error);
     } finally {
       setLoading(false);
     }
@@ -128,20 +124,15 @@ function LoginPage({ landingDemo = false } = {}) {
   const forgotHref = inviteForgotHint?.email
     ? `/forgot-password?email=${encodeURIComponent(inviteForgotHint.email)}`
     : formData.email
-      ? `/forgot-password?email=${encodeURIComponent(formData.email)}`
+      ? `/forgot-password?email=${encodeURIComponent(formData.email.trim())}`
       : '/forgot-password';
 
   if (!landingDemo && !authLoading && isAuthenticated && !oneTimeCreds && !inviteForgotHint) {
     return <BrandPageLoader />;
   }
 
-  const flashToggleLabel = enableFlash
-    ? isFlashlight
-      ? t('login.flashlightOff')
-      : t('login.flashlightOn')
-    : passwordRevealed
-      ? t('login.hide')
-      : t('login.show');
+  const emailDescribedBy = fieldErrors.email ? 'login-email-error' : undefined;
+  const passwordDescribedBy = fieldErrors.password ? 'login-password-error' : undefined;
 
   return (
     <AuthPageLayout
@@ -151,18 +142,11 @@ function LoginPage({ landingDemo = false } = {}) {
       glassCard={!landingDemo}
       showcaseAside={!landingDemo}
     >
-      <LoginFlashlightLayer
-        active={isFlashlight}
-        originX={origin.x}
-        originY={origin.y}
-        angleDeg={angleDeg}
-      />
-
       <div className={`relative z-20 w-full max-w-[22rem] pointer-events-auto ${closeColor}`}>
         {!landingDemo ? (
           <Link
             to="/"
-            className="absolute -right-[0.15rem] -top-[0.35rem] z-[5] flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-inherit opacity-55 transition-[opacity,background] duration-150 ease-in-out hover:bg-[color-mix(in_srgb,currentColor_10%,transparent)] hover:opacity-100"
+            className="absolute -right-1 -top-1 z-[5] flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-inherit transition-[opacity,background] duration-150 ease-in-out hover:bg-[color-mix(in_srgb,currentColor_10%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600"
             aria-label={t('authLayout.home')}
             title={t('authLayout.home')}
           >
@@ -170,11 +154,14 @@ function LoginPage({ landingDemo = false } = {}) {
           </Link>
         ) : null}
 
+        {!landingDemo ? <AuthFigmaLoginMobileLogo /> : null}
+
         <h2
           className={`text-center text-[1.65rem] font-bold tracking-tight sm:text-[1.85rem] ${titleColor}`}
         >
           {t('login.title')}
         </h2>
+        <p className={`mt-2 text-center text-sm leading-relaxed ${hintColor}`}>{t('login.subtitle')}</p>
 
         {inviteForgotHint ? (
           <div
@@ -191,67 +178,81 @@ function LoginPage({ landingDemo = false } = {}) {
           </div>
         ) : null}
 
-        <form onSubmit={handleSubmit} className="relative mt-8 space-y-5">
-          <div className="relative pt-8">
-            {enableFlash ? <LoginOwlMascot ref={owlRef} lit={owlLit} /> : null}
+        <form noValidate onSubmit={handleSubmit} className="relative mt-6 space-y-5">
+          <div>
+            <label htmlFor="email" className={`mb-2 block text-sm font-semibold ${labelColor}`}>
+              {t('login.email')}
+            </label>
             <input
+              ref={emailInputRef}
               id="email"
               type="email"
+              inputMode="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className={inputBase}
+              onChange={(e) => {
+                setFormData({ ...formData, email: e.target.value });
+                clearFieldError('email');
+              }}
+              className={fieldErrors.email ? inputInvalid : inputBase}
               placeholder={t('login.placeholderEmail')}
               autoComplete="email"
-              aria-label={t('login.email')}
+              aria-invalid={fieldErrors.email ? 'true' : 'false'}
+              aria-describedby={emailDescribedBy}
+              disabled={loading}
             />
+            {fieldErrors.email ? (
+              <p id="login-email-error" role="alert" className={`mt-1.5 text-sm leading-snug ${errorColor}`}>
+                {fieldErrors.email}
+              </p>
+            ) : null}
           </div>
 
           <div>
-            <div className="relative z-[2]">
+            <label htmlFor="password" className={`mb-2 block text-sm font-semibold ${labelColor}`}>
+              {t('login.password')}
+            </label>
+            <div className="relative">
               <input
                 ref={passwordInputRef}
                 id="password"
-                type={passwordRevealed ? 'text' : 'password'}
+                type={showPassword ? 'text' : 'password'}
                 value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className={`${inputBase} relative z-[2] pr-12 ${
-                  passwordRevealed && isFlashlight
-                    ? 'font-mono tracking-[0.04em] !text-[#fef9c3] [text-shadow:0_0_8px_rgba(250,204,21,0.55)]'
-                    : ''
-                }`}
+                onChange={(e) => {
+                  setFormData({ ...formData, password: e.target.value });
+                  clearFieldError('password');
+                }}
+                className={`${fieldErrors.password ? inputInvalid : inputBase} pr-14`}
                 placeholder={t('login.placeholderPwd')}
                 autoComplete="current-password"
-                aria-label={t('login.password')}
+                aria-invalid={fieldErrors.password ? 'true' : 'false'}
+                aria-describedby={passwordDescribedBy}
+                disabled={loading}
               />
               <button
-                ref={flashlightBtnRef}
                 type="button"
-                onClick={toggleFlashlight}
-                className={`${FIGMA_TOGGLE_BTN} z-[3] rounded-lg p-1.5 ${showPwdBtn}`}
-                aria-label={flashToggleLabel}
+                onClick={() => setShowPassword((prev) => !prev)}
+                className={`absolute right-1.5 top-1/2 z-[3] flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600 ${showPwdBtn}`}
+                aria-label={showPassword ? t('login.hide') : t('login.show')}
+                aria-pressed={showPassword}
                 aria-controls="password"
-                aria-pressed={enableFlash ? isFlashlight : passwordRevealed}
-                title={enableFlash ? t('login.nightOwlHint') : undefined}
               >
-                {enableFlash ? (
-                  isFlashlight ? (
-                    <LoginFlashlightIcon
-                      className="h-5 w-5 origin-center text-[#fde047] drop-shadow-[0_0_6px_rgba(250,204,21,0.75)] transition-transform duration-[40ms] ease-linear motion-reduce:transition-none"
-                      strokeWidth={2}
-                      style={{ transform: `rotate(${angleDeg}deg)` }}
-                    />
-                  ) : (
-                    <Eye className="h-5 w-5" strokeWidth={2} aria-hidden />
-                  )
-                ) : passwordRevealed ? (
+                {showPassword ? (
                   <EyeOff className="h-5 w-5" strokeWidth={2} aria-hidden />
                 ) : (
                   <Eye className="h-5 w-5" strokeWidth={2} aria-hidden />
                 )}
               </button>
             </div>
+            {fieldErrors.password ? (
+              <p id="login-password-error" role="alert" className={`mt-1.5 text-sm leading-snug ${errorColor}`}>
+                {fieldErrors.password}
+              </p>
+            ) : null}
             <div className="mt-2 flex justify-end">
-              <Link to={forgotHref} className={`text-sm font-semibold transition ${linkCyan}`}>
+              <Link to={forgotHref} className={`text-sm font-semibold underline-offset-2 hover:underline ${linkCyan}`}>
                 {t('login.forgot')}
               </Link>
             </div>
@@ -259,8 +260,8 @@ function LoginPage({ landingDemo = false } = {}) {
 
           <button
             type="submit"
-            disabled={submitDisabled}
-            className={`flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-base font-bold !text-white shadow-lg vh-transition disabled:cursor-not-allowed disabled:opacity-60 ${btnPrimary}`}
+            disabled={loading}
+            className={`flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-base font-bold !text-white shadow-lg vh-transition disabled:cursor-not-allowed disabled:opacity-60 ${btnPrimary}`}
           >
             {loading ? t('login.submitting') : t('login.submit')}
             {!loading && <ArrowRight className="h-5 w-5 text-white" strokeWidth={2} aria-hidden />}

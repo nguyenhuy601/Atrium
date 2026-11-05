@@ -465,7 +465,7 @@ function diagnoseQualityCoverageReason(container) {
 }
 
 /** Epic có trong SoT nhưng chưa có Story — không phân rã được; phải bổ sung ở WHAT. */
-function epicMissingStoriesStubRows(container, wbsMeta) {
+function epicMissingStoriesStubRows(container, wbsMeta, existingTaskRows = []) {
   const ids = wbsMeta?.epicsWithoutStories || [];
   const epicOnly =
     String(wbsMeta?.fallbackReason || '') === 'epic_only_backlog_needs_what';
@@ -475,11 +475,27 @@ function epicMissingStoriesStubRows(container, wbsMeta) {
       ? container.analyses.approvedBacklogStructure.epics
       : [];
   const byId = new Map(epics.filter((e) => e?.id).map((e) => [String(e.id), e]));
-  const list = ids.length
+  // Already have Epic row in WBS tree → never "lập lại" stub with same title.
+  const existingEpicIds = new Set(
+    (Array.isArray(existingTaskRows) ? existingTaskRows : [])
+      .filter((r) => String(r?.level || '').toLowerCase() === 'epic')
+      .map((r) => String(r.id || '').replace(/^c\d+-/i, ''))
+      .filter(Boolean)
+  );
+  const storyCount = (Array.isArray(existingTaskRows) ? existingTaskRows : []).filter(
+    (r) => String(r?.level || '').toLowerCase() === 'story'
+  ).length;
+  // False-positive BE flag: stories exist (often orphan roots) — don't duplicate Epic stub.
+  if (storyCount > 0 && !epicOnly) return [];
+  const list = (ids.length
     ? ids
     : epicOnly
       ? epics.map((e) => String(e.id)).filter(Boolean)
-      : [];
+      : []
+  ).filter((eid) => {
+    const clean = String(eid || '').replace(/^c\d+-/i, '');
+    return clean && !existingEpicIds.has(clean) && !existingEpicIds.has(String(eid));
+  });
   return list.map((eid, i) => {
     const epic = byId.get(String(eid)) || {};
     return withGate1Provenance({
@@ -600,12 +616,13 @@ function taskRows(container) {
 
   // Do not invent Heuristic/UNRESOLVED stub rows for unresolvedStoryIds —
   // that was a FE fallback fake WBS. Gaps stay in wbs.meta (informational only).
-  return [...treeRows, ...epicMissingStoriesStubRows(container, wbsMeta)];
+  // Pass treeRows so we never duplicate an Epic already present (orphan epic + stub).
+  return [...treeRows, ...epicMissingStoriesStubRows(container, wbsMeta, treeRows)];
 }
 
 function dependencyRows(container) {
-  const { items } = listDependencyDisplayItems(container);
-  return items.map((d) =>
+  const { items, unresolvedQuestions, analysis } = listDependencyDisplayItems(container);
+  const rows = items.map((d) =>
     withAiProvenance({
       logicalId: `dep:${d.id}`,
       id: d.id,
@@ -641,6 +658,33 @@ function dependencyRows(container) {
       origin: undefined,
     })
   );
+
+  // Open questions keep the tab non-empty when edges were soft-demoted / partial.
+  const oqs = Array.isArray(unresolvedQuestions)
+    ? unresolvedQuestions
+    : Array.isArray(analysis?.openQuestions)
+      ? analysis.openQuestions
+      : [];
+  for (let i = 0; i < oqs.length; i += 1) {
+    const q = oqs[i];
+    if (!q || typeof q !== 'object') continue;
+    const code = String(q.code || `dep-oq-${i}`).trim();
+    const message = pickText(q.question, q.message, q.whyItMatters, code) || code;
+    rows.push(
+      withAiProvenance({
+        logicalId: `dep:open_question:${code}:${i}`,
+        id: code,
+        section: 'dependencies',
+        sectionLabel: SECTION_LABELS.dependencies,
+        title: message,
+        summary: code !== message ? code : undefined,
+        level: 'open_question',
+        status: 'OPEN_QUESTION',
+        source: analysis?.source || '',
+      })
+    );
+  }
+  return rows;
 }
 
 function buildTaskById(container) {
@@ -1134,12 +1178,26 @@ function riskRows(container, pack) {
     : Array.isArray(container?.planning?.risks)
       ? container.planning.risks
       : [];
-  const rows = items.map((r, i) => {
+  let rows = items.map((r, i) => {
     const id = String(r.id || r.riskId || `risk-${i}`);
+    const trigger = clip(r.trigger || '', 200);
+    const impactDescription = clip(r.impactDescription || '', 200);
+    const mitigation = clip(r.mitigation || '', 240);
+    const relatedFrIds = Array.isArray(r.relatedFrIds)
+      ? r.relatedFrIds.map(String).filter(Boolean)
+      : [];
+    const probability =
+      r.probability != null && Number.isFinite(Number(r.probability))
+        ? Number(r.probability)
+        : null;
+    const impact =
+      r.impact != null && Number.isFinite(Number(r.impact)) ? Number(r.impact) : null;
     const summary = clip(
-      r.summary || r.mitigation || [r.probability != null ? `P${r.probability}` : '', r.impact != null ? `I${r.impact}` : '']
-        .filter(Boolean)
-        .join(' · '),
+      r.summary ||
+        [trigger, impactDescription, mitigation].filter(Boolean).join(' — ') ||
+        [probability != null ? `P${probability}` : '', impact != null ? `I${impact}` : '']
+          .filter(Boolean)
+          .join(' · '),
       200
     );
     return withAiProvenance({
@@ -1149,6 +1207,12 @@ function riskRows(container, pack) {
       sectionLabel: SECTION_LABELS.risks,
       title: r.name || r.title || id,
       summary: summary || undefined,
+      trigger: trigger || undefined,
+      impactDescription: impactDescription || undefined,
+      mitigation: mitigation || undefined,
+      relatedFrIds,
+      probability,
+      impact,
       level: 'risk',
       band: r.band || r.severity || '',
       status: 'READY',
@@ -1157,6 +1221,31 @@ function riskRows(container, pack) {
       source: r.source || sectionSource || undefined,
     });
   });
+
+  const openQuestionSources = [
+    ...(Array.isArray(riskAnalysis.openQuestions) ? riskAnalysis.openQuestions : []),
+    ...(Array.isArray(riskAnalysis.unresolvedQuestions) ? riskAnalysis.unresolvedQuestions : []),
+  ];
+  for (let i = 0; i < openQuestionSources.length; i += 1) {
+    const q = openQuestionSources[i];
+    if (!q || typeof q !== 'object') continue;
+    const code = String(q.code || q.id || `risk-oq-${i}`).trim();
+    const message = pickText(q.message, q.question, q.text, q.title, code) || code;
+    rows.push(
+      withAiProvenance({
+        logicalId: `risk:open_question:${code}:${i}`,
+        id: code,
+        section: 'risks',
+        sectionLabel: SECTION_LABELS.risks,
+        title: message,
+        summary: code !== message ? code : undefined,
+        level: 'open_question',
+        band: '',
+        status: 'OPEN_QUESTION',
+        source: sectionSource || undefined,
+      })
+    );
+  }
 
   const assumptions = Array.isArray(pack?.assumptions) ? pack.assumptions : [];
   for (let i = 0; i < assumptions.length; i += 1) {
@@ -1947,6 +2036,23 @@ function qualityRows(container) {
  * COMPLETE_NO_EDGES = analyzed valid empty → not missing.
  * SKIPPED / no analysisStatus → still missing / not analyzed.
  */
+function hasRiskAnalysisMeta(container) {
+  const riskAnalysis = container?.analyses?.risk;
+  if (!riskAnalysis || typeof riskAnalysis !== 'object') return false;
+  const status = String(riskAnalysis.status || riskAnalysis.meta?.analysisStatus || '').trim();
+  const source = String(riskAnalysis.meta?.source || '').trim();
+  const openQuestions = Array.isArray(riskAnalysis.openQuestions) ? riskAnalysis.openQuestions : [];
+  const unresolved = Array.isArray(riskAnalysis.unresolvedQuestions)
+    ? riskAnalysis.unresolvedQuestions
+    : [];
+  return Boolean(status || source || openQuestions.length || unresolved.length);
+}
+
+function isRiskSectionMissing(container, rows) {
+  if (rows.length > 0) return false;
+  return !hasRiskAnalysisMeta(container);
+}
+
 function isDependenciesSectionMissing(container, rows) {
   if (rows.length > 0) return false;
   const section = container?.analyses?.dependency || {};
@@ -2070,7 +2176,9 @@ export function buildGate2ProposalItems({
     const missing =
       key === 'dependencies'
         ? isDependenciesSectionMissing(container, rows)
-        : rows.length === 0 && !coverageReason;
+        : key === 'risks'
+          ? isRiskSectionMissing(container, rows)
+          : rows.length === 0 && !coverageReason;
     // Keep section visible when coverage gap explains empty/partial content
     const missingWithReason = rows.length === 0 && Boolean(coverageReason);
     return {

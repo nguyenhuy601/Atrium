@@ -1,4 +1,4 @@
-# VoiceHub Plan Template (Plan Standard)
+# Atrium Plan Template (Plan Standard)
 
 Copy and fill. Do not omit Out-of-Scope, DO NOT MODIFY, Pass Criteria, or Rollback.
 

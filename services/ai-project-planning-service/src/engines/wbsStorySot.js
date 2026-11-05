@@ -44,28 +44,53 @@ function resolveWbsStoriesFromSot(opts = {}) {
   // planning.backlog only if SoT missing (old runs that still had BacklogMap).
   let stories = [];
   let epics = [];
+  let features = [];
 
   if (structure && Array.isArray(structure.stories) && structure.stories.length) {
+    epics = Array.isArray(structure.epics) ? structure.epics : [];
+    features = Array.isArray(structure.features) ? structure.features : [];
+    const epicIdSet = new Set(
+      epics.map((e) => String(e?.id || '').trim()).filter(Boolean)
+    );
+    const featureEpicById = new Map();
+    for (const f of features) {
+      const fid = String(f?.id || '').trim();
+      if (!fid) continue;
+      const pe = String(f.parentEpicId || f.parentId || '').trim();
+      if (pe && epicIdSet.has(pe)) featureEpicById.set(fid, pe);
+    }
     stories = structure.stories
       .filter((s) => s && Array.isArray(s.sourceFrIds) && s.sourceFrIds.length)
-      .map((s) => ({
-        id: String(s.id),
-        name: String(s.name || s.title || s.id),
-        description: s.description || '',
-        parentId: s.parentFeatureId || s.parentEpicId || null,
-        parentFeatureId: s.parentFeatureId || null,
-        parentEpicId: s.parentFeatureId ? null : s.parentEpicId || null,
-        sourceFrIds: [...s.sourceFrIds],
-        sourceUcIds: Array.isArray(s.sourceUcIds) ? [...s.sourceUcIds] : [],
-        sourceNfrIds: [],
-        acRefs: Array.isArray(s.acRefs) ? [...s.acRefs] : [],
-        needsDecomposition: s.needsDecomposition !== false,
-        approvedBaselineVersion: structure.meta?.approvedBaselineVersion || null,
-        sourceSnapshotVersion: structure.meta?.sourceSnapshotVersion || null,
-        howStale: Boolean(s.howStale),
-      }))
+      .map((s) => {
+        const parentFeatureId = s.parentFeatureId
+          ? String(s.parentFeatureId).trim()
+          : null;
+        let parentEpicId = s.parentEpicId ? String(s.parentEpicId).trim() : null;
+        if (parentEpicId && !epicIdSet.has(parentEpicId)) parentEpicId = null;
+        if (!parentEpicId && parentFeatureId) {
+          parentEpicId = featureEpicById.get(parentFeatureId) || null;
+        }
+        // WBS HOW tree: Epic → [Feature] → Story. Prefer Feature as direct parent
+        // when present so materialize can keep the middle layer; else Epic.
+        const parentId = parentFeatureId || parentEpicId || null;
+        return {
+          id: String(s.id),
+          name: String(s.name || s.title || s.id),
+          description: s.description || '',
+          parentId,
+          parentFeatureId: parentFeatureId || null,
+          parentEpicId: parentEpicId || null,
+          sourceFrIds: [...s.sourceFrIds],
+          sourceUcIds: Array.isArray(s.sourceUcIds) ? [...s.sourceUcIds] : [],
+          sourceNfrIds: [],
+          acRefs: Array.isArray(s.acRefs) ? [...s.acRefs] : [],
+          needsDecomposition: s.needsDecomposition !== false,
+          approvedBaselineVersion: structure.meta?.approvedBaselineVersion || null,
+          sourceSnapshotVersion: structure.meta?.sourceSnapshotVersion || null,
+          howStale: Boolean(s.howStale),
+        };
+      })
       .filter((s) => !isExcludedFromWbsDecomposition(s));
-    epics = Array.isArray(structure.epics) ? structure.epics : [];
   } else {
     const backlogStories = opts.container?.planning?.backlog?.stories;
     const fromBacklog = Array.isArray(backlogStories) ? backlogStories : null;
@@ -73,6 +98,9 @@ function resolveWbsStoriesFromSot(opts = {}) {
       stories = fromBacklog.filter((s) => s && !isExcludedFromWbsDecomposition(s));
       epics = Array.isArray(opts.container?.planning?.backlog?.epics)
         ? opts.container.planning.backlog.epics
+        : [];
+      features = Array.isArray(opts.container?.planning?.backlog?.features)
+        ? opts.container.planning.backlog.features
         : [];
     }
   }
@@ -106,14 +134,15 @@ function resolveWbsStoriesFromSot(opts = {}) {
     stories = kept;
   }
 
-  const storyParentIds = new Set(
-    stories
-      .map((s) => String(s.parentId || s.parentEpicId || '').trim())
-      .filter(Boolean)
-  );
+  // Epic is covered when a Story resolves to it directly or via Feature.
+  const coveredEpicIds = new Set();
+  for (const s of stories) {
+    const epicId = String(s.parentEpicId || '').trim();
+    if (epicId) coveredEpicIds.add(epicId);
+  }
   const epicsWithoutStories = (Array.isArray(epics) ? epics : [])
     .map((e) => String(e?.id || '').trim())
-    .filter((id) => id && !storyParentIds.has(id));
+    .filter((id) => id && !coveredEpicIds.has(id));
 
   if (epicsWithoutStories.length) {
     reasonCodes.push('epic_missing_stories');
@@ -129,13 +158,22 @@ function resolveWbsStoriesFromSot(opts = {}) {
       ok: false,
       stories: [],
       epics,
+      features,
       epicsWithoutStories,
       reasonCodes,
       rejectedStories,
     };
   }
 
-  return { ok: true, stories, epics, epicsWithoutStories, reasonCodes, rejectedStories };
+  return {
+    ok: true,
+    stories,
+    epics,
+    features,
+    epicsWithoutStories,
+    reasonCodes,
+    rejectedStories,
+  };
 }
 
 /** Map SoT stories → WBS LLM unit shape (id = story id). */
@@ -148,7 +186,9 @@ function storiesToWbsUnits(stories = []) {
     fr: Array.isArray(s.sourceFrIds) ? s.sourceFrIds : Array.isArray(s.fr) ? s.fr : [],
     ac: Array.isArray(s.acRefs) ? s.acRefs : Array.isArray(s.ac) ? s.ac : [],
     uc: Array.isArray(s.sourceUcIds) ? s.sourceUcIds : Array.isArray(s.uc) ? s.uc : [],
-    parentId: s.parentId || s.parentEpicId || null,
+    parentId: s.parentId || s.parentFeatureId || s.parentEpicId || null,
+    parentFeatureId: s.parentFeatureId || null,
+    parentEpicId: s.parentEpicId || null,
   }));
 }
 

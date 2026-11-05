@@ -647,7 +647,7 @@ exports.inviteMember = async (req, res, next) => {
       await sendCompanyInviteEmail({
         email: normalizedEmail,
         inviteUrl,
-        organizationName: organization.name || 'VoiceHub',
+        organizationName: organization.name || 'Atrium',
         firstName: invite.firstName,
         lastName: invite.lastName,
       });

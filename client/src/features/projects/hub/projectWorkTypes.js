@@ -2,7 +2,7 @@
 
 export const WORK_TYPE_CREATE_IDS = ['story', 'task', 'bug'];
 export const WORK_TYPE_ALL_IDS = ['epic', 'feature', 'story', 'task', 'bug', 'subtask'];
-export const WORK_TYPE_CHANGE_EVENT = 'voicehub-project-work-types';
+export const WORK_TYPE_CHANGE_EVENT = 'atrium-project-work-types';
 export const WORK_TYPE_MAX_DEPTH = 4;
 export const WORK_TYPE_INDENT_PX = 24;
 /** List tree: thụt rõ hơn Board settings indent (dễ thấy cha/con). */

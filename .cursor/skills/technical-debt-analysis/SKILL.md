@@ -1,7 +1,7 @@
 ---
 name: technical-debt-analysis
 description: >-
-  Produces VoiceHub technical debt reports: complexity, duplication, deprecated APIs, architecture violations, perf and security smells. Use for audits.
+  Produces Atrium technical debt reports: complexity, duplication, deprecated APIs, architecture violations, perf and security smells. Use for audits.
 ---
 
 # technical debt analysis

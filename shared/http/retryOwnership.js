@@ -1,5 +1,5 @@
 /**
- * Retry ownership matrix (VoiceHub HTTP resilience).
+ * Retry ownership matrix (Atrium HTTP resilience).
  *
  * | Layer              | Responsibility                                      |
  * |--------------------|-----------------------------------------------------|

@@ -189,6 +189,7 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_CHAT_FALLBACK_MODELS=${LLM_CHAT_FALLBACK_MODELS:-}
     networks:
       - enterprise-network
     deploy:
@@ -214,12 +215,20 @@ services:
       - CHAT_SERVICE_URL=${CHAT_SERVICE_URL}
       - CHAT_INTERNAL_TOKEN=${CHAT_INTERNAL_TOKEN}
       - TASK_FROM_FILE_WORKER=true
+      - EXECUTION_CONTROL=${EXECUTION_CONTROL:-1}
+      - EXECUTION_CONTROL_WORKER=${EXECUTION_CONTROL_WORKER:-1}
+      - EXECUTION_CONTROL_POLL_MS=${EXECUTION_CONTROL_POLL_MS:-2000}
+      - EXECUTION_CONTROL_SCHEDULER_MS=${EXECUTION_CONTROL_SCHEDULER_MS:-300000}
+      - EXECUTION_CONTROL_DEBOUNCE_MS=${EXECUTION_CONTROL_DEBOUNCE_MS:-30000}
+      - EXECUTION_CONTROL_SCHEDULER_BATCH=${EXECUTION_CONTROL_SCHEDULER_BATCH:-50}
+      - EXECUTION_CONTROL_DEFAULT_CAPACITY_TO_DUE=${EXECUTION_CONTROL_DEFAULT_CAPACITY_TO_DUE:-8}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3.8-max}
       - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_CHAT_FALLBACK_MODELS=${LLM_CHAT_FALLBACK_MODELS:-}
     networks:
       - enterprise-network
     deploy:
@@ -254,6 +263,7 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_CHAT_FALLBACK_MODELS=${LLM_CHAT_FALLBACK_MODELS:-}
       # DashScope free embed when LLM_PROVIDER=openai_compatible|dashscope; Ollama tags ignored in code
       - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-text-embedding-v4}
       - RAG_EMBEDDING_VERSION=${RAG_EMBEDDING_VERSION:-dashscope-text-embedding-v4}
@@ -346,6 +356,7 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_CHAT_FALLBACK_MODELS=${LLM_CHAT_FALLBACK_MODELS:-}
       - RABBITMQ_URL=${RABBITMQ_URL}
       - RABBITMQ_QUORUM_QUEUES=${RABBITMQ_QUORUM_QUEUES:-true}
     networks:
@@ -656,7 +667,7 @@ services:
       FRIEND_SERVICE_URL: ${FRIEND_SERVICE_URL}
       SOCKET_SERVICE_URL: ${SOCKET_SERVICE_URL}
       NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL}
-      CORS_ORIGIN: ${CORS_ORIGIN:-https://voicehub.local}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://atrium.dev}
       VOICE_SIGNAL_PATH: /voice-socket
       MEDIASOUP_LISTEN_IP: ${MEDIASOUP_LISTEN_IP:-0.0.0.0}
       MEDIASOUP_ANNOUNCED_IP: ${MEDIASOUP_ANNOUNCED_IP}
@@ -946,10 +957,10 @@ volumes:
   # Reuse Compose-extra volume names so existing models/objects survive cutover.
   ollama_data:
     external: true
-    name: voicehub-extra_ollama_data
+    name: atrium-extra_ollama_data
   minio_data:
     external: true
-    name: voicehub-extra_minio_data
+    name: atrium-extra_minio_data
   qdrant_data:
     external: true
-    name: voicehub-extra_qdrant_data
+    name: atrium-extra_qdrant_data

@@ -58,7 +58,7 @@ function AuthMarketingAside({ nightOwl = false, compact = false }) {
             <Zap size={17} className="fill-primary-foreground text-primary-foreground" aria-hidden />
           </div>
           <span className="font-display text-[1.0625rem] font-bold tracking-tight text-sidebar-foreground-active">
-            VoiceHub
+            Atrium
           </span>
         </div>
 

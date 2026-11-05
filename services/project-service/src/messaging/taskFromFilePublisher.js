@@ -1,7 +1,7 @@
 const amqp = require('amqplib');
 const { assertQuorumQueue } = require('@enterprise/shared/messaging/rabbitQuorum');
 
-const QUEUE = process.env.RABBITMQ_TASK_FROM_FILE_QUEUE || 'voicehub.task.from_file';
+const QUEUE = process.env.RABBITMQ_TASK_FROM_FILE_QUEUE || 'atrium.task.from_file';
 
 async function publishTaskFromFileJob(payload) {
   const url = process.env.RABBITMQ_URL;

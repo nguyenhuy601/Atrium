@@ -29,7 +29,7 @@ export default function Phase2GateBanner({
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const { capabilities } = useProjectCapabilities(projectId);
+  const { capabilities, isLoading: capsLoading } = useProjectCapabilities(projectId);
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState('manual');
   const [busy, setBusy] = useState(false);
@@ -37,11 +37,13 @@ export default function Phase2GateBanner({
 
   const phase = String(deliveryPhase || '').toLowerCase();
   const gateRelevant = phase === 'requirement_analysis' || phase === 'delivery_planning';
+  const canViewAnalysis = Boolean(capabilities.canViewAnalysis);
 
   const { data: gaps } = useQuery({
     queryKey: ['projectAnalysisGaps', String(projectId || '')],
     queryFn: async () => unwrap(await projectAPI.getAnalysisGaps(projectId)),
-    enabled: Boolean(projectId) && gateRelevant,
+    // Avoid 403 toast spam when viewer lacks analysis:view.
+    enabled: Boolean(projectId) && gateRelevant && !capsLoading && canViewAnalysis,
     staleTime: 15_000,
   });
 

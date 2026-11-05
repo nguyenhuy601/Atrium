@@ -1,8 +1,8 @@
-# Gitleaks — VoiceHub
+# Gitleaks — Atrium
 # .env từng bị commit vào lịch sử; đã untrack khỏi HEAD. Allowlist path .env*
 # để CI không fail trên commit cũ; vẫn bắt secret trong source/code.
 
-title = "VoiceHub gitleaks"
+title = "Atrium gitleaks"
 
 [extend]
 useDefault = true

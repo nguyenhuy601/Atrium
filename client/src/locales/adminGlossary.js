@@ -35,7 +35,7 @@ export const ADMIN_VI_WHITELIST = Object.freeze([
   'Voice',
   'Meeting',
   'Meetings',
-  'VoiceHub',
+  'Atrium',
   'Redis',
   'RabbitMQ',
   'Mongo',

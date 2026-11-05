@@ -287,29 +287,41 @@ function isCustomerRequirementId(raw) {
 /** Normalize story rows for accept/prompt (id, fr, ac, uc). */
 function normalizeStoriesForWbs(stories = []) {
   return (Array.isArray(stories) ? stories : [])
-    .map((s) => ({
-      id: normalizeRef(s?.id),
-      name: s?.name || s?.id,
-      description: s?.description || '',
-      fr: Array.isArray(s?.fr)
-        ? s.fr.map(normalizeRef).filter(Boolean)
-        : Array.isArray(s?.sourceFrIds)
-          ? s.sourceFrIds.map(normalizeRef).filter(Boolean)
-          : [],
-      ac: Array.isArray(s?.ac)
-        ? s.ac
-        : Array.isArray(s?.acRefs)
-          ? s.acRefs
-          : [],
-      uc: Array.isArray(s?.uc)
-        ? s.uc.map(normalizeRef).filter(Boolean)
-        : Array.isArray(s?.sourceUcIds)
-          ? s.sourceUcIds.map(normalizeRef).filter(Boolean)
-          : [],
-      module: truncate(s?.module || s?.moduleName || '', UNIT_SCOPE_MAX) || undefined,
-      feature: truncate(s?.feature || s?.featureName || '', UNIT_SCOPE_MAX) || undefined,
-      parentId: s?.parentId ?? s?.parentEpicId ?? null,
-    }))
+    .map((s) => {
+      let parentFeatureId = normalizeRef(s?.parentFeatureId) || null;
+      const parentEpicId = normalizeRef(s?.parentEpicId) || null;
+      const rawParentId = normalizeRef(s?.parentId) || null;
+      // Production SoT sometimes only stamps parentId=FEATURE-* (no parentFeatureId).
+      if (!parentFeatureId && rawParentId && /^FEATURE[-_]/i.test(rawParentId)) {
+        parentFeatureId = rawParentId;
+      }
+      const parentId = parentFeatureId || parentEpicId || rawParentId || null;
+      return {
+        id: normalizeRef(s?.id),
+        name: s?.name || s?.id,
+        description: s?.description || '',
+        fr: Array.isArray(s?.fr)
+          ? s.fr.map(normalizeRef).filter(Boolean)
+          : Array.isArray(s?.sourceFrIds)
+            ? s.sourceFrIds.map(normalizeRef).filter(Boolean)
+            : [],
+        ac: Array.isArray(s?.ac)
+          ? s.ac
+          : Array.isArray(s?.acRefs)
+            ? s.acRefs
+            : [],
+        uc: Array.isArray(s?.uc)
+          ? s.uc.map(normalizeRef).filter(Boolean)
+          : Array.isArray(s?.sourceUcIds)
+            ? s.sourceUcIds.map(normalizeRef).filter(Boolean)
+            : [],
+        module: truncate(s?.module || s?.moduleName || '', UNIT_SCOPE_MAX) || undefined,
+        feature: truncate(s?.feature || s?.featureName || '', UNIT_SCOPE_MAX) || undefined,
+        parentId,
+        parentFeatureId,
+        parentEpicId,
+      };
+    })
     .filter((s) => s.id);
 }
 
@@ -951,10 +963,11 @@ function stampWbsDepth(nodes = []) {
 
 /**
  * Materialize MVP tree from Gate1 SoT + LLM task leaves:
- * Epic → Story → Task (Story may be root when parentEpicId null).
+ * Epic → Feature → Story → Task (Feature/Story may be root when parent null).
  */
 function materializeWbsFromSotAndLeaves({
   epics = [],
+  features = [],
   stories = [],
   leaves = [],
   frUnits = null,
@@ -988,20 +1001,71 @@ function materializeWbsFromSotAndLeaves({
     .filter(Boolean);
 
   const epicIds = new Set(epicContainers.map((e) => e.id));
+  const featureContainers = (Array.isArray(features) ? features : [])
+    .map((f) => {
+      const id = normalizeRef(f?.id);
+      if (!id) return null;
+      const parentRaw = normalizeRef(f.parentEpicId || f.parentId);
+      const parentClean = parentRaw ? parentRaw.replace(/^c\d+-/i, '') || parentRaw : '';
+      const parentId =
+        parentClean && epicIds.has(parentClean)
+          ? parentClean
+          : parentRaw && epicIds.has(parentRaw)
+            ? parentRaw
+            : null;
+      return {
+        id,
+        name: String(f.name || f.title || id).trim().slice(0, 240) || id,
+        description: f.description || '',
+        parentId,
+        level: 'feature',
+        sourceFrIds: Array.isArray(f.sourceFrIds)
+          ? f.sourceFrIds.map(normalizeRef).filter(Boolean)
+          : [],
+        sourceUcIds: [],
+        sourceNfrIds: [],
+        acRefs: [],
+        suggestedRoleKey: 'business_analyst',
+        effortSeedHours: 0,
+        effortHours: 0,
+        needsDecomposition: false,
+      };
+    })
+    .filter(Boolean);
+  const featureIds = new Set(featureContainers.map((f) => f.id));
+
   const storyContainers = storyList.map((s) => {
-    const parentRaw = normalizeRef(s.parentId);
-    const parentClean = parentRaw ? parentRaw.replace(/^c\d+-/i, '') || parentRaw : '';
-    const parentId =
-      parentClean && epicIds.has(parentClean)
-        ? parentClean
-        : parentRaw && epicIds.has(parentRaw)
-          ? parentRaw
-          : null;
+    const featureParent = normalizeRef(s.parentFeatureId);
+    const epicParentRaw = normalizeRef(s.parentEpicId || s.parentId);
+    const epicParentClean = epicParentRaw
+      ? epicParentRaw.replace(/^c\d+-/i, '') || epicParentRaw
+      : '';
+    let parentId = null;
+    if (featureParent && featureIds.has(featureParent)) {
+      parentId = featureParent;
+    } else if (epicParentClean && epicIds.has(epicParentClean)) {
+      parentId = epicParentClean;
+    } else if (epicParentRaw && epicIds.has(epicParentRaw)) {
+      parentId = epicParentRaw;
+    } else {
+      const parentRaw = normalizeRef(s.parentId);
+      const parentClean = parentRaw ? parentRaw.replace(/^c\d+-/i, '') || parentRaw : '';
+      if (parentClean && (featureIds.has(parentClean) || epicIds.has(parentClean))) {
+        parentId = parentClean;
+      } else if (parentRaw && (featureIds.has(parentRaw) || epicIds.has(parentRaw))) {
+        parentId = parentRaw;
+      }
+    }
     return {
       id: s.id,
       name: s.name || s.id,
       description: s.description || '',
       parentId,
+      parentFeatureId: featureParent || null,
+      parentEpicId:
+        (epicParentClean && epicIds.has(epicParentClean) && epicParentClean) ||
+        (epicParentRaw && epicIds.has(epicParentRaw) && epicParentRaw) ||
+        null,
       level: 'story',
       sourceFrIds: [...(s.fr || [])],
       sourceUcIds: [...(s.uc || [])],
@@ -1033,13 +1097,27 @@ function materializeWbsFromSotAndLeaves({
     leaves: enrichedLeaves,
     frUnits,
   });
-  const rawTasks = [...epicContainers, ...storyContainers, ...placed.leaves];
+  const rawTasks = [
+    ...epicContainers,
+    ...featureContainers,
+    ...storyContainers,
+    ...placed.leaves,
+  ];
   const tasks = stampWbsDepth(
     applyContainerEffortRollup(dedupeChildTitlesAgainstParents(rawTasks))
   );
   const roots = tasks.filter((t) => !t.parentId).map((t) => t.id);
+  const coveredEpicIds = new Set();
+  for (const s of storyContainers) {
+    if (s.parentEpicId) coveredEpicIds.add(s.parentEpicId);
+    if (s.parentId && epicIds.has(s.parentId)) coveredEpicIds.add(s.parentId);
+    if (s.parentId && featureIds.has(s.parentId)) {
+      const feature = featureContainers.find((f) => f.id === s.parentId);
+      if (feature?.parentId) coveredEpicIds.add(feature.parentId);
+    }
+  }
   const epicsWithoutStories = epicContainers
-    .filter((e) => !storyContainers.some((s) => s.parentId === e.id))
+    .filter((e) => !coveredEpicIds.has(e.id))
     .map((e) => e.id);
   return {
     tasks,
@@ -1047,7 +1125,7 @@ function materializeWbsFromSotAndLeaves({
       roots,
       nodes: tasks,
       taskCount: placed.leaves.length,
-      featureCount: 0,
+      featureCount: featureContainers.length,
       workPackageCount: 0,
       epicsWithoutStories,
     },
@@ -1093,10 +1171,42 @@ function dedupeWbsLeaves(leaves = []) {
   };
 }
 
+/** Rebuild Feature rows when SoT/stories cite FEATURE-* but features[] was dropped. */
+function ensureFeaturesFromStories(features = [], stories = [], epics = []) {
+  const list = Array.isArray(features) ? [...features] : [];
+  const have = new Set(list.map((f) => normalizeRef(f?.id)).filter(Boolean));
+  const epicIds = new Set(
+    (Array.isArray(epics) ? epics : [])
+      .map((e) => normalizeRef(e?.id)?.replace(/^c\d+-/i, '') || normalizeRef(e?.id))
+      .filter(Boolean)
+  );
+  const soleEpicId = epicIds.size === 1 ? [...epicIds][0] : null;
+  for (const s of Array.isArray(stories) ? stories : []) {
+    let pf = normalizeRef(s?.parentFeatureId);
+    const rawParent = normalizeRef(s?.parentId);
+    if (!pf && rawParent && /^FEATURE[-_]/i.test(rawParent)) pf = rawParent;
+    if (!pf || have.has(pf)) continue;
+    let pe = normalizeRef(s?.parentEpicId)?.replace(/^c\d+-/i, '') || normalizeRef(s?.parentEpicId);
+    if (pe && !epicIds.has(pe)) pe = null;
+    if (!pe) pe = soleEpicId;
+    if (!pe) continue;
+    list.push({
+      id: pf,
+      name: pf,
+      parentEpicId: pe,
+      parentId: pe,
+      sourceFrIds: Array.isArray(s.fr) ? s.fr : Array.isArray(s.sourceFrIds) ? s.sourceFrIds : [],
+    });
+    have.add(pf);
+  }
+  return list;
+}
+
 /**
  * @param {{
  *   stories?: object[],
  *   epics?: object[],
+ *   features?: object[],
  *   semantic?: object|null,
  *   pack?: object|null,
  *   roleAllowList?: string[]|null,
@@ -1108,6 +1218,11 @@ async function proposeWbsTasksWithLlm(opts = {}) {
   const env = opts.env || process.env;
   const stories = normalizeStoriesForWbs(opts.stories);
   const epics = Array.isArray(opts.epics) ? opts.epics : [];
+  const features = ensureFeaturesFromStories(
+    Array.isArray(opts.features) ? opts.features : [],
+    stories,
+    epics
+  );
   const semantic = opts.semantic && typeof opts.semantic === 'object' ? opts.semantic : null;
   const pack = opts.pack && typeof opts.pack === 'object' ? opts.pack : null;
   const roleAllowList = Array.isArray(opts.roleAllowList) ? opts.roleAllowList : null;
@@ -1191,6 +1306,7 @@ async function proposeWbsTasksWithLlm(opts = {}) {
     return runWbsChunkOrchestrator({
       stories,
       epics,
+      features,
       semantic,
       roleAllowList,
       localeInstruction,
@@ -1483,6 +1599,7 @@ async function proposeWbsTasksWithLlm(opts = {}) {
 
   const materialized = materializeWbsFromSotAndLeaves({
     epics,
+    features,
     stories,
     leaves,
     frUnits,
@@ -1507,7 +1624,7 @@ async function proposeWbsTasksWithLlm(opts = {}) {
       unresolvedStoryIds,
       storyCount: stories.length,
       epicCount: epics.length,
-      featureCount: 0,
+      featureCount: Number(materialized.wbs?.featureCount) || features.length || 0,
       workPackageCount: 0,
       epicsWithoutStories: materialized.wbs?.epicsWithoutStories || [],
       uncoveredFrIds,

@@ -11,7 +11,6 @@ import {
   FolderPlus,
   Send,
   SlidersHorizontal,
-  Trash2,
   Upload,
   X,
 } from 'lucide-react';
@@ -23,7 +22,6 @@ import {
 } from '../../components/adminUsers/adminUserPanelUi';
 import GradientButton from '../../components/Shared/GradientButton';
 import Modal from '../../components/Shared/Modal';
-import ConfirmDialog from '../../components/Shared/ConfirmDialog';
 import {
   FIGMA_PAGE_CARD,
   FIGMA_PAGE_SUBTITLE,
@@ -151,7 +149,6 @@ export default function RequirementImportWorkspace({
   const [statusFilter, setStatusFilter] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(1);
-  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const { packs, invalidateAllForOrg } = useRequirementPacks(orgId);
   const loadPacks = invalidateAllForOrg;
@@ -369,22 +366,6 @@ export default function RequirementImportWorkspace({
       await loadPacks();
     } catch (error) {
       toast.error(resolveApiErrorMessage(error, { t, fallback: t('requirements.rejectFail') }));
-    } finally {
-      setActionPackId('');
-    }
-  };
-
-  const deletePack = async (packId) => {
-    if (!orgId || !packId || actionPackId) return;
-    setActionPackId(packId);
-    try {
-      await requirementAPI.deletePack(orgId, packId);
-      toast.success(t('requirements.deletePackSuccess'));
-      if (reviewPackId === packId) setReviewPackId('');
-      setDeleteTarget(null);
-      await loadPacks();
-    } catch (error) {
-      toast.error(resolveApiErrorMessage(error, { t, fallback: t('requirements.deletePackFail') }));
     } finally {
       setActionPackId('');
     }
@@ -773,17 +754,6 @@ export default function RequirementImportWorkspace({
             {t('requirements.createProject')}
           </PackRowActionButton>
         ) : null}
-        {canApprove && pack.status === 'approved' ? (
-          <PackRowActionButton
-            variant="danger"
-            disabled={actionPackId === pack._id}
-            onClick={() => setDeleteTarget(pack)}
-            title={t('requirements.deletePack')}
-          >
-            <Trash2 className="h-3 w-3 shrink-0" aria-hidden />
-            {t('requirements.deletePack')}
-          </PackRowActionButton>
-        ) : null}
       </div>
     </li>
   );
@@ -857,23 +827,6 @@ export default function RequirementImportWorkspace({
         canRunAiPlanning={canRunAiPlanning}
         onClose={() => setReviewPackId('')}
         onChanged={loadPacks}
-        onDeletePack={(pack) => setDeleteTarget(pack)}
-      />
-
-      <ConfirmDialog
-        isOpen={Boolean(deleteTarget)}
-        onClose={() => !actionPackId && setDeleteTarget(null)}
-        onConfirm={() => deletePack(String(deleteTarget?._id || '').trim())}
-        title={t('requirements.deletePackTitle')}
-        message={t('requirements.deletePackConfirm', {
-          name:
-            deleteTarget?.overview?.requirementName ||
-            deleteTarget?.sourceFileName ||
-            deleteTarget?._id ||
-            '—',
-        })}
-        confirmText={t('requirements.deletePack')}
-        cancelText={t('common.cancel')}
       />
       {noteDialog}
     </div>

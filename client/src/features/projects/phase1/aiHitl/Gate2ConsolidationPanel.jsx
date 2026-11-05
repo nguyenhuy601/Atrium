@@ -1,9 +1,14 @@
 import { useState } from 'react';
 import { isBlockingProposal } from './gate2ReviewOwnership.js';
 
-function labelOf(t, key, fallback) {
-  const value = typeof t === 'function' ? t(key) : '';
-  return value || fallback;
+function labelOf(t, key, fallback, vars) {
+  const value = typeof t === 'function' ? t(key, vars) : '';
+  if (value && value !== key) return value;
+  if (!vars) return fallback;
+  return Object.entries(vars).reduce(
+    (text, [name, raw]) => text.replace(`{${name}}`, String(raw ?? '')),
+    fallback
+  );
 }
 
 function statusLabel(t, row) {
@@ -29,8 +34,8 @@ function statusLabel(t, row) {
 }
 
 /**
- * PM tổng hợp: đề xuất sửa phần PO/Tech, xử lý từ chối, escalate.
- * Chủ phần accept/reject. PO accept_risk được ghi riêng, không giả Tech Lead đã duyệt.
+ * Vai trò tổng hợp (theo gateReviewPolicy): đề xuất sửa, xử lý từ chối, escalate.
+ * Chủ phần accept/reject. Final approver accept_risk được ghi riêng.
  */
 export default function Gate2ConsolidationPanel({
   mode = 'consolidate',
@@ -38,6 +43,8 @@ export default function Gate2ConsolidationPanel({
   proposals = [],
   busy = false,
   t,
+  synthesisLabel = 'PM',
+  finalLabel = 'PO',
   onPropose,
   onDecide,
   onKeepOriginal,
@@ -55,6 +62,7 @@ export default function Gate2ConsolidationPanel({
   });
   const blocking = proposals.filter(isBlockingProposal);
   const showForm = mode === 'consolidate';
+  const roleVars = { synthesis: synthesisLabel, final: finalLabel };
 
   const submitDraft = (extra = {}) => {
     if (typeof onPropose !== 'function') return;
@@ -66,19 +74,21 @@ export default function Gate2ConsolidationPanel({
     <section className="mb-4 space-y-3 rounded-lg border border-border bg-muted/20 p-3">
       <div>
         <h3 className="text-sm font-semibold text-foreground">
-          {labelOf(t, 'requirements.gate2ConsolidationTitle', 'PM tổng hợp')}
+          {labelOf(t, 'requirements.gate2ConsolidationTitle', '{synthesis} tổng hợp', roleVars)}
         </h3>
         <p className="mt-1 text-xs text-muted-foreground">
           {assignSections
             ? labelOf(
                 t,
                 'requirements.gate2ConsolidationHint',
-                'PM kiểm tra xung đột. Sửa phần của Tech Lead hoặc PO chỉ có hiệu lực khi chủ phần xác nhận.'
+                '{synthesis} kiểm tra xung đột. Sửa phần của vai trò khác chỉ có hiệu lực khi chủ phần xác nhận.',
+                roleVars
               )
             : labelOf(
                 t,
                 'requirements.gate2ConsolidationHintAll',
-                'Vai trò tổng hợp xem toàn bộ kế hoạch rồi xác nhận. Không chia section cho từng vai trò.'
+                '{synthesis} xem toàn bộ kế hoạch rồi xác nhận. Không chia section cho từng vai trò.',
+                roleVars
               )}
         </p>
       </div>
@@ -126,7 +136,12 @@ export default function Gate2ConsolidationPanel({
                 onClick={() => onResolveEscalation?.({ proposalId: row.id, decision: 'accept_risk' })}
                 className="rounded-md border border-amber-600/40 px-2 py-1 text-xs font-semibold text-amber-900 disabled:opacity-40 dark:text-amber-200"
               >
-                {labelOf(t, 'requirements.gate2AcceptRisk', 'PO chấp nhận rủi ro')}
+                {labelOf(
+                  t,
+                  'requirements.gate2AcceptRisk',
+                  '{final} chấp nhận rủi ro',
+                  roleVars
+                )}
               </button>
               <button
                 type="button"
@@ -172,7 +187,12 @@ export default function Gate2ConsolidationPanel({
                 onClick={() => onEscalate?.({ proposalId: row.id })}
                 className="rounded-md border border-amber-600/40 px-2 py-1 text-xs font-semibold text-amber-900 disabled:opacity-40 dark:text-amber-200"
               >
-                {labelOf(t, 'requirements.gate2Escalate', 'Chuyển PO quyết trade-off')}
+                {labelOf(
+                  t,
+                  'requirements.gate2Escalate',
+                  'Chuyển {final} quyết trade-off',
+                  roleVars
+                )}
               </button>
             </div>
           ) : null}
@@ -233,23 +253,25 @@ export default function Gate2ConsolidationPanel({
             >
               {labelOf(t, 'requirements.gate2SendProposal', 'Gửi chủ phần xác nhận')}
             </button>
-            <button
-              type="button"
-              disabled={busy || blocking.length > 0}
-              onClick={() => onConfirmPlan?.()}
-              className="rounded-md border border-emerald-600/40 px-3 py-1.5 text-xs font-semibold text-emerald-800 disabled:opacity-40 dark:text-emerald-300"
-            >
-              {labelOf(t, 'requirements.gate2PmConfirmPlan', 'Xác nhận kế hoạch đã nhất quán')}
-            </button>
+            {typeof onConfirmPlan === 'function' ? (
+              <button
+                type="button"
+                disabled={busy || blocking.length > 0}
+                onClick={() => onConfirmPlan()}
+                className="rounded-md border border-emerald-600/40 px-3 py-1.5 text-xs font-semibold text-emerald-800 disabled:opacity-40 dark:text-emerald-300"
+              >
+                {labelOf(t, 'requirements.gate2PmConfirmPlan', 'Xác nhận kế hoạch đã nhất quán')}
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
-      {showForm && !assignSections ? (
+      {showForm && !assignSections && typeof onConfirmPlan === 'function' ? (
         <div className="flex justify-end">
           <button
             type="button"
             disabled={busy || blocking.length > 0}
-            onClick={() => onConfirmPlan?.()}
+            onClick={() => onConfirmPlan()}
             className="rounded-md border border-emerald-600/40 px-3 py-1.5 text-xs font-semibold text-emerald-800 disabled:opacity-40 dark:text-emerald-300"
           >
             {labelOf(t, 'requirements.gate2PmConfirmPlan', 'Xác nhận kế hoạch đã nhất quán')}

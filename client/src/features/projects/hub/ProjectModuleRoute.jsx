@@ -3,7 +3,6 @@ import { useCallback, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import ProjectHubPage from '../../../pages/Projects/ProjectHubPage';
-import CollaborateRequirementsPage from '../../requirements/CollaborateRequirementsPage';
 import SpaceCalendarModule from '../../spaceModules/SpaceCalendarModule';
 import SpaceDocumentsModule from '../../spaceModules/SpaceDocumentsModule';
 import SpaceProjectChatModule from '../../spaceModules/SpaceProjectChatModule';
@@ -40,8 +39,6 @@ import { isProjectMembershipDenied } from '../../../config/routeDeniedNotice';
 import { resolveApiErrorMessage } from '../../../utils/resolveApiErrorMessage';
 import { isAiHitlIncomplete, resolveAiProjectEntryPath } from '../phase1/aiHitl/aiHitlNavState';
 import { loadLinkedPackForAiNav } from '../phase1/aiHitl/loadLinkedPackForAiNav';
-import { shouldDenyProjectEntry } from '../projectRoleEntry';
-import ProjectRoleDeniedRedirect from '../ProjectRoleDeniedRedirect';
 
 const PHASE1_MODULES = new Set([
   'overview',
@@ -79,6 +76,7 @@ export default function ProjectModuleRoute() {
     isPending: projectPending,
     isError: projectError,
     error: projectLoadError,
+    refetch: refetchProject,
   } = useQuery({
     queryKey: queryKeys.projectHub.project(projectId),
     queryFn: () => fetchProjectHubProject(projectId),
@@ -140,7 +138,7 @@ export default function ProjectModuleRoute() {
   }
 
   if (projectError && !projectRow) {
-    if (isProjectMembershipDenied(projectQueryError)) {
+    if (isProjectMembershipDenied(projectLoadError)) {
       return (
         <Navigate
           to={buildProjectsPickerPath(orgId)}
@@ -152,7 +150,7 @@ export default function ProjectModuleRoute() {
     return (
       <div className="flex min-h-[12rem] items-center justify-center p-6">
         <AdminLoadErrorState
-          message={resolveApiErrorMessage(projectQueryError, {
+          message={resolveApiErrorMessage(projectLoadError, {
             t,
             fallback: t('workspace.projectsLoadFail'),
           })}
@@ -231,8 +229,6 @@ export default function ProjectModuleRoute() {
     );
   } else if (module === 'documents') {
     body = <SpaceDocumentsModule />;
-  } else if (module === 'requirements') {
-    body = <CollaborateRequirementsPage />;
   } else if (hubTab) {
     body = (
       <ProjectHubPage

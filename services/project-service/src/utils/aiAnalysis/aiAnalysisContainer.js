@@ -55,6 +55,52 @@ function emptyAnalysisSection() {
   };
 }
 
+/**
+ * HOW tool extras that must survive ensure() — whitelist-strip previously wiped
+ * RiskTool openQuestions (Monitor "Rủi ro / Giả định" empty) and Dependency proposalEdges.
+ */
+const HOW_ANALYSIS_SECTION_EXTRA_KEYS = Object.freeze([
+  'openQuestions',
+  'unresolvedQuestions',
+  'risks',
+  'maxSeverity',
+  'proposalEdges',
+  'schedulableEdges',
+  'analysisStatus',
+  'analysisComplete',
+  'scheduleReady',
+  'executionTerminal',
+  'assessment',
+  'inputHash',
+  'wbsVersion',
+  'promptVersion',
+  'runId',
+  'attemptId',
+]);
+
+/**
+ * @param {object|null|undefined} src
+ */
+function normalizeStandardAnalysisSection(src) {
+  if (!src || typeof src !== 'object') return emptyAnalysisSection();
+  const next = {
+    status: String(src.status || 'empty'),
+    model: src.model ?? null,
+    generatedAt: src.generatedAt ?? null,
+    items: Array.isArray(src.items) ? src.items : [],
+    entities: Array.isArray(src.entities) ? src.entities : [],
+    edges: Array.isArray(src.edges) ? src.edges : [],
+    dataFlows: Array.isArray(src.dataFlows) ? src.dataFlows : [],
+    orderHint: Array.isArray(src.orderHint) ? src.orderHint : [],
+    chains: Array.isArray(src.chains) ? src.chains : [],
+    meta: src.meta && typeof src.meta === 'object' ? src.meta : {},
+  };
+  for (const key of HOW_ANALYSIS_SECTION_EXTRA_KEYS) {
+    if (src[key] !== undefined) next[key] = src[key];
+  }
+  return next;
+}
+
 function emptyHierarchySection() {
   return {
     status: 'empty',
@@ -246,18 +292,7 @@ function ensureAiAnalysisContainer(raw) {
       if (key === 'hierarchy') {
         analyses[key] = normalizeHierarchySection(src);
       } else {
-        analyses[key] = {
-          status: String(src.status || 'empty'),
-          model: src.model ?? null,
-          generatedAt: src.generatedAt ?? null,
-          items: Array.isArray(src.items) ? src.items : [],
-          entities: Array.isArray(src.entities) ? src.entities : [],
-          edges: Array.isArray(src.edges) ? src.edges : [],
-          dataFlows: Array.isArray(src.dataFlows) ? src.dataFlows : [],
-          orderHint: Array.isArray(src.orderHint) ? src.orderHint : [],
-          chains: Array.isArray(src.chains) ? src.chains : [],
-          meta: src.meta && typeof src.meta === 'object' ? src.meta : {},
-        };
+        analyses[key] = normalizeStandardAnalysisSection(src);
       }
     }
   }
@@ -367,6 +402,11 @@ function ensureAiAnalysisContainer(raw) {
         planningSrc.backlog && typeof planningSrc.backlog === 'object'
           ? planningSrc.backlog
           : null,
+      // Gate2 materialize / Monitor — do not drop HOW risk & dependency lists
+      ...(Array.isArray(planningSrc.risks) ? { risks: planningSrc.risks } : {}),
+      ...(Array.isArray(planningSrc.dependencies)
+        ? { dependencies: planningSrc.dependencies }
+        : {}),
     },
     resource: {
       fte: Array.isArray(resourceSrc.fte) ? resourceSrc.fte : [],
@@ -626,6 +666,8 @@ module.exports = {
   createEmptyAiAnalysisContainer,
   ensureAiAnalysisContainer,
   emptyHierarchySection,
+  normalizeStandardAnalysisSection,
+  HOW_ANALYSIS_SECTION_EXTRA_KEYS,
   assertSchemaVersionPresent,
   getJobStatus,
   assertPreviousJobConfirmed,

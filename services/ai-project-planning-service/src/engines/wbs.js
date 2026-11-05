@@ -229,6 +229,7 @@ async function runWbsEngineAsync(container = {}, opts = {}) {
   const llmOut = await proposeWbsTasksWithLlm({
     stories: sot.stories,
     epics: sot.epics,
+    features: sot.features || [],
     semantic: semanticBundle.semantic || null,
     pack,
     roleAllowList: Array.isArray(opts.roleAllowList) ? opts.roleAllowList : null,
@@ -241,13 +242,43 @@ async function runWbsEngineAsync(container = {}, opts = {}) {
 
   if (llmOut.ok && Array.isArray(llmOut.tasks) && llmOut.wbs) {
     const success = llmSuccessResult(llmOut);
-    if (Array.isArray(sot.epicsWithoutStories) && sot.epicsWithoutStories.length) {
-      success.meta.epicsWithoutStories = sot.epicsWithoutStories;
+    // Trust materialize tree for epic↔story coverage — do not re-flag epic_missing_stories
+    // from pre-LLM SoT when Feature middle-layer made sot look "empty" under Epic.
+    const materializedMissing = Array.isArray(llmOut.wbs?.epicsWithoutStories)
+      ? llmOut.wbs.epicsWithoutStories
+      : Array.isArray(success.meta?.epicsWithoutStories)
+        ? success.meta.epicsWithoutStories
+        : [];
+    if (materializedMissing.length) {
+      success.meta.epicsWithoutStories = materializedMissing;
       success.meta.needsReview = true;
       if (!Array.isArray(success.meta.reasonCodes)) success.meta.reasonCodes = [];
       if (!success.meta.reasonCodes.includes('epic_missing_stories')) {
         success.meta.reasonCodes.push('epic_missing_stories');
       }
+    } else {
+      success.meta.epicsWithoutStories = [];
+      if (Array.isArray(success.meta.reasonCodes)) {
+        success.meta.reasonCodes = success.meta.reasonCodes.filter(
+          (c) => c !== 'epic_missing_stories'
+        );
+      }
+    }
+    // Invariant: ABS Feature SoT must survive into WBS tree (no silent drop).
+    const sotFeatureCount = Array.isArray(sot.features) ? sot.features.length : 0;
+    const outFeatureCount = Number(success.meta?.featureCount) || 0;
+    if (sotFeatureCount > 0 && outFeatureCount === 0) {
+      console.error(
+        '[how-wbs] FEATURE_DROPPED sotFeatures=%s outFeatures=%s — hierarchy data loss',
+        sotFeatureCount,
+        outFeatureCount
+      );
+      success.meta.needsReview = true;
+      if (!Array.isArray(success.meta.reasonCodes)) success.meta.reasonCodes = [];
+      if (!success.meta.reasonCodes.includes('wbs_feature_layer_dropped')) {
+        success.meta.reasonCodes.push('wbs_feature_layer_dropped');
+      }
+      success.meta.sotFeatureCount = sotFeatureCount;
     }
     return success;
   }

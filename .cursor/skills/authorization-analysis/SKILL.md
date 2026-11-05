@@ -1,7 +1,7 @@
 ---
 name: authorization-analysis
 description: >-
-  Analyzes VoiceHub RBAC/authorization: roles, permissions, scopes, IDOR, FE-vs-BE enforcement, gateway trust and x-user-id. Use when touching permissions.js, role-permission-service, or authz-sensitive APIs.
+  Analyzes Atrium RBAC/authorization: roles, permissions, scopes, IDOR, FE-vs-BE enforcement, gateway trust and x-user-id. Use when touching permissions.js, role-permission-service, or authz-sensitive APIs.
 ---
 
 # authorization analysis
@@ -17,7 +17,7 @@ Pure styling without access control.
 ## Related Rules
 
 - `.cursor/rules/deep-agents-dispatch.mdc`; skill `authorization-analysis`
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

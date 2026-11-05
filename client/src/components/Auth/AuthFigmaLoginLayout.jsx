@@ -86,7 +86,7 @@ export function AuthFigmaLoginMobileLogo() {
       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
         <Zap size={16} className="fill-primary-foreground text-primary-foreground" aria-hidden />
       </div>
-      <span className="font-display text-base font-bold text-foreground">VoiceHub</span>
+      <span className="font-display text-base font-bold text-foreground">Atrium</span>
     </div>
   );
 }

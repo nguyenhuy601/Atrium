@@ -1,7 +1,7 @@
 ---
 name: dependency-analysis
 description: >-
-  Analyzes VoiceHub package or service coupling before large upgrades or refactors.
+  Analyzes Atrium package or service coupling before large upgrades or refactors.
 ---
 
 # dependency analysis

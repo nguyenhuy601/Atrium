@@ -13,7 +13,7 @@ const FEATURES_VI = [
     color: 'from-cyan-600 to-teal-600',
     detail: {
       intro:
-        'VoiceHub xây dựng lớp xác thực phù hợp môi trường doanh nghiệp: tài khoản quản lý tập trung, phân quyền theo ngữ cảnh tổ chức và luồng đăng nhập ổn định.',
+        'Atrium xây dựng lớp xác thực phù hợp môi trường doanh nghiệp: tài khoản quản lý tập trung, phân quyền theo ngữ cảnh tổ chức và luồng đăng nhập ổn định.',
       bullets: [
         'Phiên đăng nhập gắn với tổ chức và quyền truy cập từng khu vực trong ứng dụng.',
         'Tách rõ luồng công khai (landing) và luồng nội bộ sau đăng nhập.',
@@ -150,7 +150,7 @@ const FEATURES_EN = [
     color: 'from-cyan-600 to-teal-600',
     detail: {
       intro:
-        'VoiceHub provides enterprise-friendly authentication: centralized accounts, contextual permissions per organization, and stable login flows.',
+        'Atrium provides enterprise-friendly authentication: centralized accounts, contextual permissions per organization, and stable login flows.',
       bullets: [
         'Sessions tied to org membership and access to each area of the app.',
         'Clear separation between public (marketing) and internal post-login flows.',
@@ -297,7 +297,7 @@ export const HOME_LOCALES = {
     },
     hero: {
       badge: 'Nền tảng cộng tác nội bộ',
-      titleBefore: 'VoiceHub —',
+      titleBefore: 'Atrium —',
       titleGradient: 'giao tiếp và phối hợp',
       titleAfter: 'cho doanh nghiệp hiện đại',
       desc:
@@ -313,7 +313,7 @@ export const HOME_LOCALES = {
       bodyProblem:
         'Doanh nghiệp thường phải dùng quá nhiều ứng dụng: chat, họp, quản lý nhóm, chia sẻ tài liệu. Dữ liệu phân mảnh, khó phối hợp và dễ mất ngữ cảnh — hiệu suất giảm, người mới onboard lâu.',
       labelSolution: 'Giải pháp',
-      titleSolution: 'VoiceHub hợp nhất toàn bộ quy trình cộng tác',
+      titleSolution: 'Atrium hợp nhất toàn bộ quy trình cộng tác',
       bodySolution:
         'Một nền tảng duy nhất cho giao tiếp và phối hợp nội bộ: từ xác thực tới chat, họp, tổ chức và tài liệu — cùng một trải nghiệm, cùng một điểm vào sau đăng nhập.',
     },
@@ -350,7 +350,7 @@ export const HOME_LOCALES = {
     finalCta: {
       title: 'Sẵn sàng nâng cấp trải nghiệm cộng tác nội bộ?',
       body:
-        'Đăng nhập để bắt đầu sử dụng hệ thống VoiceHub — mọi chức năng thực tế mở từ bảng điều khiển sau khi bạn xác thực.',
+        'Đăng nhập để bắt đầu sử dụng hệ thống Atrium — mọi chức năng thực tế mở từ bảng điều khiển sau khi bạn xác thực.',
       login: 'Đăng nhập vào hệ thống',
       register: 'Tạo tài khoản',
       openDashboard: 'Mở bảng điều khiển',
@@ -392,7 +392,7 @@ export const HOME_LOCALES = {
     },
     hero: {
       badge: 'Internal collaboration platform',
-      titleBefore: 'VoiceHub —',
+      titleBefore: 'Atrium —',
       titleGradient: 'communication and coordination',
       titleAfter: 'for modern businesses',
       desc:
@@ -408,7 +408,7 @@ export const HOME_LOCALES = {
       bodyProblem:
         'Teams juggle too many apps: chat, meetings, org management, and documents. Data splits across tools, context gets lost, onboarding drags — and productivity suffers.',
       labelSolution: 'The solution',
-      titleSolution: 'VoiceHub unifies the whole collaboration flow',
+      titleSolution: 'Atrium unifies the whole collaboration flow',
       bodySolution:
         'One platform for internal communication and coordination: from authentication to chat, meetings, org structure, and files — one experience and one entry point after login.',
     },
@@ -445,7 +445,7 @@ The page URL does not change; nothing is persisted on the server. Click a step f
     finalCta: {
       title: 'Ready to level up internal collaboration?',
       body:
-        'Sign in to start using VoiceHub — every real feature opens from the dashboard once you are authenticated.',
+        'Sign in to start using Atrium — every real feature opens from the dashboard once you are authenticated.',
       login: 'Log in to the system',
       register: 'Create an account',
       openDashboard: 'Open dashboard',

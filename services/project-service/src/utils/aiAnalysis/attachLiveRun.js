@@ -45,6 +45,7 @@ function slimGatePreview(raw, page) {
     skippedCount: Number(raw.skippedCount) || 0,
     quality: {
       missingActor: Number(qualityIn.missingActor) || 0,
+      missingOutcome: Number(qualityIn.missingOutcome) || 0,
       missingAc: Number(qualityIn.missingAc) || 0,
       thinText: Number(qualityIn.thinText) || 0,
       ambiguous: Number(qualityIn.ambiguous) || 0,

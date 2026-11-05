@@ -163,9 +163,18 @@ function buildLlmJobQueueMessage(job) {
 }
 
 function defaultGeneration(env = process.env) {
+  let chatModels = [];
+  try {
+    const { chatModelCandidates } = require('@enterprise/shared/llm/openaiCompatibleClient');
+    chatModels = chatModelCandidates(env);
+  } catch {
+    const primary = String(env.LLM_CHAT_MODEL || env.DASHSCOPE_MODEL || '').trim();
+    chatModels = primary ? [primary] : [];
+  }
   return {
     ...DEFAULT_GENERATION,
-    model: String(env.LLM_CHAT_MODEL || env.DASHSCOPE_MODEL || '').trim() || null,
+    model: chatModels[0] || null,
+    fallbackModels: chatModels.slice(1),
     maxOutputTokens: Number(env.LLM_JOBS_MAX_OUTPUT_TOKENS) || 4096,
     temperature: Number(env.LLM_JOBS_TEMPERATURE) || 0.2,
   };

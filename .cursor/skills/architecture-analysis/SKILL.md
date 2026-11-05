@@ -1,7 +1,7 @@
 ---
 name: architecture-analysis
 description: >-
-  Analyzes VoiceHub system components, service boundaries, dependencies, data flows, integration, scalability, and risks. Use for multi-service design or before large changes. Read-only by default.
+  Analyzes Atrium system components, service boundaries, dependencies, data flows, integration, scalability, and risks. Use for multi-service design or before large changes. Read-only by default.
 ---
 
 # architecture analysis
@@ -17,7 +17,7 @@ Single-file bug with known cause.
 ## Related Rules
 
 - `.cursor/rules/deep-agents-dispatch.mdc` (agent: `researcher`)
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

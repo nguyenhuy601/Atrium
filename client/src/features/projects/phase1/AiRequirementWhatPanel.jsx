@@ -108,6 +108,8 @@ export default function AiRequirementWhatPanel({
         }
         await requirementAPI.startPhaseAiPlanning(organizationId, packId, {
           phase: 'what',
+          mode: 'requirement',
+          snapshotPolicy: 'reuse_if_valid',
           force: Boolean(force),
         });
         setPhaseStatus('pending');

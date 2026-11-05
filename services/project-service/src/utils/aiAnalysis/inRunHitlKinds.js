@@ -7,7 +7,6 @@ const IN_RUN_KINDS = Object.freeze([
   'clarify',
   'edit_draft',
   'wbs_confirm',
-  'fr_confirm',
 ]);
 
 function normalizeInRunKind(raw) {
@@ -21,14 +20,6 @@ function normalizeInRunKind(raw) {
     k === 'wbs_stage'
   ) {
     return 'wbs_confirm';
-  }
-  if (
-    k === 'fr_confirm' ||
-    k === 'confirm_fr' ||
-    k === 'fr_checkpoint' ||
-    k === 'fr_stage'
-  ) {
-    return 'fr_confirm';
   }
   return k;
 }

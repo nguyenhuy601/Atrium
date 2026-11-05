@@ -1,7 +1,7 @@
 ---
 name: environment-analysis
 description: >-
-  Analyzes VoiceHub env and LAN HTTPS setup: .env only, VITE_API_URL=/api, voicehub.local, socket via gateway, HMR wss. Use for CORS, wrong API host, LAN access issues.
+  Analyzes Atrium env and LAN HTTPS setup: .env only, VITE_API_URL=/api, atrium.dev, socket via gateway, HMR wss. Use for CORS, wrong API host, LAN access issues.
 ---
 
 # environment analysis
@@ -16,7 +16,7 @@ Pure business-logic bugs.
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 
@@ -25,7 +25,7 @@ Symptom or env question
 ## Workflow
 
 1. Check .env / client .env for VITE_* and gateway URLs (do not print secrets).
-2. Enforce same-origin /api and voicehub.local guidance from constraints.
+2. Enforce same-origin /api and atrium.dev guidance from constraints.
 3. Do not hardcode LAN IPs in code or invite links.
 4. Suggest verify-lan-https.ps1 when appropriate.
 

@@ -154,7 +154,7 @@ function HomePage() {
               V
             </div>
             <div>
-              <p className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>VoiceHub</p>
+              <p className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Atrium</p>
               <p className={`text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-700'}`}>{copy.nav.tagline}</p>
             </div>
           </Link>

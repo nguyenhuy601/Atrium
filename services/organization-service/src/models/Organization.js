@@ -87,7 +87,7 @@ const organizationSchema = new mongoose.Schema(
       },
       /**
        * Allowlist domain email (không có @). Rỗng = không chặn (dev/UAT).
-       * Ví dụ: ['voicehub.local', 'gmail.com', 'congty.vn']
+       * Ví dụ: ['atrium.dev', 'gmail.com', 'congty.vn']
        */
       allowedEmailDomains: {
         type: [String],

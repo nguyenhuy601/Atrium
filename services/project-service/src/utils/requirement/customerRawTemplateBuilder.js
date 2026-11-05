@@ -35,7 +35,7 @@ function buildContextRows() {
 
 async function buildCustomerRawTemplateBuffer() {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'VoiceHub';
+  wb.creator = 'Atrium';
   wb.created = new Date();
 
   addSheet(

@@ -542,7 +542,22 @@ export default function Gate1SectionReviewTable({
 
                 {columns.map((col) => {
                   const canInline =
-                    isEditing && col.editable && col.field && !busy;
+                    isEditing &&
+                    col.editable &&
+                    col.field &&
+                    !busy &&
+                    (typeof col.isEditable !== 'function' || col.isEditable(row));
+                  // WBS title indent follows Level (live) while editing title as free text.
+                  const wbsTitlePadPx =
+                    wbsTreeCollapse &&
+                    col.key === 'title' &&
+                    typeof cfg.resolveWbsUiDepth === 'function'
+                      ? Math.max(0, Number(cfg.resolveWbsUiDepth(row, d.editedPayload)) || 0) *
+                        12
+                      : 0;
+                  const cellPadStyle = wbsTitlePadPx
+                    ? { paddingLeft: `${wbsTitlePadPx}px` }
+                    : undefined;
                   return (
                     <div
                       key={col.key}
@@ -551,39 +566,43 @@ export default function Gate1SectionReviewTable({
                       }`}
                     >
                       {canInline && col.editor === 'select' ? (
-                        <AssignmentSelectCell
-                          row={row}
-                          col={col}
-                          editedPayload={d.editedPayload}
-                          cfg={cfg}
-                          t={t}
-                          onChange={(editedPayload) =>
-                            setDecision(id, {
-                              ...(action === 'create' ? { action: 'create', section } : {}),
-                              editedPayload,
-                            })
-                          }
-                        />
+                        <div style={cellPadStyle}>
+                          <AssignmentSelectCell
+                            row={row}
+                            col={col}
+                            editedPayload={d.editedPayload}
+                            cfg={cfg}
+                            t={t}
+                            onChange={(editedPayload) =>
+                              setDecision(id, {
+                                ...(action === 'create' ? { action: 'create', section } : {}),
+                                editedPayload,
+                              })
+                            }
+                          />
+                        </div>
                       ) : canInline ? (
-                        <input
-                          type="text"
-                          className={`${INLINE_FIELD_CLASS} placeholder:text-muted-foreground`}
-                          value={cfg.getFieldValue(row, col, d.editedPayload)}
-                          onChange={(e) =>
-                            setDecision(id, {
-                              ...(action === 'create'
-                                ? { action: 'create', section }
-                                : {}),
-                              editedPayload: cfg.patchEditedPayload(
-                                d.editedPayload,
-                                col.field,
-                                e.target.value
-                              ),
-                            })
-                          }
-                          aria-label={labelOf(t, col.headerKey, col.headerFallback)}
-                          placeholder={labelOf(t, col.headerKey, col.headerFallback)}
-                        />
+                        <div style={cellPadStyle}>
+                          <input
+                            type="text"
+                            className={`${INLINE_FIELD_CLASS} placeholder:text-muted-foreground`}
+                            value={cfg.getFieldValue(row, col, d.editedPayload)}
+                            onChange={(e) =>
+                              setDecision(id, {
+                                ...(action === 'create'
+                                  ? { action: 'create', section }
+                                  : {}),
+                                editedPayload: cfg.patchEditedPayload(
+                                  d.editedPayload,
+                                  col.field,
+                                  e.target.value
+                                ),
+                              })
+                            }
+                            aria-label={labelOf(t, col.headerKey, col.headerFallback)}
+                            placeholder={labelOf(t, col.headerKey, col.headerFallback)}
+                          />
+                        </div>
                       ) : (
                         <>
                           <span className="break-words">

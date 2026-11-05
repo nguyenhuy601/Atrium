@@ -28,7 +28,7 @@ async function applyJobResult(req, res) {
 }
 
 /**
- * GET /internal/ai-planning/snapshots/:snapshotId?packId=&organizationId=
+ * GET /internal/ai-planning/snapshots/:snapshotId?packId=&organizationId=&projection=what|how|full
  */
 async function hydrateSnapshot(req, res) {
   try {
@@ -39,6 +39,7 @@ async function hydrateSnapshot(req, res) {
         req.query.organizationId ||
         req.body?.organizationId ||
         req.headers['x-organization-id'],
+      projection: req.query.projection || req.body?.projection || 'full',
     });
     return res.json({ success: true, data });
   } catch (error) {

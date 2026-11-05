@@ -160,8 +160,14 @@ function blockingMatchesRow(block, row) {
 
 /** Labels from requirementGaps / RequirementAnalysisTool → row field keys. */
 const MISSING_LABEL_FIELD_KEYS = {
-  'Acceptance criteria': ['ac', 'acceptanceCriteria'],
-  Description: ['description', 'desc'],
+  'Acceptance criteria': [
+    'ac',
+    'acceptanceCriteria',
+    'acceptance_condition',
+    'acceptance',
+  ],
+  // Short FR may only store prose in title/name (pack contract avoids duplicating desc).
+  Description: ['description', 'desc', 'text', 'title', 'name'],
   Priority: ['priority'],
   Actor: ['actor', 'actors', 'primaryActor'],
   'Error handling': ['errorHandling', 'error_handling'],
@@ -233,6 +239,9 @@ export function sectionHasUnresolvedIntegrityIssues(
  * Drop / shrink incomplete_fields issues once the row (or edit) has the field.
  * Relationship integrity issues are kept as-is.
  */
+/** Soft-only labels — do not keep Monitor/Gate1 amber for these alone. */
+const SOFT_MISSING_LABELS = new Set(['Priority']);
+
 export function filterBlockingIssuesForCurrentValues(issues, row, decision = null) {
   const list = Array.isArray(issues) ? issues : [];
   if (!list.length) return [];
@@ -258,8 +267,10 @@ export function filterBlockingIssuesForCurrentValues(issues, row, decision = nul
       out.push(issue);
       continue;
     }
-    const stillMissing = missing.filter((label) =>
-      isMissingLabelStillEmpty(label, effective)
+    const stillMissing = missing.filter(
+      (label) =>
+        !SOFT_MISSING_LABELS.has(String(label)) &&
+        isMissingLabelStillEmpty(label, effective)
     );
     if (!stillMissing.length) continue;
     out.push({ ...issue, missing: stillMissing });
@@ -286,7 +297,9 @@ export function attachConflictAmbiguityToGate1Bundle(bundle, pack) {
 
   for (const key of Object.keys(bySection)) {
     const rows = asArray(bySection[key]).map((row) => {
-      const issues = gate.blocking.filter((b) => blockingMatchesRow(b, row));
+      const rawIssues = gate.blocking.filter((b) => blockingMatchesRow(b, row));
+      // Drop stale incomplete_fields once row already has the field (e.g. title-only Description).
+      const issues = filterBlockingIssuesForCurrentValues(rawIssues, row, null);
       if (!issues.length) return row;
       conflictCountBySection[key] = (conflictCountBySection[key] || 0) + 1;
       const primaryKind = normalizeIntegrityBlockKind(issues[0]);
@@ -304,10 +317,35 @@ export function attachConflictAmbiguityToGate1Bundle(bundle, pack) {
 
   for (const block of gate.blocking) {
     const section = block.section || 'functionalRequirements';
+    // Priority-only / Description-satisfied-by-title must not inflate FR tab warn.
+    if (
+      normalizeIntegrityBlockKind(block) === 'data_integrity' &&
+      Array.isArray(block.missing) &&
+      block.missing.length &&
+      block.missing.every((label) => String(label) === 'Priority')
+    ) {
+      continue;
+    }
     const matchedSomewhere = Object.values(bySection).some((rows) =>
-      asArray(rows).some((row) => blockingMatchesRow(block, row))
+      asArray(rows).some((row) => {
+        if (!blockingMatchesRow(block, row)) return false;
+        return filterBlockingIssuesForCurrentValues([block], row, null).length > 0;
+      })
     );
     if (!matchedSomewhere) {
+      // Only count orphan blocks that are still unresolved without a row match.
+      const stillOpen = filterBlockingIssuesForCurrentValues([block], {}, null);
+      if (!stillOpen.length) continue;
+      if (
+        stillOpen.every(
+          (issue) =>
+            Array.isArray(issue.missing) &&
+            issue.missing.length > 0 &&
+            issue.missing.every((label) => String(label) === 'Priority')
+        )
+      ) {
+        continue;
+      }
       conflictCountBySection[section] = (conflictCountBySection[section] || 0) + 1;
     }
   }

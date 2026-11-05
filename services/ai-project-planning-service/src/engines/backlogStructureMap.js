@@ -121,12 +121,21 @@ function mapApprovedStructureToBacklog(structure) {
     const parentEpicId = parentRaw
       ? stripChunkIdPrefix(parentRaw) || parentRaw
       : null;
+    // Resolve epic via Feature.parentId when Story only cites parentFeatureId.
+    let resolvedEpicId =
+      parentEpicId && epicIds.has(parentEpicId) ? parentEpicId : null;
+    if (!resolvedEpicId && parentFeatureId) {
+      const feature = features.find((f) => f.id === parentFeatureId);
+      const viaFeature = feature?.parentId ? String(feature.parentId) : null;
+      if (viaFeature && epicIds.has(viaFeature)) resolvedEpicId = viaFeature;
+    }
+
     if (parentFeatureId) {
       parentId = parentFeatureId;
-    } else if (parentEpicId && epicIds.has(parentEpicId)) {
-      parentId = parentEpicId;
-    } else if (parentEpicId && !epicIds.has(parentEpicId)) {
-      // Orphan epic ref — prefer null parent (root / independent story).
+    } else if (resolvedEpicId) {
+      parentId = resolvedEpicId;
+    } else {
+      // Orphan epic/feature ref — prefer null parent (root / independent story).
       parentId = null;
     }
 
@@ -136,7 +145,7 @@ function mapApprovedStructureToBacklog(structure) {
       description: String(s.description || '').trim(),
       parentId,
       parentFeatureId: parentFeatureId || null,
-      parentEpicId: parentFeatureId ? null : parentEpicId && epicIds.has(parentEpicId) ? parentEpicId : null,
+      parentEpicId: resolvedEpicId || null,
       level: 'story',
       sourceFrIds,
       sourceUcIds: Array.isArray(s.sourceUcIds)

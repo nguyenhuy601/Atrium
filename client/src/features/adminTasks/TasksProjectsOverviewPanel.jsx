@@ -132,13 +132,16 @@ function ProjectActionLinks({ boardId, busy, onArchive, t }) {
 
 export default function TasksProjectsOverviewPanel({ orgId }) {
   const { t } = useAppStrings();
-  const { projects, loading, reload } = useOrgProjectsList(orgId, { view: '' });
+  const { projects, loading, isError, error, reload } = useOrgProjectsList(orgId, { view: '' });
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [busyId, setBusyId] = useState('');
   const [visibleCount, setVisibleCount] = useState(SCROLL_PAGE_SIZE);
   const scrollRootRef = useRef(null);
   const sentinelRef = useRef(null);
+  const loadErrorMessage = isError
+    ? resolveApiErrorMessage(error, { t, fallback: t('projectsLoadFail') })
+    : '';
 
   const filtered = useMemo(
     () => filterAdminProjects(projects, { q: query, status: statusFilter }),
@@ -233,6 +236,13 @@ export default function TasksProjectsOverviewPanel({ orgId }) {
         <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
           {loading ? (
             <p className="px-4 py-8 text-sm text-muted-foreground">{t('adminTasks.loading')}</p>
+          ) : loadErrorMessage ? (
+            <div className="space-y-3 px-4 py-8">
+              <p className="text-sm text-destructive">{loadErrorMessage}</p>
+              <button type="button" className={adminSecondaryBtnClass('text-xs')} onClick={() => reload()}>
+                {t('common.retry')}
+              </button>
+            </div>
           ) : (
             <>
               <div

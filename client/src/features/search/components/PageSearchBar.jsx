@@ -3,7 +3,7 @@ import { useAppStrings } from '../../../locales/appStrings';
 import { getSearchFieldClasses } from '../searchFieldTheme';
 
 /**
- * Ô tìm kiếm chuẩn VoiceHub — export alias AppSearchField.
+ * Ô tìm kiếm chuẩn Atrium — export alias AppSearchField.
  */
 export default function PageSearchBar({
   value,

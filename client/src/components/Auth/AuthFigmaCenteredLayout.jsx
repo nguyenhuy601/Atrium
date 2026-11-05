@@ -31,7 +31,7 @@ function AuthFigmaCenteredLayout({
           <div className={logoIconClass}>
             <Zap size={20} className="fill-primary-foreground text-primary-foreground" aria-hidden />
           </div>
-          <span className="font-display text-[1.25rem] font-bold text-foreground">VoiceHub</span>
+          <span className="font-display text-[1.25rem] font-bold text-foreground">Atrium</span>
         </div>
         {children}
       </div>

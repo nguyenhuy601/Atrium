@@ -1,6 +1,6 @@
 # @enterprise/shared
 
-Package platform dùng chung cho microservices Node trong VoiceHub. Tổng quan repo: [`../README.md`](../README.md).
+Package platform dùng chung cho microservices Node trong Atrium. Tổng quan repo: [`../README.md`](../README.md).
 
 **Không** chứa HTTP client gọi service khác (realtime, user profile, webhook, firebase) — các module đó nằm trong `services/<name>/src/clients/` hoặc `src/utils/` của service sở hữu.
 

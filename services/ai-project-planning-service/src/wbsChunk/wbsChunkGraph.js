@@ -31,6 +31,7 @@ const WbsChunkState = Annotation.Root({
   inputSnapshotId: lastWrite(),
   stories: lastWrite(),
   epics: lastWrite(),
+  features: lastWrite(),
   semantic: lastWrite(),
   roleAllowList: lastWrite(),
   localeInstruction: lastWrite(),
@@ -64,6 +65,7 @@ async function planChunks(state, config) {
         frUnits: slice,
         stories: state.stories || [],
         epics: state.epics || [],
+        features: state.features || [],
         semantic: state.semantic || null,
         roleAllowList: state.roleAllowList || null,
         localeInstruction: state.localeInstruction || '',
@@ -171,11 +173,30 @@ function routeAfterClassify(state) {
 async function reconcile(state, config) {
   const env = envOf(config);
   const units = await listWorkUnitsByRun(state.runId, env);
+  // Prefer graph state; fall back to durable chunk input (features often missing after Send/resume).
+  let features = Array.isArray(state.features) ? state.features : [];
+  let stories = Array.isArray(state.stories) ? state.stories : [];
+  let epics = Array.isArray(state.epics) ? state.epics : [];
+  if (!features.length || !stories.length || !epics.length) {
+    for (const unit of units || []) {
+      const inp = unit?.input || {};
+      if (!features.length && Array.isArray(inp.features) && inp.features.length) {
+        features = inp.features;
+      }
+      if (!stories.length && Array.isArray(inp.stories) && inp.stories.length) {
+        stories = inp.stories;
+      }
+      if (!epics.length && Array.isArray(inp.epics) && inp.epics.length) {
+        epics = inp.epics;
+      }
+    }
+  }
   const result = reconcileWbsChunks(units, {
     inputSnapshotId: state.inputSnapshotId,
     frUnits: state.frUnits,
-    stories: state.stories,
-    epics: state.epics,
+    stories,
+    epics,
+    features,
   });
   return { result };
 }

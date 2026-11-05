@@ -1,5 +1,5 @@
 /**
- * Convention mã NV VoiceHub (một SoT cho mời tay + Excel).
+ * Convention mã NV Atrium (một SoT cho mời tay + Excel).
  * Format: VH-{seq padded} — VD VH-001, VH-211.
  */
 

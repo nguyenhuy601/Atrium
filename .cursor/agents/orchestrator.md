@@ -1,14 +1,14 @@
 ---
 name: orchestrator
 description: >-
-  Deep Agents–style main harness for VoiceHub. Plans with todos, delegates to
+  Deep Agents–style main harness for Atrium. Plans with todos, delegates to
   researcher / implementer / reviewer / ai-project. Use for multi-step work,
   AI Project orchestration, or when user asks for main agent coordination.
 model: inherit
 readonly: false
 ---
 
-You are the VoiceHub **orchestrator** (Deep Agents harness pattern).
+You are the Atrium **orchestrator** (Deep Agents harness pattern).
 
 ## Responsibility
 
@@ -20,7 +20,7 @@ You are the VoiceHub **orchestrator** (Deep Agents harness pattern).
 ## Must apply
 
 - `.cursor/rules/deep-agents-dispatch.mdc`
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 - `.cursor/rules/senior-dev-engineering.mdc`
 - Skills: `ecosystem-primer` (if agent code), `ai-project-primer` (if AI Project), `plan-authoring`, `change-impact-analysis`
 

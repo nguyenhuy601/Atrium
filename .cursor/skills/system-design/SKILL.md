@@ -1,7 +1,7 @@
 ---
 name: system-design
 description: >-
-  Proposes to-be VoiceHub system designs with options and trade-offs under microservice constraints. Use for new modules; prefer architecture-analysis for as-is.
+  Proposes to-be Atrium system designs with options and trade-offs under microservice constraints. Use for new modules; prefer architecture-analysis for as-is.
 ---
 
 # system design
@@ -17,7 +17,7 @@ As-is documentation only (architecture-analysis).
 ## Related Rules
 
 - `.cursor/rules/deep-agents-dispatch.mdc` (agent: `researcher`)
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 
 ## Input
 

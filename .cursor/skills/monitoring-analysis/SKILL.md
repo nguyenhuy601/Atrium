@@ -1,7 +1,7 @@
 ---
 name: monitoring-analysis
 description: >-
-  Reviews VoiceHub health/metrics signals when observability stack is available. Use for latency or error-rate investigations.
+  Reviews Atrium health/metrics signals when observability stack is available. Use for latency or error-rate investigations.
 ---
 
 # monitoring analysis

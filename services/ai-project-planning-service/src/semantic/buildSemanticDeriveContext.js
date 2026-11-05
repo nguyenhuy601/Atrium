@@ -121,9 +121,9 @@ function takeBrqFull(pack, opts = {}, max = 30) {
  * Understanding delta only — capability/intent already on frFull; do not re-dump requirements/semanticItems.
  */
 function takeRequirementUnderstanding(understanding, max = 24) {
-  if (!g4 || typeof g4 !== 'object') return null;
+  if (!understanding || typeof understanding !== 'object') return null;
   const ambiguities = [];
-  for (const r of asArray(g4.requirements).slice(0, max)) {
+  for (const r of asArray(understanding.requirements).slice(0, max)) {
     const id = String(r.id || r.frId || r.logicalId || '').trim();
     for (const a of asArray(r.ambiguities || r.semanticInterpretation?.ambiguities).slice(0, 3)) {
       ambiguities.push({
@@ -135,15 +135,15 @@ function takeRequirementUnderstanding(understanding, max = 24) {
     }
     if (ambiguities.length >= max) break;
   }
-  for (const a of asArray(g4.ambiguities).slice(0, max - ambiguities.length)) {
+  for (const a of asArray(understanding.ambiguities).slice(0, max - ambiguities.length)) {
     ambiguities.push({
       frId: clip(a.frId || a.id || '', 40) || undefined,
       field: clip(a.field || '', 60) || undefined,
       issue: clip(a.issue || a.message || String(a), 160),
     });
   }
-  const ambiguityCount = ambiguities.length || asArray(g4.ambiguities).length;
-  const conflictCount = asArray(g4.conflicts).length;
+  const ambiguityCount = ambiguities.length || asArray(understanding.ambiguities).length;
+  const conflictCount = asArray(understanding.conflicts).length;
   if (!ambiguityCount && !conflictCount) return null;
   return {
     ambiguityCount,
@@ -153,7 +153,7 @@ function takeRequirementUnderstanding(understanding, max = 24) {
 }
 
 function takeEvidenceRefs(evidence, understanding, max = 24) {
-  return asArray(evidence || g4?.evidence)
+  return asArray(evidence || understanding?.evidence)
     .slice(0, max)
     .map((ev, i) => {
       const row = {
@@ -240,7 +240,7 @@ function buildSemanticDeriveContext(pack, opts = {}) {
     pack: packForCompile(pack, opts),
     snapshot: opts.snapshot,
     container: opts.container,
-    understanding: g4,
+    understanding,
     focusRefs: opts.focusRefs,
     budget: opts.budget,
     snapshotId: opts.snapshotId,
@@ -263,7 +263,7 @@ function buildSemanticDeriveContext(pack, opts = {}) {
     annotations: compiled.annotations,
     brqFull: takeBrqFull(pack, opts, 30),
     requirementUnderstanding: takeRequirementUnderstanding(understanding, 24),
-    evidenceRefs: takeEvidenceRefs(opts.evidence, g4, 24),
+    evidenceRefs: takeEvidenceRefs(opts.evidence, understanding, 24),
     retrievedContext: retrieved.items.length ? retrieved.items : undefined,
   };
 }

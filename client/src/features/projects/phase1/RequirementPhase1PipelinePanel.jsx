@@ -6,10 +6,7 @@ import { requirementAPI } from '../../../services/api/requirementAPI';
 import { useAppStrings } from '../../../locales/appStrings';
 import { resolveApiErrorMessage } from '../../../utils/resolveApiErrorMessage';
 import { buildPhase1ModulePath } from './nav/phase1NavConfig';
-import {
-  buildCollaborateRequirementsPath,
-  buildProjectsAiHitlPath,
-} from '../../../utils/suitePathUtils';
+import { buildProjectsAiHitlPath } from '../../../utils/suitePathUtils';
 import RequirementHitlJourney from '../../requirements/RequirementHitlJourney';
 import { waitForPhaseWhatJob } from './hooks/usePhaseWhatRunMonitor';
 import Phase1AiRequirementProgress from './Phase1AiRequirementProgress';
@@ -46,7 +43,7 @@ function textOr(t, key, vars) {
 
 /**
  * Phase 1 tool-first — 2 stages:
- * 1) prepare_only (input readiness)
+ * 1) requirement + snapshotPolicy=reuse_if_valid (BE preflight; prepare_only = Understanding CTA)
  * 2) tools_propose (tools → 1 projection → seed draft artifacts)
  * Gate 1: preview / submit / approve like manual pack flow.
  */
@@ -111,14 +108,23 @@ export default function RequirementPhase1PipelinePanel({
     const aiCtx = pack?.aiAnalysis?.analyses?.requirementAiContext;
     const knowledgeMeta = pack?.aiAnalysis?.analyses?.phase1Knowledge;
     const gateA = pack?.aiAnalysis?.analyses?.requirementTools?.gateA || aiCtx?.gateA;
-    const g4Ready =
+    const frItems = proposal?.generated?.functionalRequirements?.items;
+    const stage2Ready =
       phaseWhat?.status === 'ready' &&
-      (phaseWhat?.mode === 'g4' ||
-        phaseWhat?.mode === 'requirement' ||
-        Array.isArray(proposal?.generated?.functionalRequirements?.items));
-    if (g4Ready || (phaseWhat?.mode === 'tools_propose' && phaseWhat?.status === 'ready')) {
+      (phaseWhat?.mode === 'requirement' ||
+        phaseWhat?.mode === 'tools_propose' ||
+        Array.isArray(frItems));
+    if (stage2Ready) {
       const gate1Bundle = buildGate1ReviewBundle(pack, proposal);
       const reviewItems = gate1Bundle.items;
+      const frRequirementCount = Array.isArray(frItems)
+        ? frItems.length
+        : reviewItems.filter((r) => r.section === 'functionalRequirements').length;
+      const frRelationshipCount = Array.isArray(
+        proposal?.generated?.functionalRequirements?.relations
+      )
+        ? proposal.generated.functionalRequirements.relations.length
+        : 0;
       setStage2Meta((prev) => ({
         ...(prev || {}),
         done: true,
@@ -140,19 +146,10 @@ export default function RequirementPhase1PipelinePanel({
             pack?.aiAnalysis?.workbookDiagnostic?.intakeKind === 'customer_raw' ||
             pack?.aiAnalysis?.intakeKind === 'customer_raw'
         ),
-        g4RequirementCount: Array.isArray(
-          proposal?.generated?.functionalRequirements?.items
-        )
-          ? proposal.generated.functionalRequirements.items.length
-          : reviewItems.filter((r) => r.section === 'functionalRequirements').length ||
-            (Array.isArray(g4?.requirements) ? g4.requirements.length : 0),
-        g4RelationshipCount: Array.isArray(g4?.relationships)
-          ? g4.relationships.length
-          : Array.isArray(proposal?.generated?.functionalRequirements?.relations)
-            ? proposal.generated.functionalRequirements.relations.length
-            : 0,
-        llmCalls: Number(g4?.meta?.llmCalls) || prev?.llmCalls || 0,
-        partial: Boolean(g4?.meta?.partial),
+        frRequirementCount,
+        frRelationshipCount,
+        llmCalls: prev?.llmCalls || 0,
+        partial: Boolean(prev?.partial),
         status: String(pack?.status || ''),
         gateAPassed:
           gateA?.passed === true ||
@@ -178,14 +175,14 @@ export default function RequirementPhase1PipelinePanel({
           0,
         groundingPassCount: Number(phaseWhat.groundingPassCount) || prev?.groundingPassCount || 0,
         groundingFailCount: Number(phaseWhat.groundingFailCount) || prev?.groundingFailCount || 0,
-        contextPersisted: Boolean(aiCtx) || Boolean(g4) || Boolean(proposal),
+        contextPersisted: Boolean(aiCtx) || Boolean(proposal),
       }));
     } else if (phaseWhat?.status === 'pending') {
       setStage2Meta((prev) => ({
         ...(prev || {}),
         done: false,
         pending: true,
-        mode: phaseWhat?.mode || 'g4',
+        mode: phaseWhat?.mode || 'requirement',
         remoteRunId: phaseWhat?.remoteRunId || null,
       }));
     }
@@ -340,47 +337,36 @@ export default function RequirementPhase1PipelinePanel({
     setStage2Meta(null);
     setPipeline({ step: 1, substep: 'prepare' });
     try {
-      const prepRes = await requirementAPI.startPhaseAiPlanning(organizationId, packId, {
-        phase: 'what',
-        mode: 'prepare_only',
-      });
-      const prepared = unwrap(prepRes);
-      const missing = prepared?.readiness?.missing || [];
-      const prepForm = prepared?.readiness?.formValidation || prepared?.formValidation;
-      if (prepForm) setFormValidation(prepForm);
-      setStage1Meta({
-        intakeCorpusChars: Number(prepared?.intakeCorpusChars) || 0,
-        excerptsCount: Number(prepared?.excerptsCount) || 0,
-        skippedCount: Number(prepared?.skippedCount) || 0,
-        missing,
-        prefillApplied: Boolean(prepared?.readiness?.prefillApplied),
-        status: String(prepared?.status || ''),
-      });
-      if (prepared?.status) setPackStatus(String(prepared.status));
-      // RULE-FORM-01: only block on form INVALID — not content volume / requirementReadiness
-      if (prepForm && prepForm.ok === false) {
-        const msg = formatCustomerRawFormTooltip(prepForm, t);
-        setErrorMsg(msg);
-        toast.error(msg);
-        return;
-      }
-      const blocking = missing.filter((code) => code === 'no_analysis_snapshot');
-      if (blocking.length) {
-        const msg =
-          t('requirements.phase1InputBlocked', { codes: blocking.join(', ') }) ||
-          `Thiếu dữ liệu đầu vào: ${blocking.join(', ')}`;
-        setErrorMsg(msg);
-        toast.error(msg);
-        return;
-      }
-
+      // Fast Start: single requirement call — BE preflight prepares when MISSING/STALE.
       setBusyStage(2);
       const res = await requirementAPI.startPhaseAiPlanning(organizationId, packId, {
         phase: 'what',
-        mode: 'g4',
+        mode: 'requirement',
+        snapshotPolicy: 'reuse_if_valid',
         force: Boolean(stage2Meta?.done),
       });
       const data = unwrap(res);
+      if (data?.preparationState || data?.readiness) {
+        const readiness = data.readiness || {};
+        const missing = readiness.missing || [];
+        const prepForm = readiness.formValidation || data.formValidation;
+        if (prepForm) setFormValidation(prepForm);
+        setStage1Meta({
+          intakeCorpusChars: Number(data.intakeCorpusChars ?? readiness.intakeCorpusChars) || 0,
+          excerptsCount: Number(data.excerptsCount ?? readiness.excerptsCount) || 0,
+          skippedCount: Number(data.skippedCount ?? readiness.skippedCount) || 0,
+          missing,
+          prefillApplied: Boolean(readiness.prefillApplied),
+          status: String(data.status || readiness.packStatus || ''),
+        });
+        if (data?.status) setPackStatus(String(data.status));
+        if (prepForm && prepForm.ok === false) {
+          const msg = formatCustomerRawFormTooltip(prepForm, t);
+          setErrorMsg(msg);
+          toast.error(msg);
+          return;
+        }
+      }
       const acceptedRemote =
         res?.status === 202 ||
         (data?.accepted === true && data?.remote === true) ||
@@ -611,22 +597,6 @@ export default function RequirementPhase1PipelinePanel({
         >
           <ListChecks className="h-4 w-4" />
           {t('requirements.understandingEditArtifacts')}
-        </button>
-        <button
-          type="button"
-          disabled={!organizationId || !packId}
-          onClick={() =>
-            navigate(
-              buildCollaborateRequirementsPath(organizationId, {
-                packId,
-                projectId,
-              })
-            )
-          }
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted/50 disabled:opacity-40"
-        >
-          <Eye className="h-4 w-4" />
-          {t('requirements.phase1PreviewCta')}
         </button>
         {!gate1Done && stage2Meta?.done ? (
           <button

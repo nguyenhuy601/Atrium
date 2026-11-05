@@ -556,15 +556,17 @@ function acceptDependencyProposal({
       continue;
     }
     if (edge.requiredAt === 'INTEGRATION' && !isIntegrationGateMapped(edge, edge.from, known)) {
+      // Soft: keep FS schedulable as FULL when gate leaf missing — do not blank Schedule/UI.
       openQuestions.push({
-        code: 'DEP_WBS_REFINEMENT_REQUIRED',
+        code: 'DEP_INTEGRATION_DEMOTED',
         message: clip(
-          `Phụ thuộc tích hợp ${edge.from}←${edge.to} chưa ánh xạ tới gate/leaf hợp lệ — không ép FS full-task.`,
+          `Phụ thuộc tích hợp ${edge.from}←${edge.to} chưa có gate leaf — xếp lịch FS full-task (soft).`,
           240
         ),
         relatedTaskIds: [edge.from, edge.to],
       });
-      continue;
+      edge.requiredAt = 'FULL';
+      edge.demotedFromIntegration = true;
     }
     fsCandidates.push(edge);
   }

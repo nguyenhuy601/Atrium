@@ -75,7 +75,7 @@ function buildRejectedError(errorLike, fallbackKey = 'errors.generic') {
    /api/friends/* → organization-service (derived roster)
 ======================================== */
 
-// Same-origin /api qua Nginx (https://voicehub.local) hoặc Vite proxy — không hardcode :3000.
+// Same-origin /api qua Nginx (https://atrium.dev) hoặc Vite proxy — không hardcode :3000.
 const API_URL = resolveApiBaseUrl();
 
 /* ========================================

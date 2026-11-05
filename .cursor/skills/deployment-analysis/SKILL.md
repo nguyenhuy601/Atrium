@@ -1,7 +1,7 @@
 ---
 name: deployment-analysis
 description: >-
-  Guides VoiceHub deploy/update: Swarm for app microservices and infra AI (ollama/minio/qdrant/meili); build only the changed service; avoid full-stack rebuilds and VHDX bloat.
+  Guides Atrium deploy/update: Swarm for app microservices and infra AI (ollama/minio/qdrant/meili); build only the changed service; avoid full-stack rebuilds and VHDX bloat.
 ---
 
 # deployment analysis

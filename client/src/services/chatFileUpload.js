@@ -59,7 +59,7 @@ export function createUploadTimeoutError() {
 
 /**
  * Proxy 5xx thường là MinIO down — vẫn thử signed URL (Firebase) trước khi fail.
- * CORS signed URL có thể fail trên voicehub.local; khi đó ném lỗi gốc (messageUser).
+ * CORS signed URL có thể fail trên atrium.dev; khi đó ném lỗi gốc (messageUser).
  */
 async function uploadWithProxyThenSignedFallback(
   api,
@@ -136,7 +136,7 @@ function putFileWithProgress(url, file, contentType, onProgress, signal) {
 }
 
 /**
- * Upload qua proxy same-origin — tránh PUT trực tiếp lên GCS/Firebase (403 trên voicehub.local).
+ * Upload qua proxy same-origin — tránh PUT trực tiếp lên GCS/Firebase (403 trên atrium.dev).
  * @returns {Promise<{ storagePath: string, storageBackend?: string }>}
  */
 async function uploadViaStorageProxy(api, file, resolvedMime, retentionContext, onProgress, signal) {

@@ -1,5 +1,5 @@
 /**
- * Lõi tìm kiếm VoiceHub — kiểu trạng thái và token bộ lọc (Discord-style).
+ * Lõi tìm kiếm Atrium — kiểu trạng thái và token bộ lọc (Discord-style).
  * Prefix UI tiếng Việt map sang key nội bộ tiếng Anh cho API.
  */
 

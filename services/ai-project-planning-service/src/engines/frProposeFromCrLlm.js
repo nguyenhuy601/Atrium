@@ -1,8 +1,9 @@
 /**
- * Phase WHAT — LLM proposes analyzed FR-* from Customer Raw CR intake + Epic map.
- * RULE-FR-01: FR id is never CR-*.
- * RULE-FR-02: each FR cites ≥1 CR in the intake whitelist.
- * RULE-FR-03: flag off / LLM fail → empty, no 1-1 CR dump.
+ * Phase WHAT — LLM proposes analyzed FR-* from the requirement sheet + Epic map.
+ * Intake id = sheet column Requirement ID (requirement_identity), any format.
+ * RULE-FR-01: FR id is FR-* and is never a sheet Requirement ID.
+ * RULE-FR-02: each FR cites ≥1 Requirement ID from the intake whitelist.
+ * RULE-FR-03: flag off / LLM fail / empty sheet → empty, no file-row dump.
  * RULE-E6: FR content first; epic = grouping label only — never rewrite FR to fit epic.
  * Shape: fr-from-cr-v2 (epics[] + parentEpicId required).
  */
@@ -12,10 +13,11 @@ const {
   FR_FROM_CR_SHAPE_VERSION,
   isWhatFrFromCrFlagOn,
   resolveFrFromCrChunk,
+  resolveFrFromCrConcurrency,
   resolveFrFromCrMaxCr,
   resolveFrFromCrNumCtx,
   resolveFrFromCrTimeoutMs,
-  resolveFrFromCrNumPredict,
+  resolveFrFromCrNumPredictForChunk,
 } = require('../contracts/frFromCrContract');
 const {
   reconcileEpicsAcrossChunks,
@@ -36,13 +38,28 @@ function normalizeRef(raw) {
   return String(raw || '').trim();
 }
 
-/** Customer Raw CR-* — intake only, never a Gate1 FR id. */
+/** Legacy CR-* helper for callers that still drop customer-raw ids. Intake itself is not format-locked. */
 function isCustomerRequirementId(raw) {
   const s = String(raw || '').trim();
   if (!s) return false;
   if (/^(CR)[-_.\s]?\d+/i.test(s)) return true;
   const compact = s.toLowerCase().replace(/[^a-z0-9]+/g, '');
   return /^cr\d+$/i.test(compact);
+}
+
+/** Requirement ID column on sheet 03_Requirement — stored as requirement_identity. */
+function sheetRequirementId(row) {
+  const fields = row?.fields && typeof row.fields === 'object' ? row.fields : null;
+  return normalizeRef(
+    row?.requirement_identity ||
+      row?.requirementId ||
+      fields?.['Requirement ID'] ||
+      fields?.['requirement id'] ||
+      fields?.requirement_identity ||
+      row?.externalId ||
+      row?.id ||
+      row?.logicalId
+  );
 }
 
 function isProposedFrId(raw) {
@@ -54,9 +71,7 @@ function isEpicId(raw) {
 }
 
 function rowId(row) {
-  return normalizeRef(
-    row?.externalId || row?.logicalId || row?.id || row?.requirement_identity || row?.frId
-  );
+  return sheetRequirementId(row);
 }
 
 function shortTitleFromBehavior(text, max = 120) {
@@ -72,9 +87,9 @@ function shortTitleFromBehavior(text, max = 120) {
   return `${(sp > 40 ? slice.slice(0, sp) : slice).trim()}…`;
 }
 
-function pushCr(out, seen, row, index) {
-  const id = rowId(row) || `CR-${index + 1}`;
-  if (!isCustomerRequirementId(id) || seen.has(id)) return;
+function pushCr(out, seen, row) {
+  const id = rowId(row);
+  if (!id || seen.has(id)) return;
   seen.add(id);
   const behavior = String(row?.functional_behavior || '').trim();
   // Prefer explicit name/title; else short headline from behavior (not full copy into both fields).
@@ -105,7 +120,34 @@ function pushCr(out, seen, row, index) {
 }
 
 /**
- * CR whitelist for prompt + accept.
+ * Requirement-sheet rows. First non-empty source wins so an overlaid FR-* list
+ * does not replace Requirement ID values still on canonicalRaw.
+ * @param {object} pack
+ * @param {object|null} snapshot
+ */
+function listSheetRequirementRows(pack = {}, snapshot = null) {
+  const canonical = snapshot?.canonicalRaw || pack?.aiAnalysis?.canonicalRaw;
+  const behaviors = canonical?.content?.functionalBehaviors;
+  if (Array.isArray(behaviors) && behaviors.length) return behaviors;
+  const records = canonical?.records?.requirements;
+  if (Array.isArray(records) && records.length) return records;
+
+  const sheetLists = [
+    pack?.aiAnalysis?.customerRawRows?.requirements,
+    pack?.aiAnalysis?.customerRawRows?.functionalRequirements,
+    pack?.functionalRequirements,
+    pack?.frList,
+    snapshot?.functionalRequirements,
+    snapshot?.projected?.srs?.functionalRequirements,
+  ];
+  for (const list of sheetLists) {
+    if (Array.isArray(list) && list.length) return list;
+  }
+  return [];
+}
+
+/**
+ * Requirement ID whitelist for prompt + accept. Any non-empty sheet id.
  * @param {object} pack
  * @param {object} [snapshot]
  * @param {NodeJS.ProcessEnv} [env]
@@ -114,34 +156,10 @@ function listCustomerRawIntake(pack = {}, snapshot = null, env = process.env) {
   const max = resolveFrFromCrMaxCr(env);
   const out = [];
   const seen = new Set();
-
-  const lists = [
-    pack?.aiAnalysis?.customerRawRows?.requirements,
-    pack?.aiAnalysis?.customerRawRows?.functionalRequirements,
-    pack?.functionalRequirements,
-    pack?.frList,
-    snapshot?.functionalRequirements,
-    snapshot?.projected?.srs?.functionalRequirements,
-  ];
-  for (const list of lists) {
-    if (!Array.isArray(list)) continue;
-    for (let i = 0; i < list.length && out.length < max; i += 1) {
-      pushCr(out, seen, list[i], i);
-    }
+  const rows = listSheetRequirementRows(pack, snapshot);
+  for (let i = 0; i < rows.length && out.length < max; i += 1) {
+    pushCr(out, seen, rows[i]);
   }
-
-  if (!out.length && (snapshot?.canonicalRaw || pack?.aiAnalysis?.canonicalRaw)) {
-    try {
-      const { resolveFrListForUnderstanding } = require('../semantic/sectionInputContract');
-      const rows = resolveFrListForUnderstanding(snapshot || {}, pack);
-      for (let i = 0; i < rows.length && out.length < max; i += 1) {
-        pushCr(out, seen, rows[i], i);
-      }
-    } catch {
-      /* intake stays empty */
-    }
-  }
-
   return out;
 }
 
@@ -157,13 +175,13 @@ function buildFrFromCrPrompt({ crRows = [], localeInstruction = '' } = {}) {
   const { HIERARCHY_PROMPT_RULES } = require('../semantic/hierarchyPromptRules');
   return [
     localeInstruction || 'Respond in the same language as CR titles.',
-    'Propose FR+Epic JSON only. No prose. No CR ids as FR id.',
+    'Propose FR+Epic JSON only. No prose. Never use a Requirement ID as the FR id.',
     'Shape:{"epics":[{"id","name"}],"features":[{"id","name","parentEpicId"}]?,"nodes":[{"id","name","description?","ac","priority","sourceCrIds","parentEpicId","parentFeatureId?"}]}',
     'RULE-E6 (dual-duty): (1) Prioritize correct CR→FR split + AC; keep FR name/description faithful to CR behavior.',
     '(2) Epic groups different capabilities under one business goal — do NOT rewrite FR name/AC to fit an epic; do NOT drop an FR because grouping is hard.',
     HIERARCHY_PROMPT_RULES,
-    'Rules: id = FR-n unique within this chunk; sourceCrIds exact CR ids from CR_INTAKE and non-empty;',
-    'split independent behaviors (do NOT copy 1 CR = 1 FR when one CR states several behaviors); never copy CR id as FR id; no NFR-only items;',
+    'Rules: id = FR-n unique within this chunk; sourceCrIds = exact Requirement ID values from CR_INTAKE (keep the sheet format, including plain numbers) and non-empty;',
+    'split independent behaviors (do NOT copy 1 Requirement ID = 1 FR when one row states several behaviors); never copy a Requirement ID as FR id; no NFR-only items;',
     'name = short title; description = fuller behavior (do not set description identical to name); each node must be Story-granular (verifiable AC).',
     'Epic: use stable epicId when possible (e.g. EPIC-IOT), not only EPIC-1 sequential; parentEpicId must reference epics[].id or null for intentional root Story.',
     'Optional features[] when several Story-FRs share one capability; parentFeatureId references features[].id.',
@@ -230,7 +248,7 @@ function acceptFrFromCr(raw, crWhitelist = []) {
     if (!row || typeof row !== 'object') return { ok: false, errors: [`row_${i}_invalid`] };
     const id = normalizeRef(row.id || row.logicalId || row.frId);
     if (!id) return { ok: false, errors: [`row_${i}_missing_id`] };
-    if (isCustomerRequirementId(id) || !isProposedFrId(id)) {
+    if (whitelist.has(id) || !isProposedFrId(id)) {
       return { ok: false, errors: [`invalid_fr_id_${id}`, 'expected_FR'] };
     }
     if (seen.has(id)) return { ok: false, errors: [`dup_id_${id}`] };
@@ -335,7 +353,7 @@ function mergeProposedFrRequirements(proposedItems = [], g4Requirements = []) {
   return (Array.isArray(proposedItems) ? proposedItems : [])
     .map((src) => {
       const id = String(src?.id || src?.logicalId || '').trim();
-      if (!id || isCustomerRequirementId(id)) return null;
+      if (!id || !isProposedFrId(id)) return null;
       const g4 = g4ById.get(id) || {};
       const sourceCrIds = Array.isArray(src?.sourceCrIds)
         ? src.sourceCrIds.map((x) => String(x || '').trim()).filter(Boolean)
@@ -408,6 +426,7 @@ async function proposeFrFromCrWithLlm(opts = {}) {
   }
 
   const chunkSize = resolveFrFromCrChunk(env);
+  const concurrency = resolveFrFromCrConcurrency(env);
   const chunks = [];
   for (let i = 0; i < crRows.length; i += chunkSize) {
     chunks.push(crRows.slice(i, i + chunkSize));
@@ -427,45 +446,76 @@ async function proposeFrFromCrWithLlm(opts = {}) {
   }
 
   const gen = typeof opts.generateJsonFn === 'function' ? opts.generateJsonFn : generateJson;
-  /** @type {{ epics: object[], items: object[] }[]} */
-  const chunkResults = [];
   let llmCalls = 0;
   const t0 = Date.now();
+  const timeoutMs = resolveFrFromCrTimeoutMs(env);
+  console.info(
+    `[fr-from-cr] start crIn=${crRows.length} chunks=${chunks.length} chunkSize=${chunkSize} concurrency=${concurrency} timeoutMs=${timeoutMs}`
+  );
 
-  for (let ci = 0; ci < chunks.length; ci += 1) {
+  /**
+   * @param {number} ci
+   * @returns {Promise<{ ok: true, value: { epics: object[], items: object[] } } | { ok: false, fail: object }>}
+   */
+  async function runChunk(ci) {
     const prompt = buildFrFromCrPrompt({ crRows: chunks[ci], localeInstruction });
+    const numPredict = resolveFrFromCrNumPredictForChunk(chunks[ci].length, env);
+    const tChunk = Date.now();
     let llmResult;
     try {
       llmResult = await gen({
         prompt,
-        numPredict: resolveFrFromCrNumPredict(env),
+        numPredict,
         numCtx: resolveFrFromCrNumCtx(env),
-        timeoutMs: resolveFrFromCrTimeoutMs(env),
+        timeoutMs,
         temperature: 0.1,
+        // A 120s timeout must not be repeated 3× on the same model.
+        retryOnTimeout: false,
         env,
       });
     } catch (err) {
-      return failMeta(String(err?.message || err || 'llm_throw'), {
-        reasonCodes: ['llm_throw', `chunk_${ci}`],
-        llmCalls: llmCalls + 1,
-        llmMs: Date.now() - t0,
-      });
+      llmCalls += 1;
+      return {
+        ok: false,
+        fail: failMeta(String(err?.message || err || 'llm_throw'), {
+          reasonCodes: ['llm_throw', `chunk_${ci}`],
+          llmCalls,
+          llmMs: Date.now() - t0,
+          chunks: chunks.length,
+        }),
+      };
     }
     llmCalls += 1;
+    const chunkMs = Date.now() - tChunk;
     if (!llmResult?.ok || llmResult.data == null) {
-      return failMeta(llmResult?.error || 'llm_failed', {
-        reasonCodes: [llmResult?.error || 'llm_failed', `chunk_${ci}`],
-        llmCalls,
-        llmMs: Date.now() - t0,
-      });
+      console.warn(
+        `[fr-from-cr] chunk=${ci + 1}/${chunks.length} cr=${chunks[ci].length} numPredict=${numPredict} ms=${chunkMs} ok=false reason=${llmResult?.error || 'llm_failed'}`
+      );
+      return {
+        ok: false,
+        fail: failMeta(llmResult?.error || 'llm_failed', {
+          reasonCodes: [llmResult?.error || 'llm_failed', `chunk_${ci}`],
+          llmCalls,
+          llmMs: Date.now() - t0,
+          chunks: chunks.length,
+          numPredict,
+        }),
+      };
     }
     const accepted = acceptFrFromCr(llmResult.data, chunks[ci]);
     if (!accepted.ok) {
-      return failMeta((accepted.errors || ['contract_fail']).join(','), {
-        reasonCodes: [...(accepted.errors || ['contract_fail']), `chunk_${ci}`],
-        llmCalls,
-        llmMs: Date.now() - t0,
-      });
+      console.warn(
+        `[fr-from-cr] chunk=${ci + 1}/${chunks.length} cr=${chunks[ci].length} ms=${chunkMs} ok=false reason=contract`
+      );
+      return {
+        ok: false,
+        fail: failMeta((accepted.errors || ['contract_fail']).join(','), {
+          reasonCodes: [...(accepted.errors || ['contract_fail']), `chunk_${ci}`],
+          llmCalls,
+          llmMs: Date.now() - t0,
+          chunks: chunks.length,
+        }),
+      };
     }
     const prefixedItems = accepted.items.map((item) => ({
       ...item,
@@ -489,8 +539,39 @@ async function proposeFrFromCrWithLlm(opts = {}) {
         item.parentEpicId = epicIdLocalRemap[item.parentEpicId];
       }
     }
-    chunkResults.push({ epics: prefixedEpics, items: prefixedItems });
+    console.info(
+      `[fr-from-cr] chunk=${ci + 1}/${chunks.length} cr=${chunks[ci].length} fr=${prefixedItems.length} numPredict=${numPredict} ms=${chunkMs} ok=true`
+    );
+    return { ok: true, value: { epics: prefixedEpics, items: prefixedItems } };
   }
+
+  const laneCount = Math.max(1, Math.min(concurrency, chunks.length));
+  /** @type {Array<{ ok: true, value: object } | { ok: false, fail: object } | undefined>} */
+  const settled = new Array(chunks.length);
+  let cursor = 0;
+  async function lane() {
+    while (true) {
+      const ci = cursor;
+      cursor += 1;
+      if (ci >= chunks.length) return;
+      if (settled.some((row) => row && row.ok === false)) return;
+      settled[ci] = await runChunk(ci);
+      if (settled[ci] && settled[ci].ok === false) return;
+    }
+  }
+  await Promise.all(Array.from({ length: laneCount }, () => lane()));
+
+  const failed = settled.find((row) => row && row.ok === false);
+  if (failed) return failed.fail;
+  if (settled.some((row) => !row || row.ok !== true)) {
+    return failMeta('llm_failed', {
+      reasonCodes: ['llm_failed', 'chunk_incomplete'],
+      llmCalls,
+      llmMs: Date.now() - t0,
+      chunks: chunks.length,
+    });
+  }
+  const chunkResults = settled.map((row) => row.value);
 
   const reconciled = reconcileEpicsAcrossChunks(chunkResults);
   const items = renumberProposedFr(reconciled.items);

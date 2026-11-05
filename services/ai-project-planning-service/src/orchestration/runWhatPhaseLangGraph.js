@@ -99,6 +99,7 @@ async function runWhatPhaseLangGraph({
       contextPackage: null,
       history: [],
       toolResults: [],
+      toolExecutions: [],
       messages: humanFeedback
         ? [{ role: 'user', content: JSON.stringify(humanFeedback).slice(0, 2000) }]
         : [],
@@ -130,29 +131,71 @@ async function runWhatPhaseLangGraph({
   });
 
   const durationMs = Math.max(0, Date.now() - startedAt);
-  const timing = logWhatTiming(finalState.whatTiming || whatTiming, { totalMs: durationMs });
+  const timing = logWhatTiming(finalState.whatTiming || whatTiming, {
+    totalMs: durationMs,
+    state: finalState,
+  });
+  if (finalState?.stopReason === 'GRAPH_RECURSION_LIMIT') {
+    finalState.stopReason = 'GRAPH_RECURSION_LIMIT';
+  }
+
+  const interrupted = Boolean(finalState.interrupted);
+  const srsProposal =
+    finalState.srsProposal ||
+    finalState.container?.analyses?.srsProposal ||
+    null;
+  let outContainer =
+    finalState.container && typeof finalState.container === 'object'
+      ? { ...finalState.container }
+      : { analyses: {}, phaseRuns: {} };
+  // Nested interrupt leaves parent channels empty — rehydrate analyses for project callback.
+  if (srsProposal) {
+    outContainer.analyses = { ...(outContainer.analyses || {}), srsProposal };
+  }
+  const stopReason = interrupted
+    ? finalState.stopReason || 'WHAT_INTERRUPTED'
+    : finalState.stopReason || STOP_REASONS.COMPLETE;
+  if (interrupted) {
+    outContainer.phaseRuns = {
+      ...(outContainer.phaseRuns || {}),
+      phase_what: {
+        ...(outContainer.phaseRuns?.phase_what || {}),
+        status: 'ready',
+        mode: 'requirement',
+        remoteRunId: runId || null,
+        snapshotId: boundSnapshotId || null,
+        hitl: 'gate1',
+        stopReason,
+        partial: true,
+        readyForGate1: Boolean(srsProposal?.completeness?.readyForGate1),
+        durationMs,
+      },
+    };
+  }
 
   return {
     phase: 'what',
-    container: finalState.container,
+    container: outContainer,
     history: Array.isArray(finalState.history) ? finalState.history : [],
     toolResults: Array.isArray(finalState.toolResults) ? finalState.toolResults : [],
     contextPackage: finalState.contextPackage || null,
-    frUnderstanding: finalState.frUnderstanding,
+    frUnderstanding: finalState.frUnderstanding || null,
     proposalFragment: finalState.proposalFragment || null,
-    srsProposal: finalState.srsProposal || null,
+    srsProposal,
     evaluate: finalState.evaluate,
     feasibilitySignal: finalState.feasibilitySignal,
     feasibility: finalState.feasibility,
     goal: finalState.goal || initialFields.goal,
     constraints: finalState.constraints || initialFields.constraints,
     budget: finalState.budget || budget,
-    stopReason: finalState.stopReason || STOP_REASONS.COMPLETE,
-    hitl: 'gate1',
+    stopReason,
+    hitl: finalState.hitlInterrupt || finalState.hitl || 'gate1',
+    // Deliver FR via completed callback (soft-path parity). LG thread stays interruptible in Redis.
     paused: false,
+    interrupted,
     gate: null,
     gatePreview: null,
-    partial: null,
+    partial: interrupted ? { reason: stopReason } : null,
     durationMs,
     whatTiming: timing,
     stub: false,

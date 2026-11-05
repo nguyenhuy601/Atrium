@@ -1,7 +1,7 @@
 ---
 name: integration-design
 description: >-
-  Designs VoiceHub S2S, events, gateway, and socket integrations without putting business HTTP clients in shared/. Use when adding cross-service integration.
+  Designs Atrium S2S, events, gateway, and socket integrations without putting business HTTP clients in shared/. Use when adding cross-service integration.
 ---
 
 # integration design
@@ -16,7 +16,7 @@ In-process single-service logic.
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 - `.cursor/rules/deep-agents-dispatch.mdc` (agent: `researcher`)
 
 ## Input

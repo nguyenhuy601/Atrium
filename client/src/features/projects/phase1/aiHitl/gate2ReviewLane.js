@@ -1,8 +1,13 @@
 /**
- * Gate 2 — parallel domain review, PM consolidation, PO final (FE mirror).
+ * Gate 2 — parallel domain review, synthesis consolidation, final approve (FE mirror).
  */
 
 import { isBlockingProposal } from './gate2ReviewOwnership.js';
+import {
+  isHowInFlightForGate2,
+  isHowReadyForGate2,
+  viewerHoldsGate2Role,
+} from './gate2RoleMatch.js';
 
 export const GATE2_REVIEW_LANE = Object.freeze({
   PARALLEL: 'parallel',
@@ -36,18 +41,13 @@ export function resolveGate2ReviewLane(pack) {
   if (raw === 'consolidation') return GATE2_REVIEW_LANE.CONSOLIDATION;
   if (raw === 'reconfirm') return GATE2_REVIEW_LANE.RECONFIRM;
   if (raw === 'parallel' || raw === 'pm' || raw === 'tech') return GATE2_REVIEW_LANE.PARALLEL;
-  if (packStatus === 'approved' || howStatus === 'ready') return GATE2_REVIEW_LANE.PARALLEL;
+  if (packStatus === 'approved' || isHowReadyForGate2(howStatus)) return GATE2_REVIEW_LANE.PARALLEL;
   return GATE2_REVIEW_LANE.PARALLEL;
 }
 
 /**
  * @returns {'showParallel'|'showConsolidation'|'showChangeConfirm'|'showPoPanel'|'waitingParallel'|'waitingConsolidation'|'waitingPo'|'done'|'howPending'}
  */
-function holdsRole(viewerRoleKeys, roleKey) {
-  const key = String(roleKey || '').trim().toLowerCase();
-  return Boolean(key) && (viewerRoleKeys || []).includes(key);
-}
-
 function policyReviewerKeys(reviewPlan) {
   if (!reviewPlan) return [];
   if (reviewPlan.mode === 'parallel') return reviewPlan.parallelRoleKeys || [];
@@ -71,21 +71,22 @@ export function resolveGate2ReviewView({
   viewerRoleKeys = [],
 }) {
   const how = String(howStatus || '').trim().toLowerCase();
-  if (how === 'pending' || how === 'running' || how === 'queued') return 'howPending';
+  if (isHowInFlightForGate2(how)) return 'howPending';
 
   const effective = String(lane || '').trim().toLowerCase();
   if (effective === GATE2_REVIEW_LANE.DONE || how === 'confirmed') return 'done';
-  if (how && how !== 'ready' && how !== 'confirmed') return 'howPending';
-  if (!how || how === 'empty') return 'howPending';
+  if (!isHowReadyForGate2(how)) return 'howPending';
 
   const actor = String(userId || '').trim();
   const list = Array.isArray(proposals) ? proposals : [];
+  const roles = viewerRoleKeys || [];
 
   if (reviewPlan?.finalRoleKey) {
-    const roles = (viewerRoleKeys || []).map((key) => String(key || '').trim().toLowerCase());
     if (effective === GATE2_REVIEW_LANE.PARALLEL || effective === 'pm' || effective === 'tech') {
       const open = policyReviewerKeys(reviewPlan).some(
-        (key) => roles.includes(key) && trackStatus(tracks, key, { techRequired: true }) === 'pending'
+        (key) =>
+          viewerHoldsGate2Role(roles, key) &&
+          trackStatus(tracks, key, { techRequired: true }) === 'pending'
       );
       return open ? 'showParallel' : 'waitingParallel';
     }
@@ -93,11 +94,11 @@ export function resolveGate2ReviewView({
       effective === GATE2_REVIEW_LANE.CONSOLIDATION ||
       effective === GATE2_REVIEW_LANE.RECONFIRM
     ) {
-      if (holdsRole(roles, reviewPlan.synthesisRoleKey)) return 'showConsolidation';
+      if (viewerHoldsGate2Role(roles, reviewPlan.synthesisRoleKey)) return 'showConsolidation';
       return 'waitingConsolidation';
     }
     if (effective === GATE2_REVIEW_LANE.PO_FINAL || effective === 'po') {
-      if (holdsRole(roles, reviewPlan.finalRoleKey)) return 'showPoPanel';
+      if (viewerHoldsGate2Role(roles, reviewPlan.finalRoleKey)) return 'showPoPanel';
       return 'waitingPo';
     }
     return 'waitingParallel';
@@ -146,11 +147,11 @@ export function openParallelTracks({
   viewerRoleKeys = [],
 }) {
   if (reviewPlan?.finalRoleKey) {
-    const roles = new Set(
-      (viewerRoleKeys || []).map((key) => String(key || '').trim().toLowerCase())
-    );
+    const roles = viewerRoleKeys || [];
     return policyReviewerKeys(reviewPlan).filter(
-      (key) => roles.has(key) && trackStatus(tracks, key, { techRequired: true }) === 'pending'
+      (key) =>
+        viewerHoldsGate2Role(roles, key) &&
+        trackStatus(tracks, key, { techRequired: true }) === 'pending'
     );
   }
   const out = [];

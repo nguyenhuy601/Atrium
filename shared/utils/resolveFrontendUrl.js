@@ -1,6 +1,6 @@
 /**
  * URL frontend cho email / link mời — ưu tiên Origin/Referer từ browser,
- * sau đó X-Forwarded-* (Nginx https://voicehub.local), cuối cùng FRONTEND_URL.
+ * sau đó X-Forwarded-* (Nginx https://atrium.dev), cuối cùng FRONTEND_URL.
  */
 function resolveFrontendUrl(req, fallbackEnvKey = 'FRONTEND_URL') {
   const origin = req?.headers?.origin;
@@ -33,7 +33,7 @@ function resolveFrontendUrl(req, fallbackEnvKey = 'FRONTEND_URL') {
     .split(',')[0]
     .trim();
   if (xfHost) {
-    const proto = xfProto || (xfHost.includes('voicehub.local') ? 'https' : 'http');
+    const proto = xfProto || (xfHost.includes('atrium.dev') ? 'https' : 'http');
     return `${proto}://${xfHost}`.replace(/\/+$/, '');
   }
 

@@ -1,6 +1,6 @@
 /**
- * Gate2 / HOW Monitor — drill-down chi tiết Test Case (steps, preconditions, data).
- * Pattern: Gate2SprintScopePanel (modal overlay). Decision actions sống trên bảng HITL.
+ * Gate2 / HOW Monitor — drill-down Test Case (steps, preconditions, data).
+ * Read-only by default; when editable (decision=edit), patches editedPayload via onChange.
  */
 
 import { X } from 'lucide-react';
@@ -39,13 +39,65 @@ function executionLabel(row, t) {
   return labelOf(t, 'requirements.qualityReviewNotRun', 'Chưa chạy');
 }
 
-export default function Gate2TcDetailPanel({ row = null, onClose, t }) {
+function asStringList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+}
+
+function asSteps(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((step, index) => ({
+    stepNo: step?.stepNo || index + 1,
+    action: String(step?.action || ''),
+    expectedResult: String(step?.expectedResult || ''),
+  }));
+}
+
+function asTestData(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => ({
+    field: String(item?.field || ''),
+    value: String(item?.value || ''),
+  }));
+}
+
+const FIELD_CLASS =
+  'mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring';
+
+/**
+ * @param {object} props
+ * @param {object|null} props.row — display row (already merged with editedPayload when editing)
+ * @param {boolean} [props.editable]
+ * @param {(patch: object) => void} [props.onChange]
+ * @param {() => void} [props.onBeginEdit] — set decision=edit + seed when opening from read-only
+ * @param {() => void} props.onClose
+ * @param {function} props.t
+ */
+export default function Gate2TcDetailPanel({
+  row = null,
+  editable = false,
+  onChange = null,
+  onBeginEdit = null,
+  onClose,
+  t,
+}) {
   if (!row) return null;
 
   const missing = labelOf(t, 'requirements.qualityReviewMissing', 'Chưa có');
   const meta = [row.testLevel || row.level, row.testType, row.scenarioType, row.sourceUcKey]
     .filter(Boolean)
     .join(' · ');
+
+  const objective = String(row.objective || '');
+  const preconditions = asStringList(row.preconditions);
+  const testData = asTestData(row.testData);
+  const steps = asSteps(row.steps);
+  const canPatch = editable && typeof onChange === 'function';
+
+  const patch = (partial) => {
+    if (!canPatch) return;
+    onChange(partial);
+  };
 
   return (
     <div
@@ -66,7 +118,15 @@ export default function Gate2TcDetailPanel({ row = null, onClose, t }) {
               {row.title || row.id || '—'}
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {[meta, executionLabel(row, t)].filter(Boolean).join(' · ')}
+              {[
+                meta,
+                executionLabel(row, t),
+                editable
+                  ? labelOf(t, 'requirements.gate2TcDetailEditing', 'Đang sửa')
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </p>
           </div>
           <button
@@ -80,21 +140,97 @@ export default function Gate2TcDetailPanel({ row = null, onClose, t }) {
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 text-xs">
-          {row.objective ? <p className="text-sm text-foreground">{row.objective}</p> : null}
+          {canPatch ? (
+            <label className="block">
+              <span className="font-medium text-foreground">
+                {labelOf(t, 'requirements.qualityReviewObjective', 'Mục tiêu')}
+              </span>
+              <textarea
+                className={FIELD_CLASS}
+                rows={2}
+                value={objective}
+                onChange={(e) => patch({ objective: e.target.value })}
+              />
+            </label>
+          ) : objective ? (
+            <p className="text-sm text-foreground">{objective}</p>
+          ) : null}
 
-          <DetailList
-            title={labelOf(t, 'requirements.qualityReviewPreconditions', 'Điều kiện tiền đề')}
-            items={row.preconditions}
-            empty={missing}
-          />
+          {canPatch ? (
+            <label className="block">
+              <span className="font-medium text-foreground">
+                {labelOf(t, 'requirements.qualityReviewPreconditions', 'Điều kiện tiền đề')}
+              </span>
+              <textarea
+                className={FIELD_CLASS}
+                rows={3}
+                value={preconditions.join('\n')}
+                placeholder={labelOf(
+                  t,
+                  'requirements.gate2TcDetailListHint',
+                  'Mỗi dòng một mục'
+                )}
+                onChange={(e) =>
+                  patch({
+                    preconditions: e.target.value
+                      .split('\n')
+                      .map((line) => line.trim())
+                      .filter(Boolean),
+                  })
+                }
+              />
+            </label>
+          ) : (
+            <DetailList
+              title={labelOf(t, 'requirements.qualityReviewPreconditions', 'Điều kiện tiền đề')}
+              items={preconditions}
+              empty={missing}
+            />
+          )}
 
           <div>
             <p className="font-medium text-foreground">
               {labelOf(t, 'requirements.qualityReviewData', 'Dữ liệu kiểm thử')}
             </p>
-            {row.testData?.length ? (
+            {canPatch ? (
+              <div className="mt-1 space-y-2">
+                {testData.map((item, index) => (
+                  <div key={`td-${index}`} className="grid grid-cols-2 gap-2">
+                    <input
+                      className={FIELD_CLASS}
+                      value={item.field}
+                      placeholder={labelOf(t, 'requirements.gate2TcDetailField', 'Field')}
+                      onChange={(e) => {
+                        const next = testData.map((rowItem, i) =>
+                          i === index ? { ...rowItem, field: e.target.value } : rowItem
+                        );
+                        patch({ testData: next });
+                      }}
+                    />
+                    <input
+                      className={FIELD_CLASS}
+                      value={item.value}
+                      placeholder={labelOf(t, 'requirements.gate2TcDetailValue', 'Value')}
+                      onChange={(e) => {
+                        const next = testData.map((rowItem, i) =>
+                          i === index ? { ...rowItem, value: e.target.value } : rowItem
+                        );
+                        patch({ testData: next });
+                      }}
+                    />
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="rounded border border-border px-2 py-1 text-[11px] font-medium hover:bg-muted"
+                  onClick={() => patch({ testData: [...testData, { field: '', value: '' }] })}
+                >
+                  {labelOf(t, 'requirements.gate2TcDetailAddData', 'Thêm dữ liệu')}
+                </button>
+              </div>
+            ) : testData.length ? (
               <ul className="mt-1 space-y-0.5 text-muted-foreground">
-                {row.testData.map((item) => (
+                {testData.map((item) => (
                   <li key={`${item.field}-${item.value}`}>
                     <span className="text-foreground">{item.field}</span>: {item.value}
                   </li>
@@ -109,9 +245,65 @@ export default function Gate2TcDetailPanel({ row = null, onClose, t }) {
             <p className="font-medium text-foreground">
               {labelOf(t, 'requirements.qualityReviewSteps', 'Các bước')}
             </p>
-            {row.steps?.length ? (
+            {canPatch ? (
+              <div className="mt-1 space-y-3">
+                {steps.map((step, index) => (
+                  <div key={`step-${index}`} className="space-y-1 rounded-md border border-border/60 p-2">
+                    <p className="text-[11px] font-medium text-muted-foreground">
+                      {labelOf(t, 'requirements.qualityReviewSteps', 'Bước')} {index + 1}
+                    </p>
+                    <textarea
+                      className={FIELD_CLASS}
+                      rows={2}
+                      value={step.action}
+                      placeholder={labelOf(t, 'requirements.gate2TcDetailAction', 'Hành động')}
+                      onChange={(e) => {
+                        const next = steps.map((rowStep, i) =>
+                          i === index
+                            ? { ...rowStep, stepNo: i + 1, action: e.target.value }
+                            : { ...rowStep, stepNo: i + 1 }
+                        );
+                        patch({ steps: next });
+                      }}
+                    />
+                    <textarea
+                      className={FIELD_CLASS}
+                      rows={2}
+                      value={step.expectedResult}
+                      placeholder={labelOf(
+                        t,
+                        'requirements.qualityReviewExpected',
+                        'Kết quả mong đợi'
+                      )}
+                      onChange={(e) => {
+                        const next = steps.map((rowStep, i) =>
+                          i === index
+                            ? { ...rowStep, stepNo: i + 1, expectedResult: e.target.value }
+                            : { ...rowStep, stepNo: i + 1 }
+                        );
+                        patch({ steps: next });
+                      }}
+                    />
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="rounded border border-border px-2 py-1 text-[11px] font-medium hover:bg-muted"
+                  onClick={() =>
+                    patch({
+                      steps: [
+                        ...steps,
+                        { stepNo: steps.length + 1, action: '', expectedResult: '' },
+                      ],
+                    })
+                  }
+                >
+                  {labelOf(t, 'requirements.gate2TcDetailAddStep', 'Thêm bước')}
+                </button>
+              </div>
+            ) : steps.length ? (
               <ol className="mt-1 space-y-2">
-                {row.steps.map((step, index) => (
+                {steps.map((step, index) => (
                   <li key={step.stepNo || index}>
                     <p className="text-foreground">
                       {step.stepNo || index + 1}. {step.action}
@@ -143,6 +335,18 @@ export default function Gate2TcDetailPanel({ row = null, onClose, t }) {
             </p>
           ) : null}
         </div>
+
+        {!editable && typeof onBeginEdit === 'function' ? (
+          <div className="border-t border-border px-4 py-3">
+            <button
+              type="button"
+              className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
+              onClick={onBeginEdit}
+            >
+              {labelOf(t, 'requirements.gate2TcDetailBeginEdit', 'Sửa chi tiết TC')}
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -16,7 +16,7 @@ export const COMPANY_SPACE_LEVEL = {
   TEAM: 'team',
 };
 
-export const LAST_COMPANY_TEAM_ID_KEY = 'voicehub:last-company-team-id';
+export const LAST_COMPANY_TEAM_ID_KEY = 'atrium:last-company-team-id';
 
 export function normalizeCompanySpaceLevel(value) {
   const raw = String(value || '')

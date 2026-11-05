@@ -58,7 +58,7 @@ export function resolveVoiceRoomInvitePath(notif) {
     try {
       const parsed = actionUrl.startsWith('http') || actionUrl.startsWith('//')
         ? new URL(actionUrl)
-        : new URL(actionUrl, typeof window !== 'undefined' ? window.location.origin : 'https://voicehub.local');
+        : new URL(actionUrl, typeof window !== 'undefined' ? window.location.origin : 'https://atrium.dev');
       const normalized = normalizeLegacyAppPath(parsed.pathname, parsed.search || '');
       if (normalized && normalized.startsWith('/app/communicate/voice')) {
         const [pathOnly, qsRaw] = normalized.split('?');
@@ -90,7 +90,7 @@ export function parseSafeAppPath(actionUrl) {
   if (!raw) return null;
   if (/^[a-zA-Z][a-zA-Z+\-.]*:/.test(raw) || raw.startsWith('//')) return null;
   try {
-    const parsed = new URL(raw, 'https://voicehub.local');
+    const parsed = new URL(raw, 'https://atrium.dev');
     const path = String(parsed.pathname || '').trim();
     if (!path.startsWith('/app/')) return null;
     const qs = parsed.search || '';

@@ -75,7 +75,7 @@ function buildGate1Summary(pack) {
         pack?.aiAnalysis?.workbookDiagnostic?.intakeKind === 'customer_raw' ||
         pack?.aiAnalysis?.intakeKind === 'customer_raw'
     ),
-    g4RequirementCount: Array.isArray(proposal?.generated?.functionalRequirements?.items)
+    frRequirementCount: Array.isArray(proposal?.generated?.functionalRequirements?.items)
       ? proposal.generated.functionalRequirements.items.length
       : bundle.items.filter((r) => r.section === 'functionalRequirements').length,
     citationCount: Number(phaseWhat?.citationCount) || 0,
@@ -435,15 +435,25 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
 
   /** Start / re-run HOW from Monitor card (PO re-run). Review tab stays decide-only. */
   const startHowManual = useCallback(
-    async ({ force = false, feedback = '', impactScope = null } = {}) => {
+    async ({
+      force = false,
+      feedback = '',
+      impactScope = null,
+      rerunTools = null,
+    } = {}) => {
       if (!organizationId || !packId || busy) return;
       const useForce = force === true;
       const scopes = Array.isArray(impactScope)
         ? impactScope.map((s) => String(s || '').trim()).filter(Boolean)
         : [];
+      const tools = Array.isArray(rerunTools)
+        ? rerunTools.map((s) => String(s || '').trim()).filter(Boolean)
+        : [];
+      const selective = useForce && tools.length > 0;
+      const fullForce = useForce && !scopes.length && !selective;
       setBusy(true);
-      onHowStarted({ clearResults: useForce && !scopes.length });
-      if (useForce && !scopes.length) setGate2Decisions({});
+      onHowStarted({ clearResults: fullForce || (selective && tools.includes('WbsTool')) });
+      if (fullForce || (selective && tools.includes('WbsTool'))) setGate2Decisions({});
       try {
         await requirementAPI.startPhaseAiPlanning(organizationId, packId, {
           phase: 'how',
@@ -451,6 +461,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
           ...(projectId ? { projectId: String(projectId) } : {}),
           ...(feedback ? { feedback: String(feedback) } : {}),
           ...(scopes.length ? { impactScope: scopes } : {}),
+          ...(selective ? { rerunTools: tools } : {}),
         });
         toast.success(
           scopes.length
@@ -478,12 +489,17 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
 
   const startHowFirst = useCallback(() => startHowManual({ force: false }), [startHowManual]);
   const rerunHow = useCallback(() => startHowManual({ force: true }), [startHowManual]);
+  const rerunHowSelected = useCallback(
+    (tools) => startHowManual({ force: true, rerunTools: tools }),
+    [startHowManual]
+  );
   const refreshScheduleHow = useCallback(
     () =>
       startHowManual({
         force: true,
         feedback: 'Refresh schedule after Gate2 assignment edits',
         impactScope: ['resource', 'schedule'],
+        rerunTools: ['ScheduleTool'],
       }),
     [startHowManual]
   );
@@ -504,22 +520,18 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
   }, [startHowFirst]);
 
   /**
-   * Birth / manual start: prepare_only → FR (same sequence as Overview pipeline).
+   * Birth / manual start: single requirement run (Fast Start).
+   * BE preflight handles prepare when READY/STALE/MISSING — prepare_only stays on Understanding CTA.
    */
   const runWhatPipeline = useCallback(
     async ({ force = false, feedback = '', parentRunId = '', idempotencyKey = '' } = {}) => {
-      // Stage 1 — intake readiness (no LLM)
-      await requirementAPI.startPhaseAiPlanning(organizationId, packId, {
-        phase: 'what',
-        mode: 'prepare_only',
-      });
-      // Stage 2 — remote APS WHAT
       await requirementAPI.startPhaseAiPlanning(
         organizationId,
         packId,
         {
           phase: 'what',
-          mode: 'g4',
+          mode: 'requirement',
+          snapshotPolicy: 'reuse_if_valid',
           ...(force ? { force: true } : {}),
           ...(feedback ? { feedback } : {}),
           ...(parentRunId ? { parentRunId } : {}),
@@ -1190,6 +1202,21 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
     );
   };
 
+  const onGate2ResolveLineConflict = async ({ conflictId, chosenRoleKey } = {}) => {
+    if (!conflictId || !chosenRoleKey) return;
+    await postGate2(
+      {
+        action: 'resolve_line_conflict',
+        conflictId,
+        chosenRoleKey,
+      },
+      {
+        ok: t('requirements.gate2SynthResolveOk'),
+        fail: t('requirements.gate2SynthResolveFail'),
+      }
+    );
+  };
+
   const onGate2PmConfirmPlan = async () => {
     const note = await requestNote({
       title: t('requirements.gate2PmConfirmPlan'),
@@ -1489,7 +1516,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
     // Stay on Monitor — also sync ?tab= so URL deep-link cannot bounce back to Review.
     goMonitorTab();
     clearGate1DecisionsForReseed();
-    // Toast immediately — prepare_only + g4 can take seconds; do not wait for both APIs.
+    // Toast immediately — BE preflight + remote run can take seconds.
     toast.success(t(successKey) || successFallback);
     try {
       await runWhatPipeline({ force, feedback, parentRunId, idempotencyKey });
@@ -1558,14 +1585,21 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
   }
 
   const packStatus = String(pack?.status || '');
+  const packStatusLabel = (reqKey, fallback) => {
+    const fromReq = textOr(translate, `requirements.${reqKey}`);
+    if (fromReq) return fromReq;
+    const fromWs = textOr(translate, `workspace.${reqKey}`);
+    if (fromWs) return fromWs;
+    return fallback;
+  };
   const statusLabel =
     ({
-      draft: t('requirements.phase1Status_draft'),
-      under_review: t('requirements.phase1Status_pending_review'),
-      approved: t('requirements.phase1Status_approved'),
-      rejected: t('requirements.phase1Status_rejected'),
-      project_linked: t('requirements.phase1Status_active'),
-      changes_requested: t('requirements.phase1Status_changes_requested'),
+      draft: packStatusLabel('phase1Status_draft', 'Nháp'),
+      under_review: packStatusLabel('phase1Status_pending_review', 'Chờ duyệt'),
+      approved: packStatusLabel('phase1Status_approved', 'Đã duyệt'),
+      rejected: packStatusLabel('phase1Status_rejected', 'Từ chối'),
+      project_linked: packStatusLabel('phase1Status_active', 'Đang dùng'),
+      changes_requested: packStatusLabel('phase1Status_changes_requested', 'Cần chỉnh sửa'),
     }[packStatus.toLowerCase()] ||
       (packStatus ? packStatus.replace(/_/g, ' ') : ''));
 
@@ -1639,6 +1673,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
             onRerunWhat={reviseWhat}
             onStartHow={startHowFirst}
             onRerunHow={rerunHow}
+            onRerunHowSelected={rerunHowSelected}
             organizationId={organizationId}
             packId={packId}
             onRefresh={refresh}
@@ -1685,6 +1720,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
             setGate2Decision={setGate2Decision}
             parallelTracks={gate2ParallelTracks}
             gate2Proposals={gate2Proposals}
+            gate2ReviewPlan={gate2ReviewPlan}
             onGate2TrackSubmit={onGate2TrackSubmit}
             onGate2RefreshSchedule={refreshScheduleHow}
             onGate2ProposeChange={onGate2ProposeChange}
@@ -1692,6 +1728,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
             onGate2KeepOriginal={onGate2KeepOriginal}
             onGate2Escalate={onGate2Escalate}
             onGate2ResolveEscalation={onGate2ResolveEscalation}
+            onGate2ResolveLineConflict={onGate2ResolveLineConflict}
             onGate2PmConfirmPlan={onGate2PmConfirmPlan}
             onGate2PoApprove={onGate2PoApprove}
             onGate2PoReject={onGate2PoReject}

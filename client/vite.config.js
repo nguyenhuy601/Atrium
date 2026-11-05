@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
   const devHost = String(env.VITE_HOST || '0.0.0.0').trim();
   const fixedDevPort = 5173;
   const rawAllowedHosts = String(env.VITE_ALLOWED_HOSTS || '').trim();
-  // Dev: cho phép mọi Host (voicehub.local + IP trong hosts) — tránh lỗi khi đổi WiFi/DHCP.
+  // Dev: cho phép mọi Host (atrium.dev + IP trong hosts) — tránh lỗi khi đổi WiFi/DHCP.
   const allowedHostsStrict = String(env.VITE_ALLOWED_HOSTS_STRICT || '').trim() === 'true';
   const allowedHosts =
     mode === 'development' && !allowedHostsStrict

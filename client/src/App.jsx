@@ -49,7 +49,6 @@ const AdminHubPage = lazy(() => import('./pages/Admin/AdminHubPage'));
 const AdminDomainPage = lazy(() => import('./pages/Admin/AdminDomainPage'));
 const AdminLegacyRedirect = lazy(() => import('./components/Layout/AdminLegacyRedirect'));
 const ApprovalInboxPage = lazy(() => import('./features/approvals/ApprovalInboxPage'));
-const CollaborateRequirementsPage = lazy(() => import('./features/requirements/CollaborateRequirementsPage'));
 const JoinApplicationPage = lazy(() => import('./pages/Workspace/JoinApplicationPage'));
 const CreateProjectWizardPage = lazy(() => import('./pages/Projects/CreateProjectWizardPage'));
 const CreateProjectAiWizardPage = lazy(() => import('./pages/Projects/CreateProjectAiWizardPage'));
@@ -173,7 +172,7 @@ function App() {
           }
         >
           <Route index element={<ProjectPickerPage />} />
-          <Route path="requirements" element={<CollaborateRequirementsPage />} />
+          <Route path="requirements" element={<Navigate to="/app/projects" replace />} />
           <Route path=":projectId/planning/:planningModule/*" element={<Phase1Shell />} />
           <Route path=":projectId/:module" element={<ProjectModuleRoute />} />
           <Route path=":projectId" element={<ProjectIdToOverviewRedirect />} />

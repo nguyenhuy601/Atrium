@@ -226,8 +226,8 @@ function buildSystemBotProfilePayload(userId) {
   const uid = String(userId || '').trim();
   return {
     userId: uid,
-    username: 'voicehub_bot',
-    displayName: 'VoiceHub',
+    username: 'atrium_bot',
+    displayName: 'Atrium',
     avatar: null,
     status: 'offline',
     bio: '',

@@ -13,8 +13,8 @@ import {
 } from '../utils/singleCompanyMode';
 import { clearBootstrapShellCache } from '../services/bootstrapService';
 
-const LAST_WORKSPACE_SLUG_KEY = 'voicehub:last-workspace-slug';
-const WORKSPACE_CLEARED_EVENT = 'voicehub:workspace-cleared';
+const LAST_WORKSPACE_SLUG_KEY = 'atrium:last-workspace-slug';
+const WORKSPACE_CLEARED_EVENT = 'atrium:workspace-cleared';
 
 /** Gọi từ AuthContext khi logout — không phụ thuộc React context (tránh vòng import). */
 export function notifyWorkspaceClearedOnLogout() {

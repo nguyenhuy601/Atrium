@@ -10,6 +10,8 @@ const {
 const { buildInitialAgentFields } = require('../checkpoint/agentStateSchema');
 const { getLangGraphCheckpointer } = require('./langGraphCheckpointer');
 const { preparePhaseSnapshot } = require('./preparePhaseSnapshot');
+const { normalizeForceRerunSet } = require('./resolveHowRerunClosure');
+const { howReactCatalogTools } = require('./computeEligibleHowTools');
 
 async function runHowPhaseLangGraph({
   container,
@@ -27,6 +29,8 @@ async function runHowPhaseLangGraph({
   decideToolCalls = null,
   /** PlanningRun.startedAt — keep Monitor wall clock aligned with durationMs */
   wallStartedAt = null,
+  rerunTools = null,
+  forceRerunSet = null,
 } = {}) {
   const fromWall =
     wallStartedAt != null ? new Date(wallStartedAt).getTime() : NaN;
@@ -76,6 +80,26 @@ async function runHowPhaseLangGraph({
   assertDurableCheckpointerForInRunHitl({ kind: checkpointerKind });
   const threadId = String(runId || boundSnapshotId || `how-${startedAt}`);
 
+  const seedRerun =
+    Array.isArray(forceRerunSet) && forceRerunSet.length
+      ? forceRerunSet
+      : Array.isArray(rerunTools) && rerunTools.length
+        ? rerunTools
+        : Array.isArray(resumeState?.forceRerunSet) && resumeState.forceRerunSet.length
+          ? resumeState.forceRerunSet
+          : Array.isArray(resumeState?.rerunTools)
+            ? resumeState.rerunTools
+            : [];
+  const expandedRerun = normalizeForceRerunSet(
+    { forceRerunSet: seedRerun, rerunTools: seedRerun },
+    { catalog: howReactCatalogTools() }
+  );
+  if (expandedRerun.length) {
+    console.info(
+      `[how-eligible] forceRerunSet=${expandedRerun.join(',')} runId=${runId || ''}`
+    );
+  }
+
   console.info(
     `[agent_core] mode=langgraph_react phase=how runId=${runId || ''} checkpointer=${checkpointerKind}`
   );
@@ -112,6 +136,8 @@ async function runHowPhaseLangGraph({
       gapReport: null,
       completeness: null,
       generationId: runId || null,
+      rerunTools: Array.isArray(rerunTools) ? rerunTools : seedRerun,
+      forceRerunSet: expandedRerun,
     },
   });
 

@@ -1,7 +1,7 @@
 ---
 name: e2e-testing
 description: >-
-  Guides VoiceHub end-to-end checks on https://voicehub.local for critical UX flows. Use for large FE regressions.
+  Guides Atrium end-to-end checks on https://atrium.dev for critical UX flows. Use for large FE regressions.
 ---
 
 # e2e testing
@@ -16,7 +16,7 @@ Unit-only logic changes.
 
 ## Related Rules
 
-- `.cursor/rules/voicehub-constraints.mdc`
+- `.cursor/rules/atrium-constraints.mdc`
 - `.cursor/rules/deep-agents-dispatch.mdc` (agent: `implementer`)
 
 ## Input
@@ -26,7 +26,7 @@ User journeys
 ## Workflow
 
 1. Define journeys and expected UI outcomes.
-2. Verify via browser or documented manual steps on voicehub.local.
+2. Verify via browser or documented manual steps on atrium.dev.
 3. Record pass/fail/blockers.
 
 ## Expected output

@@ -8,7 +8,6 @@ import {
   ChevronsRight,
   ClipboardList,
   FileText,
-  FileSpreadsheet,
   Home,
   LayoutDashboard,
   MessageCircle,
@@ -44,13 +43,11 @@ import {
   isImmersiveCompanyModulePath,
   buildCollaborateCalendarPath,
   buildCollaborateDocumentsPath,
-  buildCollaborateRequirementsPath,
   buildCollaborateTasksPath,
   getDefaultPathForSuite,
 } from '../../utils/suitePathUtils';
 import { COMPANY_SPACE_LEVEL } from '../../utils/companySpaceLevel';
-import useRequirementAccess from '../../hooks/useRequirementAccess';
-import VoiceHubAIPanel from './VoiceHubAIPanel';
+import AtriumAIPanel from './AtriumAIPanel';
 import { VH_NAV_CHEVRON } from '../../motion/classes';
 import useMotionPresence from '../../motion/useMotionPresence';
 import { VH_MOTION_BASE_MS } from '../../motion/tokens';
@@ -334,11 +331,6 @@ export default function FigmaNavigationSidebar({
   };
   // Approvers include IC project roles (TL/QA) — inbox ACL is server-side (canAct / requester)
   const showApprovalInbox = suiteProp === 'collaborate' || suiteProp === 'company';
-  const collaborateOrgId = suiteProp === 'collaborate' ? activeOrgId : '';
-  const { access: requirementAccess } = useRequirementAccess(collaborateOrgId);
-  // SoT: access API showCollaborateNav (Position.code / org role / project role — không jobTitle FE).
-  const showRequirementsNav =
-    suiteProp === 'collaborate' && Boolean(requirementAccess?.showCollaborateNav);
   const myStructureRole = String(
     company?.myStructureRole || activeWorkspace?.myStructureRole || ''
   ).toLowerCase();
@@ -504,15 +496,6 @@ export default function FigmaNavigationSidebar({
           badge: 0,
         });
       }
-      if (showRequirementsNav) {
-        items.push({
-          key: 'requirements',
-          icon: FileSpreadsheet,
-          label: t('nav.requirements'),
-          path: buildCollaborateRequirementsPath(activeOrgId),
-          badge: 0,
-        });
-      }
       // Legacy collaborate also exposed projects — company suite does not.
       if (suiteProp === 'collaborate') {
         items.splice(2, 0, {
@@ -550,7 +533,6 @@ export default function FigmaNavigationSidebar({
     isTeamLevel,
     isSingleCompany,
     showApprovalInbox,
-    showRequirementsNav,
     showAdminSuite,
     adminNavLabel,
     adminNavPath,
@@ -622,9 +604,6 @@ export default function FigmaNavigationSidebar({
       if (item.key === 'documents') {
         return path === '/app/collaborate/documents' || path === '/app/company/documents';
       }
-      if (item.key === 'requirements') {
-        return path.includes('/requirements');
-      }
       if (item.key === 'calendar') {
         return path === '/app/collaborate/calendar' || path === '/app/company/calendar';
       }
@@ -660,7 +639,7 @@ export default function FigmaNavigationSidebar({
         />
       ) : null}
       <div
-        id="voicehub-mobile-nav"
+        id="atrium-mobile-nav"
         role={mobileNavOpen ? 'dialog' : undefined}
         aria-modal={mobileNavOpen ? true : undefined}
         aria-label={t('nav.mainMenu')}
@@ -831,7 +810,7 @@ export default function FigmaNavigationSidebar({
             >
               <Bot size={14} className="shrink-0 text-orange-500" />
               <div className="flex-1 text-left">
-                <div className="text-[0.7812rem] font-semibold text-orange-500">@VoiceHubAI</div>
+                <div className="text-[0.7812rem] font-semibold text-orange-500">@AtriumAI</div>
                 <div className="mt-px text-[0.625rem] text-orange-400/60">
                   {t('nav.aiSmartAssistant')}
                 </div>
@@ -845,7 +824,7 @@ export default function FigmaNavigationSidebar({
       </nav>
 
       {showAIPanel ? (
-        <VoiceHubAIPanel
+        <AtriumAIPanel
           onClose={() => setShowAIPanel(false)}
           anchorRef={aiButtonRef}
           collapsed={railCollapsed}

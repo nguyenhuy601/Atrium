@@ -3,7 +3,7 @@ description: Dev Docker Desktop — tránh phình VHDX (pull/update, hạn chế
 alwaysApply: true
 ---
 
-# Docker Desktop — tránh phình VHDX (VoiceHub dev)
+# Docker Desktop — tránh phình VHDX (Atrium dev)
 
 Docker Desktop trên Windows lưu data trong file VHDX trên ổ C. VHDX **chỉ phình ra**, hiếm khi tự co sau khi xóa image/container bên trong.
 
@@ -23,14 +23,14 @@ Docker Desktop trên Windows lưu data trong file VHDX trên ổ C. VHDX **chỉ
 ```bash
 # pull tag cần → deploy (không build)
 SWARM_USE_LOCAL_IMAGES=0 bash devops/swarm/deploy-stack.sh
-docker service update --force voicehub_<service>
+docker service update --force atrium_<service>
 ```
 
 **Code local chưa có trên registry** (`SWARM_USE_LOCAL_IMAGES=1` trong `.env`):
 
 ```bash
 bash devops/swarm/build-local-images.sh <service-name>   # CHỈ service đó
-docker service update --force --update-parallelism 1 --update-order start-first voicehub_<service>
+docker service update --force --update-parallelism 1 --update-order start-first atrium_<service>
 ```
 
 **Infra AI trên Swarm** (ollama, minio, qdrant, meili): xem [swarm-compose-split.mdc](./swarm-compose-split.mdc).
@@ -51,11 +51,11 @@ docker image prune -f
 docker volume prune -f    # chỉ volume không gắn container
 ```
 
-**Không** chạy `docker system prune -a --volumes` nếu chưa chắc — có thể xóa volume Compose đang dùng (`voicehub-extra_*`).
+**Không** chạy `docker system prune -a --volumes` nếu chưa chắc — có thể xóa volume Compose đang dùng (`atrium-extra_*`).
 
 ## Khi agent gợi ý lệnh Docker
 
-- Trước build: kiểm tra đã có `voicehub-<service>:latest` hoặc có thể `docker pull` từ ghcr không.
+- Trước build: kiểm tra đã có `atrium-<service>:latest` hoặc có thể `docker pull` từ ghcr không.
 - Không gợi ý `build-local-images.sh` không tham số (build all) trừ khi user yêu cầu hoặc image local hoàn toàn thiếu.
 - Sau nhiều deploy: nhắc `docker container prune` + `docker image prune`.
 - Ổ C < ~5GB trống: **không** build image nặng (voice-service ~2.3GB, workers ~1.5GB, ollama pull); nhắc giải phóng disk trước.

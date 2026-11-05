@@ -1,6 +1,6 @@
 /** Persist last selected project for Projects suite picker. */
 
-export const LAST_PROJECT_ID_KEY = 'voicehub:last-project-id';
+export const LAST_PROJECT_ID_KEY = 'atrium:last-project-id';
 
 export function readStoredLastProjectId() {
   if (typeof window === 'undefined') return '';

@@ -1,11 +1,11 @@
 ---
-description: Chuẩn vai trò dự án PO / BA / PM — ownership, phase, CR, acceptance (VoiceHub)
+description: Chuẩn vai trò dự án PO / BA / PM — ownership, phase, CR, acceptance (Atrium)
 alwaysApply: true
 ---
 
 # Vai trò dự án — PO · BA · PM (bắt buộc)
 
-Khi thiết kế UX, copy, RBAC, workflow, seed demo, hoặc plan Phase 1–4: **không trộn ownership**. Map key VoiceHub: `product_owner` = PO, `business_analyst` = BA, `project_manager` = PM. Tech Lead (`tech_lead` / `analysis:tech_review`) = cổng kỹ thuật — **không** thay BA/PO/PM.
+Khi thiết kế UX, copy, RBAC, workflow, seed demo, hoặc plan Phase 1–4: **không trộn ownership**. Map key Atrium: `product_owner` = PO, `business_analyst` = BA, `project_manager` = PM. Tech Lead (`tech_lead` / `analysis:tech_review`) = cổng kỹ thuật — **không** thay BA/PO/PM.
 
 ## Mục tiêu (một dòng)
 
@@ -31,7 +31,7 @@ Khi thiết kế UX, copy, RBAC, workflow, seed demo, hoặc plan Phase 1–4: *
 | Change Request | Quyết định business impact | Phân tích requirement impact | Phân tích schedule / resource / cost |
 | Acceptance | **Business acceptance** | Chuẩn bị acceptance criteria | Điều phối |
 
-## Theo giai đoạn VoiceHub
+## Theo giai đoạn Atrium
 
 | Giai đoạn (`deliveryPhase`) | BA | PO | PM |
 |-----------------------------|----|----|-----|

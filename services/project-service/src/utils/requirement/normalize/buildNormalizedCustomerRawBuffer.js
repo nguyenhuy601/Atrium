@@ -36,7 +36,7 @@ function addSheet(wb, name, columns, rows = []) {
  */
 async function buildNormalizedCustomerRawBuffer(payload = {}) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'VoiceHub';
+  wb.creator = 'Atrium';
   wb.created = new Date();
 
   const metaRows = CUSTOMER_RAW_META_DEFAULTS.map(([k, v]) => {

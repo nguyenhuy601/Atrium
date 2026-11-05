@@ -395,20 +395,10 @@ export function resolveWhatProgressViewModel(
       : elapsedMs;
 
   const waitingHuman = state === 'waiting_human';
-  const softHintMs = config.softHintMs ?? WHAT_MONITOR_CONFIG.softHintMs;
-  const softHintLongMs = config.softHintLongMs ?? WHAT_MONITOR_CONFIG.softHintLongMs;
-  const staleThresholdMs = config.progressStaleMs ?? WHAT_MONITOR_CONFIG.progressStaleMs;
-  const showSoftHint =
-    !waitingHuman &&
-    state === 'running' &&
-    (substep === 'prepare' || !substep) &&
-    elapsedMs >= softHintMs;
-  const softHintLong = showSoftHint && elapsedMs >= softHintLongMs;
-  const showProgressStale =
-    !waitingHuman &&
-    state === 'running' &&
-    Number.isFinite(staleThresholdMs) &&
-    progressStaleMs >= staleThresholdMs;
+  // Soft-hint / progress-stale amber warnings removed from Monitor UX.
+  const showSoftHint = false;
+  const softHintLong = false;
+  const showProgressStale = false;
 
   const activity = resolveActivity(liveRun, state);
   const showSpinner = state === 'running' || state === 'queued' || state === 'finalizing';
@@ -425,8 +415,8 @@ export function resolveWhatProgressViewModel(
       : getWhatStatusCopy({
           macroStep: macroStep || 1,
           waitingHuman,
-          showSoftHint,
-          softHintLong,
+          showSoftHint: false,
+          softHintLong: false,
         });
 
   return {

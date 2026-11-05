@@ -88,16 +88,18 @@ async function notifyJobResult(payload) {
 }
 
 /**
- * @param {{ snapshotId: string, packId: string, organizationId: string }} opts
+ * @param {{ snapshotId: string, packId: string, organizationId: string, projection?: string }} opts
  */
 async function fetchAnalysisSnapshotHydrate({
   snapshotId,
   packId,
   organizationId,
+  projection = 'full',
 }) {
   assertCallbackConfigured();
   const base = projectBase();
   const sid = encodeURIComponent(String(snapshotId || '').trim());
+  const proj = String(projection || 'full').trim().toLowerCase() || 'full';
   const response = await axios.get(
     `${base}/api/projects/internal/ai-planning/snapshots/${sid}`,
     {
@@ -108,6 +110,7 @@ async function fetchAnalysisSnapshotHydrate({
       params: {
         packId: String(packId || '').trim(),
         organizationId: String(organizationId || '').trim(),
+        ...(proj !== 'full' ? { projection: proj } : {}),
       },
       timeout: 30_000,
       validateStatus: () => true,

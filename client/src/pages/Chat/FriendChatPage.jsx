@@ -171,11 +171,11 @@ function messageDayKey(iso) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-const DM_MUTE_STORAGE_KEY = 'voicehub:dm-muted';
-const DM_PIN_STORAGE_KEY = 'voicehub:dm-pinned';
-const DM_PINNED_MESSAGES_STORAGE_KEY = 'voicehub:dm-pinned-messages';
-const DM_ARCHIVE_STORAGE_KEY = 'voicehub:dm-archived';
-const DM_DRAFT_PREFIX = 'voicehub:dm-draft:';
+const DM_MUTE_STORAGE_KEY = 'atrium:dm-muted';
+const DM_PIN_STORAGE_KEY = 'atrium:dm-pinned';
+const DM_PINNED_MESSAGES_STORAGE_KEY = 'atrium:dm-pinned-messages';
+const DM_ARCHIVE_STORAGE_KEY = 'atrium:dm-archived';
+const DM_DRAFT_PREFIX = 'atrium:dm-draft:';
 const DM_PAGE_SIZE = dmMessageService.pageSize;
 
 function loadIdList(storageKey) {

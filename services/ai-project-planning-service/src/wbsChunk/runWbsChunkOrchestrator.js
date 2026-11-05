@@ -210,6 +210,7 @@ async function runWbsChunkOrchestrator(opts = {}) {
     inputSnapshotId,
     stories: opts.stories || [],
     epics: opts.epics || [],
+    features: opts.features || [],
     semantic: opts.semantic || null,
     roleAllowList: opts.roleAllowList || null,
     localeInstruction: opts.localeInstruction || '',

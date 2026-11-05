@@ -1,7 +1,7 @@
 ---
 name: dependency-upgrade
 description: >-
-  Upgrades npm/package dependencies for VoiceHub with regression awareness. Use when user requests dependency bumps.
+  Upgrades npm/package dependencies for Atrium with regression awareness. Use when user requests dependency bumps.
 ---
 
 # dependency upgrade

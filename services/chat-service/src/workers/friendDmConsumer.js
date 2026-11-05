@@ -9,8 +9,8 @@ const { assertDmCanSend } = require('../utils/verifyDmRelationship');
 const { maybeNotifyDmReceived } = require('../utils/dmPushNotification');
 const { MAX_MESSAGE_CONTENT, USER_MESSAGE_TYPES } = require('../utils/chatErrorMap');
 
-const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'voicehub.topic';
-const QUEUE = process.env.RABBITMQ_FRIEND_DM_QUEUE || 'voicehub.friend.dm';
+const EXCHANGE = process.env.RABBITMQ_EXCHANGE || 'atrium.topic';
+const QUEUE = process.env.RABBITMQ_FRIEND_DM_QUEUE || 'atrium.friend.dm';
 const ROUTING_KEY = process.env.RABBITMQ_FRIEND_DM_ROUTING_KEY || 'friend.dm';
 
 let dmConsumer = null;

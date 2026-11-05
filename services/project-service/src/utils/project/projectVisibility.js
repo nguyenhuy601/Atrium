@@ -88,12 +88,21 @@ function resolveProjectAccess({ actor, project, membership, orgPolicy }) {
   const roleKeys = (Array.isArray(membership?.projectRoleKeys) ? membership.projectRoleKeys : []).map(
     (k) => String(k || '').trim().toLowerCase()
   );
-  /** Member-only: ProjectMembership / role keys — not org elevated, not createdBy alone. */
+  /** Member-only: ProjectMembership / role keys — not createdBy alone. */
   const isMember = Boolean(membership?.isMember) || roleKeys.length > 0;
   const isProjectManager = roleKeys.some((k) => PM_ROLE_KEYS.has(k));
+  /** Org owner/admin: governance list (matches isOrgElevatedMembershipRole / listProjects elevated query). */
+  const isOrgElevated =
+    audiences.includes('organization_admins') || audiences.includes('system_admins');
 
-  // Hard SoT: non-members never discover (even if org policy still enables directors/admins).
-  if (!isMember) {
+  // Hard SoT: non-members never discover (directors / dept / all_employees via policy alone).
+  // Exception: org elevated may discover all org projects for admin overview / governance.
+  if (isOrgElevated) {
+    discover = true;
+    for (const a of ['organization_admins', 'system_admins']) {
+      if (audiences.includes(a) && !discoverAudiences.includes(a)) discoverAudiences.push(a);
+    }
+  } else if (!isMember) {
     discover = false;
   } else if (!discover) {
     // Explicit member always discover (safety net when audience flags misconfigured)

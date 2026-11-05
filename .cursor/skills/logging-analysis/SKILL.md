@@ -1,7 +1,7 @@
 ---
 name: logging-analysis
 description: >-
-  Analyzes VoiceHub service logs for incidents with enough context and without sensitive data leakage. Use during production-like debugging.
+  Analyzes Atrium service logs for incidents with enough context and without sensitive data leakage. Use during production-like debugging.
 ---
 
 # logging analysis

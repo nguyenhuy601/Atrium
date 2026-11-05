@@ -28,7 +28,7 @@ function userServiceAxiosOpts() {
 
 async function notifyVoiceRoomInvite({ userId, roomId, hostName, frontendUrl }) {
   if (!NOTIFICATION_SERVICE_URL || !userId) return;
-  const base = frontendUrl || process.env.FRONTEND_URL || 'https://voicehub.local';
+  const base = frontendUrl || process.env.FRONTEND_URL || 'https://atrium.dev';
   const baseClean = String(base).replace(/\/+$/, '');
   const actionUrl = `${baseClean}/app/communicate/voice/${encodeURIComponent(roomId)}?join=1`;
   try {
@@ -62,7 +62,7 @@ async function notifyJoinRequestToHost({
   frontendUrl,
 }) {
   if (!NOTIFICATION_SERVICE_URL || !hostUserId) return;
-  const base = frontendUrl || process.env.FRONTEND_URL || 'https://voicehub.local';
+  const base = frontendUrl || process.env.FRONTEND_URL || 'https://atrium.dev';
   const actionUrl = `${String(base).replace(/\/+$/, '')}/app/communicate/voice/${encodeURIComponent(roomId)}?join=1`;
   try {
     await axios.post(
@@ -141,7 +141,7 @@ async function sendVoiceRoomInviteEmail({ email, roomId, hostName, frontendUrl }
     .trim()
     .replace(/\/+$/, '');
   const token = String(process.env.GATEWAY_INTERNAL_TOKEN || process.env.AUTH_INTERNAL_TOKEN || '').trim();
-  const base = frontendUrl || process.env.FRONTEND_URL || 'https://voicehub.local';
+  const base = frontendUrl || process.env.FRONTEND_URL || 'https://atrium.dev';
   const baseClean = String(base).replace(/\/+$/, '');
   const inviteUrl = `${baseClean}/app/communicate/voice/${encodeURIComponent(roomId)}?join=1`;
 

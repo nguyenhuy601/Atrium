@@ -1,7 +1,7 @@
 ---
 name: ci-cd-analysis
 description: >-
-  Analyzes VoiceHub CI/CD or image publish flows (ghcr, pipelines) when builds fail or deploy process changes.
+  Analyzes Atrium CI/CD or image publish flows (ghcr, pipelines) when builds fail or deploy process changes.
 ---
 
 # ci cd analysis

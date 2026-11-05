@@ -1,7 +1,7 @@
 import api from './api';
 
 /** Event document — lắng nghe ở NotificationsPage để refetch */
-export const NOTIFICATIONS_REFRESH_EVENT = 'voicehub:notifications-refresh';
+export const NOTIFICATIONS_REFRESH_EVENT = 'atrium:notifications-refresh';
 
 export function emitNotificationsRefresh() {
   try {

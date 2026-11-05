@@ -92,8 +92,8 @@ function resolveDependencyExecutionStatus(result) {
       return { status: 'skipped', assessment };
     }
     // FAILED / INVALID / PARTIAL are terminal analysis outcomes (executionTerminal).
-    // Do NOT emit TOOL_FAILED — that hard-stops HOW and blocks Risk. Schedule still
-    // gates on scheduleReady; analysisStatus stays on the container for Gate2 UI.
+    // Do NOT emit TOOL_FAILED — that hard-stops HOW and blocks Risk/Schedule.
+    // Schedulable edges remain optional for Schedule; analysisStatus stays for Gate2 UI.
     if (
       assessment.status === 'failed' ||
       assessment.status === 'partial' ||
@@ -244,6 +244,19 @@ function makeApplySharedNode(toolName) {
         result?.executionTerminal);
     if (terminalApply && applyPatch) {
       update.container = patch;
+    }
+    // Echo WHAT proposal channels on the END node. Nested interrupt / subgraph→parent
+    // otherwise drops runFr/accept writes (only last-node update is visible upstream).
+    if (state.srsProposal != null) update.srsProposal = state.srsProposal;
+    if (state.proposalFragment != null) update.proposalFragment = state.proposalFragment;
+    if (state.frUnderstanding != null) update.frUnderstanding = state.frUnderstanding;
+    if (state.engineResultsById != null) update.engineResultsById = state.engineResultsById;
+    if (state.semanticStatuses != null) update.semanticStatuses = state.semanticStatuses;
+    if (state.conflictAmbiguityGate != null) {
+      update.conflictAmbiguityGate = state.conflictAmbiguityGate;
+    }
+    if (state.requirementIntegrityGate != null) {
+      update.requirementIntegrityGate = state.requirementIntegrityGate;
     }
     return update;
   };
@@ -493,6 +506,9 @@ function buildWhatSectionToolSubgraph(engineId, hooks = {}) {
         generateJsonFn: state.generateJsonFn || state.frOpts?.generateJsonFn || null,
         snapshotId: state.snapshotId,
         runId: state.runId,
+        // Parity HOW: reuse phase prepareWhat CP/corpus — do not re-prepare phase RAG.
+        contextPackage: state.contextPackage || state.frOpts?.reuseContextPackage || null,
+        corpus: state.corpus,
       });
       const applied = applyFrToolToState(state, frSem);
       const containerBase =

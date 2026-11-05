@@ -6,6 +6,12 @@
 
 const { REVIEW_LANE } = require('./gate2ReviewLane');
 const { GATE2_TRACKS, trackForSection } = require('./gate2ReviewOwnership');
+const {
+  buildLineConflictsFromTracks,
+  ensureLineConflictSeed,
+  openLineConflictCount,
+  resolveLineConflict,
+} = require('./gate2LineConflict');
 
 function emptyTracks({ techRequired = true } = {}) {
   return {
@@ -78,6 +84,8 @@ function applyGate2CollaborativeAction({
   decision = '',
   track = '',
   techRequired = true,
+  conflictId = '',
+  chosenRoleKey = '',
 }) {
   const act = String(action || '').trim().toLowerCase();
   const actor = String(userId || '').trim();
@@ -104,17 +112,29 @@ function applyGate2CollaborativeAction({
     throw err;
   };
 
-  const packState = (lane, notify) => ({
+  const packState = (lane, notify, extra = {}) => ({
     gate2: {
       ...current,
       reviewLane: lane,
       reviewLaneUpdatedAt: new Date().toISOString(),
       tracks,
       changeProposals: proposals,
+      ...(Array.isArray(current.lineConflicts) ? { lineConflicts: current.lineConflicts } : {}),
+      ...(current.synthesisDraft ? { synthesisDraft: current.synthesisDraft } : {}),
     },
     reviewLane: lane,
     notify: notify || null,
+    notifyLineRejected: Array.isArray(extra.notifyLineRejected) ? extra.notifyLineRejected : null,
   });
+
+  const seedLineConflictsOntoCurrent = () => {
+    const seeded = buildLineConflictsFromTracks({
+      tracks,
+      roleKeys: planRoleKeys,
+    });
+    current.lineConflicts = seeded.lineConflicts;
+    current.synthesisDraft = seeded.synthesisDraft;
+  };
 
   const findProposal = (id) => proposals.find((row) => String(row.id) === String(id));
 
@@ -160,6 +180,7 @@ function applyGate2CollaborativeAction({
       }
     }
     if (tracksReadyForConsolidation(tracks, planRoleKeys)) {
+      seedLineConflictsOntoCurrent();
       const nextLane = reviewPlan?.synthesisRoleKey
         ? REVIEW_LANE.CONSOLIDATION
         : REVIEW_LANE.PO_FINAL;
@@ -174,6 +195,31 @@ function applyGate2CollaborativeAction({
       });
     }
     return packState(REVIEW_LANE.PARALLEL, null);
+  }
+
+  if (act === 'resolve_line_conflict') {
+    if (reviewLane !== REVIEW_LANE.CONSOLIDATION && reviewLane !== REVIEW_LANE.RECONFIRM) {
+      fail(409, 'GATE2_WRONG_LANE', 'Chỉ vai trò tổng hợp mới chốt conflict dòng.');
+    }
+    const seeded = ensureLineConflictSeed(
+      { ...current, tracks },
+      { roleKeys: planRoleKeys }
+    );
+    current.lineConflicts = seeded.lineConflicts;
+    current.synthesisDraft = seeded.synthesisDraft;
+    const resolved = resolveLineConflict({
+      lineConflicts: current.lineConflicts,
+      synthesisDraft: current.synthesisDraft,
+      conflictId,
+      chosenRoleKey,
+      userId: actor,
+      note: noteTrim,
+    });
+    current.lineConflicts = resolved.lineConflicts;
+    current.synthesisDraft = resolved.synthesisDraft;
+    return packState(REVIEW_LANE.CONSOLIDATION, null, {
+      notifyLineRejected: resolved.notifyLineRejected,
+    });
   }
 
   if (act === 'propose_change') {
@@ -354,6 +400,20 @@ function applyGate2CollaborativeAction({
         'Còn đề xuất chờ xác nhận, bị từ chối chưa xử lý, hoặc đang escalate.'
       );
     }
+    const seeded = ensureLineConflictSeed(
+      { ...current, tracks },
+      { roleKeys: planRoleKeys }
+    );
+    current.lineConflicts = seeded.lineConflicts;
+    current.synthesisDraft = seeded.synthesisDraft;
+    const openLines = openLineConflictCount(current.lineConflicts);
+    if (openLines > 0) {
+      fail(
+        409,
+        'GATE2_LINE_CONFLICTS_OPEN',
+        `Còn ${openLines} dòng conflict chưa chốt giữa các bản review.`
+      );
+    }
     current.consolidatedBy = actor;
     current.consolidatedAt = new Date().toISOString();
     if (noteTrim) current.consolidationNote = noteTrim;
@@ -384,4 +444,5 @@ module.exports = {
   isBlockingProposal,
   blockingProposals,
   applyGate2CollaborativeAction,
+  openLineConflictCount,
 };

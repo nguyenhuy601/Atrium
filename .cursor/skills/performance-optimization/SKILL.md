@@ -1,7 +1,7 @@
 ---
 name: performance-optimization
 description: >-
-  Optimizes VoiceHub performance with measure-first approach: repro, bottleneck, change, validate. Use when slow queries/UI or N+1 suspected.
+  Optimizes Atrium performance with measure-first approach: repro, bottleneck, change, validate. Use when slow queries/UI or N+1 suspected.
 ---
 
 # performance optimization

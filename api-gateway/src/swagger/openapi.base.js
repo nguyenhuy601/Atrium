@@ -38,7 +38,7 @@ const MODULE_TAGS = [
 
 function buildOpenApiBase(env = process.env) {
   const version = String(env.SWAGGER_API_VERSION || readGatewayPackageVersion()).trim() || '1.0.0';
-  const contactName = String(env.SWAGGER_CONTACT_NAME || 'VoiceHub Team').trim();
+  const contactName = String(env.SWAGGER_CONTACT_NAME || 'Atrium Team').trim();
   const contactEmail = String(env.SWAGGER_CONTACT_EMAIL || '').trim();
   const contactUrl = String(env.SWAGGER_CONTACT_URL || '').trim();
   const licenseName = String(env.SWAGGER_LICENSE_NAME || 'ISC').trim();
@@ -52,7 +52,7 @@ function buildOpenApiBase(env = process.env) {
   const license = { name: licenseName };
   if (licenseUrl) license.url = licenseUrl;
 
-  const servers = [{ url: '/', description: 'Same-origin (Nginx / voicehub.local)' }];
+  const servers = [{ url: '/', description: 'Same-origin (Nginx / atrium.dev)' }];
   if (serverUrl) {
     servers.unshift({ url: serverUrl, description: 'Configured SWAGGER_SERVER_URL' });
   }
@@ -60,7 +60,7 @@ function buildOpenApiBase(env = process.env) {
   return {
     openapi: '3.0.3',
     info: {
-      title: 'VoiceHub API',
+      title: 'Atrium API',
       description:
         'Public HTTP surface qua API Gateway.\n\n' +
         '- **Authorize**: Bearer JWT từ `POST /api/auth/login`\n' +

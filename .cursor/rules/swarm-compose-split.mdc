@@ -1,9 +1,9 @@
 ---
-description: VoiceHub dev — Docker Swarm cho app + infra AI (ollama/minio/qdrant)
+description: Atrium dev — Docker Swarm cho app + infra AI (ollama/minio/qdrant)
 alwaysApply: true
 ---
 
-# Swarm vs Compose — môi trường dev VoiceHub
+# Swarm vs Compose — môi trường dev Atrium
 
 ## Quy tắc nhớ nhanh
 
@@ -20,14 +20,14 @@ DNS trên overlay (cùng stack): `http://ollama:11434`, `http://minio:9000`, `ht
 
 **Ưu tiên pull/update, hạn chế build** — chi tiết: [docker-vhdx-disk.mdc](./docker-vhdx-disk.mdc).
 
-Chỉ build **một** service vừa sửa (tag `voicehub-<service>:latest`):
+Chỉ build **một** service vừa sửa (tag `atrium-<service>:latest`):
 
 ```bash
 bash devops/swarm/build-local-images.sh <service-name>
-docker service update --force --update-parallelism 1 --update-order start-first voicehub_<service-name>
+docker service update --force --update-parallelism 1 --update-order start-first atrium_<service-name>
 ```
 
-Infra image public (ollama/minio/qdrant): không build local — `docker service update --force voicehub_<name>` hoặc redeploy stack.
+Infra image public (ollama/minio/qdrant): không build local — `docker service update --force atrium_<name>` hoặc redeploy stack.
 
 Profile dev (label ai + pull model):
 
@@ -38,6 +38,6 @@ bash devops/swarm/dev-enable-profile.sh
 ## Khi agent gợi ý lệnh Docker
 
 - Sửa một microservice → **build đúng service đó** + `service update --force`; tránh `build-local-images.sh` không tham số.
-- Sửa/restart ollama/minio/qdrant → Swarm `docker service update --force voicehub_<name>` (không `compose up`).
+- Sửa/restart ollama/minio/qdrant → Swarm `docker service update --force atrium_<name>` (không `compose up`).
 - Không nhầm `docker compose up` root/stack yml cho microservices đã deploy Swarm.
 - Tránh redeploy toàn stack khi chỉ cần rolling một service.

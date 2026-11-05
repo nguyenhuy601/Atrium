@@ -2,7 +2,7 @@ const amqp = require('amqplib');
 const { assertQuorumQueue } = require('@enterprise/shared/messaging/rabbitQuorum');
 
 const DISPATCH_QUEUE =
-  process.env.RABBITMQ_NOTIFICATION_DISPATCH_QUEUE || 'voicehub.notification.dispatch';
+  process.env.RABBITMQ_NOTIFICATION_DISPATCH_QUEUE || 'atrium.notification.dispatch';
 
 async function publishDispatchJob(payload) {
   const url = process.env.RABBITMQ_URL;

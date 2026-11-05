@@ -4,6 +4,7 @@ import WhatMonitorResultsPanel from './WhatMonitorResultsPanel';
 import HowMonitorResultsPanel from './HowMonitorResultsPanel';
 import { shouldShowWhatMonitorResults } from './whatMonitorResultsVisibility';
 import { shouldShowHowMonitorResults } from './howMonitorResultsVisibility';
+import { resolveGate2WaitingMessage } from './gate2ReviewCopy';
 
 function labelOf(t, key, fallback) {
   const value = typeof t === 'function' ? t(key) : '';
@@ -63,6 +64,7 @@ export default function AiHitlReviewPanel({
   setGate2Decision = null,
   parallelTracks = [],
   gate2Proposals = [],
+  gate2ReviewPlan = null,
   onGate2TrackSubmit,
   onGate2RefreshSchedule = null,
   onGate2ProposeChange,
@@ -70,6 +72,7 @@ export default function AiHitlReviewPanel({
   onGate2KeepOriginal,
   onGate2Escalate,
   onGate2ResolveEscalation,
+  onGate2ResolveLineConflict,
   onGate2PmConfirmPlan,
   onGate2PoApprove,
   onGate2PoReject,
@@ -148,28 +151,27 @@ export default function AiHitlReviewPanel({
   }
 
   if (reviewMode === 'gate2') {
-    let gate2WaitingMessage = null;
-    if (
-      gate2ReviewView === 'waitingParallel' ||
-      gate2ReviewView === 'waitingPm' ||
-      gate2ReviewView === 'waitingTech'
-    ) {
-      gate2WaitingMessage = labelOf(
-        t,
-        'requirements.gate2WaitingParallel',
-        'Đang chờ các vai trò đã chọn review toàn bộ kế hoạch.'
-      );
-    } else if (gate2ReviewView === 'waitingConsolidation') {
-      gate2WaitingMessage = labelOf(
-        t,
-        'requirements.gate2WaitingConsolidation',
-        'Đã đủ review song song. Chờ PM tổng hợp xung đột rồi gửi PO xác nhận cuối.'
-      );
-    } else if (gate2ReviewView === 'waitingPo') {
-      gate2WaitingMessage = labelOf(
-        t,
-        'requirements.gate2WaitingPo',
-        'PM đã gửi bản tổng hợp. Chờ PO xác nhận cuối Gate 2.'
+    const gate2WaitingMessage = resolveGate2WaitingMessage({
+      reviewView: gate2ReviewView,
+      reviewPlan: gate2ReviewPlan,
+      t,
+    });
+
+    if (gate2ReviewView === 'howPending') {
+      return (
+        <div>
+          <h2 className="mb-3 text-sm font-semibold text-foreground">
+            {labelOf(t, 'requirements.aiHitlGate2Title', 'Gate 2 — Kế hoạch (HOW)')}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {gate2WaitingMessage ||
+              labelOf(
+                t,
+                'requirements.gate2HowPending',
+                'Vai trò đã gán: {actors}. Chưa có bảng duyệt vì AI Planning (HOW) chưa xong — chạy/theo dõi HOW trên tab Monitor. Khi HOW ready, bảng Gate 2 hiện tại đây.'
+              )}
+          </p>
+        </div>
       );
     }
 
@@ -197,6 +199,7 @@ export default function AiHitlReviewPanel({
           busy={gate2Busy}
           canPromote={canPromote}
           pack={pack}
+          reviewPlan={gate2ReviewPlan}
           decisions={gate2Decisions}
           setDecision={setGate2Decision}
           t={t}
@@ -209,6 +212,7 @@ export default function AiHitlReviewPanel({
           onKeepOriginal={onGate2KeepOriginal}
           onEscalate={onGate2Escalate}
           onResolveEscalation={onGate2ResolveEscalation}
+          onResolveLineConflict={onGate2ResolveLineConflict}
           onPmConfirmPlan={onGate2PmConfirmPlan}
           onPoApprove={onGate2PoApprove}
           onPoReject={onGate2PoReject}

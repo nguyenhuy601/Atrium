@@ -1,5 +1,5 @@
 ---
-description: Quy chuẩn animation/motion enterprise VoiceHub — token, map action→pattern, presence overlay, cấm invent keyframes
+description: Quy chuẩn animation/motion enterprise Atrium — token, map action→pattern, presence overlay, cấm invent keyframes
 globs: client/src/**/*.{jsx,tsx,css,js}
 alwaysApply: false
 ---

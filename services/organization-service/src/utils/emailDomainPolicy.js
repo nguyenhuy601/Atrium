@@ -55,7 +55,7 @@ function assertEmailDomainAllowed(email, allowedDomains) {
 
 /**
  * Resolve list từ Organization.settings + env fallback.
- * ORG_ALLOWED_EMAIL_DOMAINS=gmail.com,voicehub.local,voicehub.net
+ * ORG_ALLOWED_EMAIL_DOMAINS=gmail.com,atrium.dev,atrium.net
  */
 function resolveAllowedEmailDomains(organization) {
   const fromOrg = organization?.settings?.allowedEmailDomains;

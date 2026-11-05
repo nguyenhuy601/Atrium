@@ -575,6 +575,8 @@ async function confirmAiAnalysisPhase(req, res) {
       proposal: req.body?.proposal,
       proposalId: req.body?.proposalId,
       decision: req.body?.decision,
+      conflictId: req.body?.conflictId,
+      chosenRoleKey: req.body?.chosenRoleKey,
       forceApprove: Boolean(req.body?.forceApprove),
       overrideReason: String(req.body?.overrideReason || '').trim().slice(0, 2000),
     });
@@ -608,6 +610,10 @@ async function startPhaseAiPlanning(req, res) {
     const impactScope = Array.isArray(impactScopeRaw)
       ? impactScopeRaw.map((s) => String(s || '').trim()).filter(Boolean)
       : [];
+    const rerunToolsRaw = req.body?.rerunTools;
+    const rerunTools = Array.isArray(rerunToolsRaw)
+      ? rerunToolsRaw.map((s) => String(s || '').trim()).filter(Boolean)
+      : [];
     const data = await startPhaseAiPlanningRun({
       userId,
       organizationId,
@@ -617,6 +623,7 @@ async function startPhaseAiPlanning(req, res) {
       mode: req.body?.mode || '',
       feedback: req.body?.feedback || '',
       impactScope,
+      rerunTools,
       action: req.body?.action || '',
       decision: req.body?.decision || '',
       runId: req.body?.runId || '',
@@ -625,6 +632,7 @@ async function startPhaseAiPlanning(req, res) {
       parentRunId: req.body?.parentRunId || '',
       contextProjectId: req.body?.projectId || null,
       locale: locale || undefined,
+      snapshotPolicy: req.body?.snapshotPolicy || 'reuse_if_valid',
       idempotencyKey,
     });
     const httpStatus = Number(data?.httpStatus) === 200 ? 200 : 202;

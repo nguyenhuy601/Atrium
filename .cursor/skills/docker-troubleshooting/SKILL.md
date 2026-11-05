@@ -1,7 +1,7 @@
 ---
 name: docker-troubleshooting
 description: >-
-  Troubleshoots VoiceHub Docker/Swarm issues: container, logs, network, volume, env to root cause to fix. Respects Swarm vs Compose split and disk constraints.
+  Troubleshoots Atrium Docker/Swarm issues: container, logs, network, volume, env to root cause to fix. Respects Swarm vs Compose split and disk constraints.
 ---
 
 # docker troubleshooting

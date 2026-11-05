@@ -1,7 +1,7 @@
 ---
 name: test-analysis
 description: >-
-  Analyzes VoiceHub test failures and flakes to find root causes and next actions. Use after CI or local test fails.
+  Analyzes Atrium test failures and flakes to find root causes and next actions. Use after CI or local test fails.
 ---
 
 # test analysis

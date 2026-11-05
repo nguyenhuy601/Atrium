@@ -15,6 +15,7 @@ import ProjectHubPlanningPanel from './ProjectHubPlanningPanel';
 import ProjectHubListPanel from './ProjectHubListPanel';
 import ProjectHubTimelinePanel from './ProjectHubTimelinePanel';
 import ProjectHubChangeRequestsPanel from './ProjectHubChangeRequestsPanel';
+import ProjectHubExecutionControlPanel from './ExecutionControl/ProjectHubExecutionControlPanel';
 import ProjectHubTestCasesPanel from './ProjectHubTestCasesPanel';
 import ProjectHubDeliveryPhasePanel from './ProjectHubDeliveryPhasePanel';
 import WorkItemDetail from './WorkItemDetail';
@@ -977,7 +978,7 @@ export default function ProjectHubShell({
     if (id && id !== tab) setTabState(id);
   }, [activeModule]);
 
-  const [visitedTabs, setVisitedTabs] = useState(() => ({ overview: true }));
+  const [visitedTabs, setVisitedTabs] = useState(() => ({}));
   const prevHubProjectIdRef = useRef('');
   const [membersEpoch, setMembersEpoch] = useState(0);
   const [apiActivity, setApiActivity] = useState(null);
@@ -1016,7 +1017,9 @@ export default function ProjectHubShell({
     data: overviewPayload = null,
     isLoading: overviewLoading,
     refetch: refetchOverview,
-  } = useProjectHubOverview(projectId, { enabled: useOverviewAggregate });
+  } = useProjectHubOverview(projectId, {
+    enabled: useOverviewAggregate && tab === 'overview',
+  });
   const { data: projectQueryData = null } = useProjectHubProject(projectId);
   const projectPayload = projectQueryData ?? overviewPayload?.project ?? null;
   // Fail-closed: không mở CTA manage khi thiếu capabilities payload (tránh canManage fallback lệch role).
@@ -1038,7 +1041,7 @@ export default function ProjectHubShell({
     } else {
       setTab('overview');
     }
-    setVisitedTabs({ [nextTab]: true, overview: true });
+    setVisitedTabs({ [nextTab]: true });
     setApiActivity(null);
     setActivityLoading(false);
     setActivityError(false);
@@ -1090,6 +1093,10 @@ export default function ProjectHubShell({
   const isProjectCompleted = isProjectCompletedStatus(
     projectPayload?.status || resolvedBoard?.status
   );
+  const isDraftProject =
+    String(projectPayload?.status || resolvedBoard?.status || '')
+      .trim()
+      .toLowerCase() === 'draft';
   const workLooksComplete = summary.total > 0 && summary.donePercent === 100;
   const informationLevel = String(
     projectPayload?.access?.informationLevel ||
@@ -1106,8 +1113,7 @@ export default function ProjectHubShell({
     enabled:
       Boolean(projectId) &&
       hubCaps.canViewMembers &&
-      (overviewVisibility.canViewMemberBreakdown ||
-        tab === 'members' ||
+      (tab === 'members' ||
         Boolean(visitedTabs.members) ||
         tab === 'changeRequests' ||
         Boolean(visitedTabs.changeRequests)),
@@ -1120,11 +1126,14 @@ export default function ProjectHubShell({
     (tab === 'overview' && overviewVisibility.canViewActivity) ||
     (tab === 'activity' && hubCaps.canViewActivityTab);
   const needsFiles = tab === 'files' && hubCaps.canViewFiles;
+  // Page-scoped: sprints theo tab hiện tại (không sticky visitedTabs.board).
   const needsSprints =
     Boolean(hubCaps.canViewSprints) &&
     (tab === 'board' ||
-      Boolean(visitedTabs.board) ||
-      (capsReady &&
+      tab === 'list' ||
+      tab === 'timeline' ||
+      (tab === 'overview' &&
+        capsReady &&
         (overviewVisibility.canViewSprintContext || Boolean(hubCaps.canCompleteProject))));
 
   const needsChartWorkItems = tab === 'overview' && overviewVisibility.canViewTaskMetrics;
@@ -1254,6 +1263,7 @@ export default function ProjectHubShell({
       }
       if (item.id === 'members' && !hubCaps.canViewMembers) return false;
       if (item.id === 'changeRequests' && !hubCaps.canViewChangeRequests) return false;
+      if (item.id === 'executionControl' && !hubCaps.canViewWorkItems) return false;
       if (item.id === 'testCases' && !hubCaps.canViewWorkItems) return false;
       if (item.id === 'planning' && !hubCaps.canViewBacklog) return false;
       // Timeline: SoT P2 default — show with work-items view (not gated on backlog:view)
@@ -1288,6 +1298,8 @@ export default function ProjectHubShell({
   const showTimelinePanel = Boolean(visitedTabs.timeline) && hubCaps.canViewWorkItems;
   const showChangeRequestsPanel =
     Boolean(visitedTabs.changeRequests) && hubCaps.canViewChangeRequests;
+  const showExecutionControlPanel =
+    Boolean(visitedTabs.executionControl) && hubCaps.canViewWorkItems;
   const showTestCasesPanel = Boolean(visitedTabs.testCases) && hubCaps.canViewWorkItems;
   const showMembersPanel = Boolean(visitedTabs.members) && hubCaps.canViewMembers;
 
@@ -1624,7 +1636,16 @@ export default function ProjectHubShell({
     </div>
   ) : null;
 
-  if (!hasBoard) {
+  /** Ops / collab tabs that must render without a selected kanban board (suite deep-link). */
+  const boardlessOpsTab =
+    tab === 'settings' ||
+    tab === 'members' ||
+    tab === 'activity' ||
+    tab === 'files' ||
+    tab === 'changeRequests' ||
+    tab === 'chat';
+
+  if (!hasBoard && !boardlessOpsTab) {
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div
@@ -1869,6 +1890,17 @@ export default function ProjectHubShell({
           />
         </div>
         ) : null}
+        {tab === 'planning' && hideTabBar && capsReady && !hubCaps.canViewBacklog ? (
+          <div className="flex min-h-[8rem] items-center justify-center p-4 text-sm text-muted-foreground">
+            {t('workspace.projectHubPlanningDenied')}
+          </div>
+        ) : null}
+        {tab === 'planning' && hideTabBar && !capsReady ? (
+          <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            <span>{t('common.loading')}</span>
+          </div>
+        ) : null}
         {showPlanningPanel ? (
         <div
           className={
@@ -2007,14 +2039,31 @@ export default function ProjectHubShell({
             <span>{t('common.loading')}</span>
           </div>
         ) : null}
+        {showExecutionControlPanel ? (
+          <div
+            className={
+              tab === 'executionControl'
+                ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
+                : 'hidden'
+            }
+            hidden={tab !== 'executionControl'}
+            aria-hidden={tab !== 'executionControl'}
+          >
+            <ProjectHubExecutionControlPanel
+              projectId={projectId}
+              listActive={tab === 'executionControl'}
+            />
+          </div>
+        ) : null}
+
         {showChangeRequestsPanel ? (
-        <div
-          className={
-            tab === 'changeRequests' ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'hidden'
-          }
-          hidden={tab !== 'changeRequests'}
-          aria-hidden={tab !== 'changeRequests'}
-        >
+          <div
+            className={
+              tab === 'changeRequests' ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : 'hidden'
+            }
+            hidden={tab !== 'changeRequests'}
+            aria-hidden={tab !== 'changeRequests'}
+          >
           <ProjectHubChangeRequestsPanel
             projectId={projectId}
             listActive={tab === 'changeRequests'}
@@ -2101,6 +2150,17 @@ export default function ProjectHubShell({
         {tab === 'activity' && hubCaps.canViewActivityTab ? (
           <ActivityPanel activity={activity} locale={locale} isDarkMode={isDarkMode} t={t} />
         ) : null}
+        {tab === 'activity' && hideTabBar && capsReady && !hubCaps.canViewActivityTab ? (
+          <div className="flex min-h-[8rem] items-center justify-center p-4 text-sm text-muted-foreground">
+            {t('workspace.projectHubActivityDenied')}
+          </div>
+        ) : null}
+        {tab === 'activity' && hideTabBar && !capsReady ? (
+          <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            <span>{t('common.loading')}</span>
+          </div>
+        ) : null}
         {tab === 'settings' &&
         (hubCaps.canViewSettings ||
           hubCaps.canManageSettings ||
@@ -2119,6 +2179,7 @@ export default function ProjectHubShell({
             canArchiveProject={Boolean(hubCaps.canArchiveProject)}
             canArchiveWithoutComplete={Boolean(hubCaps.canArchiveWithoutComplete)}
             isProjectCompleted={isProjectCompleted}
+            isDraftProject={isDraftProject}
             projectStillActive={projectStillActive}
             onRequestArchive={() => setArchiveProjectOpen(true)}
             isDarkMode={isDarkMode}
@@ -2185,10 +2246,19 @@ export default function ProjectHubShell({
           isOpen={archiveProjectOpen}
           projectId={projectId}
           projectTitle={resolvedBoard?.title || projectPayload?.title || ''}
-          earlyArchive={!isProjectCompleted && Boolean(hubCaps.canArchiveWithoutComplete)}
+          draftDelete={isDraftProject}
+          earlyArchive={
+            !isDraftProject &&
+            !isProjectCompleted &&
+            Boolean(hubCaps.canArchiveWithoutComplete)
+          }
           onClose={() => setArchiveProjectOpen(false)}
           onArchived={() => {
-            toast.success(t('workspace.projectHubArchiveSuccess'));
+            toast.success(
+              isDraftProject
+                ? t('workspace.projectHubDeleteDraftSuccess')
+                : t('workspace.projectHubArchiveSuccess')
+            );
             setArchiveProjectOpen(false);
             writeStoredLastProjectId('');
             void queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
