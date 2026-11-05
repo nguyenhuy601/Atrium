@@ -10,35 +10,14 @@ pnpm-lock.yaml
 # ========================
 # Environment Variables
 # ========================
-# Không commit secret — chỉ giữ *.example / *.sample nếu có
+# Không commit secret
 .env
 .env.*
-!**/.env.example
-!**/.env.sample
-!**/.env.*.example
-!devops/swarm/.env.swarm.example
 
-# Cloudflare Origin CA (P5 — never commit)
-devops/nginx/certs/cf-origin.pem
-devops/nginx/certs/cf-origin-key.pem
-
-# Ignore local docs/scripts in this workspace (keep SoT docs tracked)
-docs/*
-!docs/ARCHITECTURE.md
-!docs/MIGRATION.md
-!docs/STRUCTURE.md
-!docs/LICENSE
-# Local/dev generated scripts (repo-root ./scripts/; pattern also matches **/scripts/)
-scripts/
-# Only CI/CD devops scripts are source-controlled (un-ignore parents so Git can traverse)
-!devops/
-!devops/scripts/
-!devops/scripts/security/
-!devops/scripts/security/**
-!devops/scripts/docker/
-!devops/scripts/docker/**
-!devops/scripts/release/
-!devops/scripts/release/**
+# Thư mục nội bộ — không đưa vào source public
+/docs/
+/devops/
+/scripts/
 
 # Local analysis cache (false-positive noise for secret scanners)
 .grapuco/
@@ -161,9 +140,6 @@ docker-compose.override.yml
 /tmp/
 /deep-research-report.md
 /summary 1.md
-devops/nginx/dev-https-runtime-*.conf
-# Demo / bàn giao RBAC local (workbook + báo cáo — không commit; giữ trên máy)
-devops/demo/
 # Plan Mode local drafts (repo chỉ track vài plan đã chốt)
 .cursor/plans/*.plan.md
 !.cursor/plans/.gitkeep
