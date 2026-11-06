@@ -20,6 +20,12 @@ export const WHAT_MONITOR_CONFIG = Object.freeze({
 export function isHowRunWallTimedOut(liveRun, phaseHow, now = Date.now()) {
   const maxLive = Number(WHAT_MONITOR_CONFIG.howRunMaxLiveMs) || 0;
   if (maxLive <= 0) return false;
+  // Optimistic HOW re-run clears remoteRunId until refresh binds the new run —
+  // never treat that local epoch as wall-stale (old startedAt would falsely unlock).
+  const hasBoundRun = Boolean(
+    String(liveRun?.runId || '').trim() || String(phaseHow?.remoteRunId || '').trim()
+  );
+  if (!hasBoundRun) return false;
   const startedRaw = liveRun?.startedAt || phaseHow?.startedAt || null;
   if (!startedRaw) return false;
   const startedAt = new Date(startedRaw).getTime();

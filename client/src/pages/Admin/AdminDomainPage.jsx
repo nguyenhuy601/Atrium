@@ -297,7 +297,7 @@ export default function AdminDomainPage() {
   const { isSystemAdmin } = useCompanyAdminAccess();
   const { hasGrant, scopeOf } = useEffectiveMasterGrants(orgId);
   const entries = useMemo(() => collectAdminRouteEntries(ADMIN_DOMAINS), []);
-  const currentPath = String(location.pathname || '').replace(/\/+$/, '') || '/app/admin';
+  const currentPath = String(location.pathname || '').replace(/\/+$/, '') || '/admin';
 
   const legacy = resolveAdminLegacyRedirect(location.pathname, location.search);
   if (legacy) {
@@ -322,7 +322,7 @@ export default function AdminDomainPage() {
       );
       if (firstAllowed?.path) return <Navigate to={firstAllowed.path} replace />;
     }
-    return <Navigate to="/app/admin" replace />;
+    return <Navigate to="/admin" replace />;
   }
 
   const impl = match.item.implementation;
@@ -338,7 +338,7 @@ export default function AdminDomainPage() {
     if (decision.action === 'redirect-first-allowed' && decision.path) {
       return <Navigate to={decision.path} replace />;
     }
-    return <Navigate to="/app/company/home" replace state={{ routeDenied: 'admin' }} />;
+    return <Navigate to="/company/home" replace state={{ routeDenied: 'admin' }} />;
   }
 
   if (impl?.startsWith('settings-')) return <CompanyAdminSettingsPage />;

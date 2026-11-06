@@ -6,7 +6,7 @@ import { useGrantScopes } from './useGrantScopes';
 import { useAppStrings } from '../locales/appStrings';
 
 /**
- * Gate CTA/form suite `/app/admin` — SoT = navItemIsAllowed (maintain Nhà cung cấp + grantScopes).
+ * Gate CTA/form suite `/admin` — SoT = navItemIsAllowed (maintain Nhà cung cấp + grantScopes).
  * @param {string} [orgIdProp] — mặc định org từ useCompanyAdminAccess
  */
 export function useAdminActionGate(orgIdProp) {

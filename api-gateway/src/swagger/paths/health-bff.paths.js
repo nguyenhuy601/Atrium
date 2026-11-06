@@ -1,5 +1,5 @@
 /**
- * Curated paths — BFF.
+ * Curated paths — BFF + dashboard report resource.
  */
 
 const { buildOperation, pathParam } = require('../components/op.helpers');
@@ -15,43 +15,32 @@ module.exports = {
       successExample: { success: true, data: { user: {}, organizations: [] } },
     }),
   },
-  '/api/dashboard/summary': {
+  '/api/reports/v1/dashboard/me': {
     get: buildOperation({
-      operationId: 'getDashboardSummary',
-      tags: ['BFF'],
-      summary: 'Dashboard summary',
-      description: 'Tóm tắt dashboard cá nhân / org context.',
+      operationId: 'getDashboardMe',
+      tags: ['Reports'],
+      summary: 'Dashboard summary (read model)',
+      description:
+        'Tóm tắt dashboard cá nhân từ report-service CQRS read model. Warm Redis; miss/stale thì snapshot refresh.',
       requireNotFound: false,
-      parameters: [
-        {
-          name: 'organizationId',
-          in: 'query',
-          required: false,
-          description: 'Org context (optional)',
-          schema: { type: 'string', example: '507f1f77bcf86cd799439011' },
-        },
-      ],
-      successExample: { success: true, data: { widgets: [] } },
-    }),
-  },
-  '/api/organizations/{orgId}/shell': {
-    get: buildOperation({
-      operationId: 'getOrgShellBff',
-      tags: ['BFF'],
-      summary: 'Org shell (BFF)',
-      description: 'Nav / membership snapshot cho UI.',
-      parameters: [pathParam('orgId', 'Organization id')],
-      successExample: { success: true, data: { organization: {}, membership: {} } },
+      successExample: {
+        success: true,
+        data: { orgCount: 0, asOf: '2026-01-01T00:00:00.000Z', upcomingMeetings: [] },
+      },
     }),
   },
   '/api/organizations/{orgId}/documents-overview': {
     get: buildOperation({
-      operationId: 'getOrgDocumentsOverviewBff',
-      tags: ['BFF'],
-      summary: 'Documents overview (BFF)',
-      description: 'Tổng quan tài liệu theo org.',
+      operationId: 'getOrgDocumentsOverview',
+      tags: ['Organizations'],
+      summary: 'Documents overview (REST)',
+      description:
+        'Tổng quan tài liệu theo org — proxy organization-service. Query view=summary|full.',
       parameters: [pathParam('orgId', 'Organization id')],
-      successExample: { success: true, data: { documents: [] } },
+      successExample: {
+        success: true,
+        data: { documentCount: 0, channels: [], attachmentMessages: [], libraryDocuments: [] },
+      },
     }),
   },
 };

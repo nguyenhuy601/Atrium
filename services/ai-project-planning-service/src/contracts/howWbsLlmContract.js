@@ -26,7 +26,8 @@ const WBS_LLM_MAX_FR = 48;
 const WBS_LLM_MAX_CAPS = 12;
 const WBS_LLM_DEFAULT_TIMEOUT_MS = 240000;
 /** qwen-plus max output on DashScope. One WBS call may use this whole budget. */
-const WBS_LLM_MAX_OUTPUT_TOKENS = 32768;
+/** DashScope compatible-mode ceiling (qwen-plus/flash/omni). qwen-max clamped lower in client. */
+const WBS_LLM_MAX_OUTPUT_TOKENS = 16384;
 /** One task JSON in Vietnamese is ~90–150 tokens. 40 truncates a full leaf. */
 const WBS_LLM_TOKENS_PER_LEAF = 160;
 const WBS_LLM_PREDICT_ENVELOPE = 80;
@@ -217,6 +218,20 @@ function resolveWbsLlmMaxRepair(env = process.env) {
 }
 
 /**
+ * Soft input-token budget for one WBS prompt (instructions + FR= + WBS_SEMANTIC=).
+ * Operational meter uses estimateTokens (chars/4); keep well under DashScope 49152.
+ * Override: HOW_WBS_PROMPT_TOKEN_BUDGET
+ */
+const WBS_LLM_DEFAULT_PROMPT_TOKEN_BUDGET = 12000;
+
+function resolveWbsPromptTokenBudget(env = process.env) {
+  return clampInt(env.HOW_WBS_PROMPT_TOKEN_BUDGET, WBS_LLM_DEFAULT_PROMPT_TOKEN_BUDGET, {
+    min: 2000,
+    max: 40000,
+  });
+}
+
+/**
  * True when LLM WBS flag on and pack has ≥1 FR (large packs use chunked LLM).
  * @param {object} pack
  * @param {NodeJS.ProcessEnv} [env]
@@ -263,5 +278,7 @@ module.exports = {
   resolveWbsLlmMaxChunks,
   WBS_LLM_MAX_REPAIR,
   resolveWbsLlmMaxRepair,
+  WBS_LLM_DEFAULT_PROMPT_TOKEN_BUDGET,
+  resolveWbsPromptTokenBudget,
   shouldAttemptWbsLlm,
 };

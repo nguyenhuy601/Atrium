@@ -26,7 +26,7 @@ export default function PeoplePanel({ orgId }) {
     if (!orgId) return;
     setLoading(true);
     try {
-      const res = await organizationAPI.getMembersWithRoles(orgId);
+      const res = await organizationAPI.getMembersWithRoles(orgId, { view: 'admin_table' });
       const data = unwrap(res);
       const list = data?.data?.members || data?.members || data;
       const raw = Array.isArray(list) ? list : [];

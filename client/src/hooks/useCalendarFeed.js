@@ -73,8 +73,14 @@ function yearMonthKey(date) {
 /**
  * Feed lịch: task + meeting (API) trong tháng của selectedDate, + sự kiện local (merge).
  * TanStack Query — staleTime 45s; không refetch on window focus.
+ * departmentId additive — BE có thể chưa lọc.
  */
-export function useCalendarFeed(selectedDate, organizationId = '', projectId = '') {
+export function useCalendarFeed(
+  selectedDate,
+  organizationId = '',
+  projectId = '',
+  departmentId = ''
+) {
   const { t } = useAppStrings();
   const [localEvents, setLocalEvents] = useState([]);
 
@@ -90,9 +96,10 @@ export function useCalendarFeed(selectedDate, organizationId = '', projectId = '
   }, []);
 
   const pid = String(projectId || '').trim();
+  const deptId = String(departmentId || '').trim();
 
   const query = useQuery({
-    queryKey: queryKeys.calendar.feed(ym, organizationId || '', pid || ''),
+    queryKey: queryKeys.calendar.feed(ym, organizationId || '', pid || '', deptId || ''),
     queryFn: async () => {
       const dueFrom = range.from.toISOString();
       const dueTo = range.to.toISOString();
@@ -104,6 +111,7 @@ export function useCalendarFeed(selectedDate, organizationId = '', projectId = '
       };
       if (organizationId) filters.organizationId = organizationId;
       if (pid) filters.projectId = pid;
+      if (deptId) filters.departmentId = deptId;
 
       const [tRes, mRes] = await Promise.all([
         taskAPI.getTasks(filters),
@@ -111,6 +119,7 @@ export function useCalendarFeed(selectedDate, organizationId = '', projectId = '
           startFrom: dueFrom,
           startTo: dueTo,
           ...(organizationId ? { organizationId } : {}),
+          ...(deptId ? { departmentId: deptId } : {}),
         }),
       ]);
 

@@ -19,6 +19,7 @@ import NotificationsTimeGroupList from './NotificationsTimeGroupList';
 import NotificationPreviewPane from './NotificationPreviewPane';
 import NotificationBulkBar from './NotificationBulkBar';
 import { useAppStrings } from '../../locales/appStrings';
+import QueryStateView from '../Shared/QueryStateView';
 
 function FilterCountBadge({ count, active, accentClass = 'bg-primary' }) {
   if (count == null || count <= 0) return null;
@@ -56,6 +57,10 @@ export default function NotificationsFigmaView({
   emptyMessage,
   emptyHint,
   loading = false,
+  loadError = false,
+  loadErrorMessage = '',
+  onRetryLoad,
+  retryLoadDisabled = false,
   getActionKind,
   actingNotifId = '',
   markingAll = false,
@@ -66,8 +71,6 @@ export default function NotificationsFigmaView({
   onMarkReadNotification,
   onClearSelection,
   onDeleteNotification,
-  onAcceptFriend,
-  onRejectFriend,
   onJoinVoice,
   onMarkAllRead,
   onToggleBulkMode,
@@ -166,7 +169,7 @@ export default function NotificationsFigmaView({
           </button>
           <button
             type="button"
-            onClick={() => navigate('/app/me/settings#notifications')}
+            onClick={() => navigate('/me/settings#notifications')}
             className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-lg border-none bg-muted text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
             title={t('notifications.settingsAria')}
             aria-label={t('notifications.settingsAria')}
@@ -269,32 +272,35 @@ export default function NotificationsFigmaView({
           ) : null}
         </div>
 
-        {loading ? (
-          <div className="py-16 text-center text-sm text-muted-foreground">{t('common.loadingEllipsis')}</div>
-        ) : null}
-
-        {!loading && totalVisible === 0 ? (
-          <div className="px-6 py-16 text-center">
-            {(() => {
-              const emptyVisual =
-                typeFilter !== 'all'
-                  ? getTypeFilterVisual(typeFilter)
-                  : getPrimaryFilterVisual(primaryFilter);
-              const EmptyIcon = emptyVisual.Icon || BellOff;
-              return (
-                <div
-                  className={`mx-auto mb-4 flex h-[60px] w-[60px] items-center justify-center rounded-[14px] border ${emptyVisual.bg} ${emptyVisual.border}`}
-                >
-                  <EmptyIcon className={`h-[26px] w-[26px] ${emptyVisual.color}`} aria-hidden />
-                </div>
-              );
-            })()}
-            <p className="mb-1.5 font-semibold text-foreground">{resolvedEmptyMessage}</p>
-            <p className="text-sm text-muted-foreground">{resolvedEmptyHint}</p>
-          </div>
-        ) : null}
-
-        {!loading && totalVisible > 0 ? (
+        <QueryStateView
+          loading={loading}
+          error={loadError}
+          errorMessage={loadErrorMessage}
+          onRetry={onRetryLoad}
+          retryDisabled={retryLoadDisabled}
+          isEmpty={totalVisible === 0}
+          empty={
+            <div className="px-6 py-16 text-center">
+              {(() => {
+                const emptyVisual =
+                  typeFilter !== 'all'
+                    ? getTypeFilterVisual(typeFilter)
+                    : getPrimaryFilterVisual(primaryFilter);
+                const EmptyIcon = emptyVisual.Icon || BellOff;
+                return (
+                  <div
+                    className={`mx-auto mb-4 flex h-[60px] w-[60px] items-center justify-center rounded-[14px] border ${emptyVisual.bg} ${emptyVisual.border}`}
+                  >
+                    <EmptyIcon className={`h-[26px] w-[26px] ${emptyVisual.color}`} aria-hidden />
+                  </div>
+                );
+              })()}
+              <p className="mb-1.5 font-semibold text-foreground">{resolvedEmptyMessage}</p>
+              <p className="text-sm text-muted-foreground">{resolvedEmptyHint}</p>
+            </div>
+          }
+        >
+        {totalVisible > 0 ? (
           <div className={FIGMA_NOTIF_SPLIT}>
             <div className={`${FIGMA_NOTIF_LIST_PANE} ${hasSelection ? 'hidden lg:block' : 'block'}`}>
               <NotificationsTimeGroupList
@@ -307,8 +313,6 @@ export default function NotificationsFigmaView({
                 actingNotifId={actingNotifId}
                 onOpen={onSelectNotification}
                 onDelete={onDeleteNotification}
-                onAcceptFriend={onAcceptFriend}
-                onRejectFriend={onRejectFriend}
                 onJoinVoice={onJoinVoice}
                 labels={actionLabels}
               />
@@ -332,8 +336,6 @@ export default function NotificationsFigmaView({
                   }
                   onMarkRead={onMarkReadNotification}
                   onDelete={onDeleteNotification}
-                  onAcceptFriend={onAcceptFriend}
-                  onRejectFriend={onRejectFriend}
                   onJoinVoice={onJoinVoice}
                   labels={actionLabels}
                 />
@@ -341,6 +343,7 @@ export default function NotificationsFigmaView({
             ) : null}
           </div>
         ) : null}
+        </QueryStateView>
       </div>
     </div>
   );

@@ -429,24 +429,24 @@ export default function AdminUserDetailDrawer({
               </div>
               <div className="flex flex-wrap gap-2 pt-2">
                 {canAssignOrgRole ? (
-                  <Link to={`/app/admin/rbac/org-roles/assign${q}`} className={DRAWER_LINK_CLASS}>
+                  <Link to={`/admin/rbac/org-roles/assign${q}`} className={DRAWER_LINK_CLASS}>
                     {t('adminUsers.assignRole')}
                   </Link>
                 ) : null}
                 {canUpdateEmployee ? (
                   <Link
-                    to={adminUserHubLink('/app/admin/users/people-ops', userId, 'assign-org')}
+                    to={adminUserHubLink('/admin/users/people-ops', userId, 'assign-org')}
                     className={DRAWER_LINK_CLASS}
                   >
                     {t('adminDomains.users.assignOrg')}
                   </Link>
                 ) : null}
                 {canAssignPosition ? (
-                  <Link to={`/app/admin/rbac/positions/assign${q}`} className={DRAWER_LINK_CLASS}>
+                  <Link to={`/admin/rbac/positions/assign${q}`} className={DRAWER_LINK_CLASS}>
                     {t('adminUsers.taxonomyLinkPosition')}
                   </Link>
                 ) : null}
-                <Link to={`/app/admin/rbac/organization-roles/lookup${q}`} className={DRAWER_LINK_CLASS}>
+                <Link to={`/admin/rbac/organization-roles/lookup${q}`} className={DRAWER_LINK_CLASS}>
                   {t('adminUsers.taxonomyLinkOrgLookup')}
                 </Link>
               </div>
@@ -516,7 +516,7 @@ export default function AdminUserDetailDrawer({
                 </ul>
               )}
               <Link
-                to={`/app/admin/accounts/login-history${q}`}
+                to={`/admin/accounts/login-history${q}`}
                 className="mt-3 inline-block rounded text-xs font-medium text-primary transition-colors duration-150 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
               >
                 {t('adminUsers.openFullHistory')}
@@ -527,12 +527,12 @@ export default function AdminUserDetailDrawer({
 
         <div className="flex flex-wrap gap-2 border-t border-border px-5 py-3">
           <Link
-            to={adminUserHubLink('/app/admin/users/people-ops', userId, 'edit')}
+            to={adminUserHubLink('/admin/users/people-ops', userId, 'edit')}
             className={adminPrimaryBtnClass('px-3 py-2 text-xs')}
           >
             {t('adminUsers.editInfo')}
           </Link>
-          <Link to={`/app/admin/accounts/detail${q}`} className={adminSecondaryBtnClass('px-3 py-2 text-xs')}>
+          <Link to={`/admin/accounts/detail${q}`} className={adminSecondaryBtnClass('px-3 py-2 text-xs')}>
             {t('adminDomains.accounts.detail')}
           </Link>
         </div>

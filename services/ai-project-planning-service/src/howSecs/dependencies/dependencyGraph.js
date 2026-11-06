@@ -173,11 +173,18 @@ function buildDependencySecGraph() {
     const runId = String(state.runId || state.snapshotId || 'run-dep');
     const attemptId = `${runId}:${inputHash}`;
 
+    // On LLM failure do not persist hundreds of allowList IDs into pack.aiAnalysis (HITL payload bloat).
+    const analyzedTaskIds = proposed.ok
+      ? allowIds.length > 64
+        ? allowIds.slice(0, 64)
+        : allowIds
+      : [];
     const result = toDependencyEngineResult(accepted, {
       model: proposed.meta?.model || null,
       llmCalls: proposed.meta?.llmCalls || 0,
       providerAttempts: proposed.meta?.providerAttempts || proposed.meta?.llmCalls || 0,
-      analyzedTaskIds: allowIds,
+      analyzedTaskIds,
+      analyzedTaskCount: allowIds.length,
       inputHash,
       wbsVersion,
       promptVersion: PROMPT_VERSION,

@@ -12,6 +12,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useAppStrings } from '../../locales/appStrings';
 import { consumeOneTimeLoginCredentials } from '../../utils/oneTimeLoginCredentials';
+import { getDefaultPathForSuite, readStoredSuite } from '../../utils/suitePathUtils';
 
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -80,7 +81,7 @@ function LoginPage({ landingDemo = false } = {}) {
     if (landingDemo || authLoading) return;
     if (oneTimeCreds || inviteForgotHint) return;
     if (isAuthenticated) {
-      navigate('/app', { replace: true });
+      navigate(getDefaultPathForSuite(readStoredSuite()), { replace: true });
     }
   }, [landingDemo, authLoading, isAuthenticated, navigate, oneTimeCreds, inviteForgotHint]);
 
@@ -114,7 +115,7 @@ function LoginPage({ landingDemo = false } = {}) {
     try {
       const result = await login(formData.email.trim(), formData.password);
       if (result?.ok) {
-        navigate('/app');
+        navigate(getDefaultPathForSuite(readStoredSuite()));
       }
     } finally {
       setLoading(false);

@@ -21,11 +21,11 @@ const { AsyncLocalStorageProviderSingleton } = require('@langchain/core/singleto
 const { buildWbsChunkGraph } = require('./wbsChunkGraph');
 const {
   resolveWbsChunkTransport,
-  resolveWbsChunkConcurrency,
   resolveWbsChunkPollMs,
   resolveWbsChunkWaitMs,
   resolveWbsChunkMaxAttempts,
 } = require('./wbsChunkContract');
+const { runScaledPool } = require('../runtime/workerScale');
 const { listWorkUnitsByRun, markAttemptFailed } = require('./wbsWorkUnitStore');
 const { processWbsChunk } = require('./processWbsChunk');
 
@@ -63,19 +63,6 @@ function isolateChunkInvokeConfig(config = {}) {
   };
 }
 
-async function mapPool(items, limit, fn) {
-  const queue = [...items];
-  const workers = Math.max(1, Math.min(queue.length || 1, limit));
-  await Promise.all(
-    Array.from({ length: workers }, async () => {
-      while (queue.length) {
-        const item = queue.shift();
-        if (item) await fn(item);
-      }
-    })
-  );
-}
-
 function inFlight(units) {
   return (units || []).filter((unit) =>
     ['PENDING', 'QUEUED', 'RUNNING'].includes(unit.status)
@@ -90,8 +77,6 @@ async function waitUntilChunkWaveSettled(runId, env, hooks) {
   const started = Date.now();
   const waitMs = resolveWbsChunkWaitMs(env);
   const pollMs = resolveWbsChunkPollMs(env);
-  const concurrency = resolveWbsChunkConcurrency(env);
-
   for (;;) {
     const units = await listWorkUnitsByRun(runId, env);
     const pending = inFlight(units);
@@ -100,12 +85,15 @@ async function waitUntilChunkWaveSettled(runId, env, hooks) {
     if (transport === 'memory') {
       const todo = pending.filter((unit) => unit.status === 'PENDING' || unit.status === 'QUEUED');
       if (todo.length) {
-        await mapPool(todo, concurrency, (unit) =>
-          processWbsChunk(unit.workUnitId, {
-            env,
-            generateJsonFn: hooks.generateJsonFn,
-            messageSnapshotId: unit.inputSnapshotId,
-          })
+        await runScaledPool(
+          todo,
+          (unit) =>
+            processWbsChunk(unit.workUnitId, {
+              env,
+              generateJsonFn: hooks.generateJsonFn,
+              messageSnapshotId: unit.inputSnapshotId,
+            }),
+          env
         );
         continue;
       }

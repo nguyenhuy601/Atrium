@@ -153,9 +153,6 @@ export function resolveNotificationVisual(notif) {
   const kind = String(notif?.data?.kind || '').trim().toLowerCase();
   const title = String(notif?.title || '');
 
-  if (raw === 'friend_request' || raw === 'friend_accepted' || ui === 'friend') {
-    return VISUAL.friend;
-  }
   if (raw === 'voice_room_invite' || raw === 'voice_invite' || ui === 'meeting') {
     return VISUAL.meeting;
   }

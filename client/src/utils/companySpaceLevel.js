@@ -208,14 +208,10 @@ export function buildCompanyModuleSearch(space, module) {
   }
 
   if (mod === 'chat') {
-    // Dept chat module uses announcement channel under the hood; UI is chat-only on /app/company/chat.
+    // chat vs announcement still needed on /company/chat; documents/calendar tabs implied by path.
     params.set('tab', level === COMPANY_SPACE_LEVEL.TEAM && teamId ? 'chat' : 'announcement');
-  } else if (mod === 'documents') {
-    params.set('tab', 'documents');
-  } else if (mod === 'calendar') {
-    // Keep teamId in URL for L2 context; OrganizationsPage forces dept calendar on /calendar route
-    params.set('tab', 'calendar');
   }
+  // documents / calendar: do not write tab — pathname is enough.
 
   return params;
 }

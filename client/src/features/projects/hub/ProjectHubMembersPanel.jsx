@@ -503,7 +503,7 @@ export default function ProjectHubMembersPanel({
       setOrgLoadError('');
       try {
         const [membersRes, structureRes] = await Promise.all([
-          organizationAPI.getMembersWithRoles(resolvedOrgId),
+          organizationAPI.getMembersWithRoles(resolvedOrgId, { view: 'directory' }),
           organizationAPI.getStructure(resolvedOrgId).catch(() => null),
         ]);
         const wrapped = unwrap(membersRes);

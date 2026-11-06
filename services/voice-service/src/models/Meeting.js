@@ -25,6 +25,11 @@ const meetingSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Organization',
     },
+    departmentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      index: true,
+    },
     /** Kênh voice workspace (roomId SFU = channelId) */
     voiceChannelId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -155,6 +160,7 @@ const meetingSchema = new mongoose.Schema(
 meetingSchema.index({ hostId: 1 });
 meetingSchema.index({ serverId: 1 });
 meetingSchema.index({ organizationId: 1 });
+meetingSchema.index({ organizationId: 1, departmentId: 1, startTime: 1 });
 meetingSchema.index({ status: 1 });
 meetingSchema.index({ startTime: 1 });
 meetingSchema.index({ voiceChannelId: 1, status: 1 });

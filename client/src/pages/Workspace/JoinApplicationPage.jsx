@@ -8,6 +8,7 @@ import {
   FIGMA_PAGE_TITLE,
 } from '../../components/Layout/figmaPageClasses';
 import { useAppStrings } from '../../locales/appStrings';
+import { buildCompanyWorkspacePath } from '../../utils/suitePathUtils';
 
 /** Luồng đơn gia nhập đã bỏ — giữ route để bookmark cũ không 404. */
 export default function JoinApplicationPage() {
@@ -30,7 +31,7 @@ export default function JoinApplicationPage() {
           <button
             type="button"
             className="mt-6 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-            onClick={() => navigate('/app/collaborate/workspaces', { replace: true })}
+            onClick={() => navigate(buildCompanyWorkspacePath(), { replace: true })}
           >
             {t('joinApplication.backToOrgs')}
           </button>

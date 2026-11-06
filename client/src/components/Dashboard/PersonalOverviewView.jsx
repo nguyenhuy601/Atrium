@@ -109,7 +109,7 @@ export default function PersonalOverviewView({ onNavigate }) {
   const openProject = (project) => {
     const pid = project?.projectId;
     if (!pid || !onNavigate) return;
-    onNavigate(`/app/collaborate/workspaces?projectId=${encodeURIComponent(pid)}`);
+    onNavigate(`/collaborate/workspaces?projectId=${encodeURIComponent(pid)}`);
   };
 
   return (
@@ -182,7 +182,7 @@ export default function PersonalOverviewView({ onNavigate }) {
                 </div>
                 <button
                   type="button"
-                  onClick={() => onNavigate?.('/app/me/settings')}
+                  onClick={() => onNavigate?.('/me/settings')}
                   className="inline-flex h-10 min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground motion-safe:transition-colors motion-reduce:transition-none hover:border-primary/40 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
                   {t('dashboard.personalOpenSettings')}
@@ -207,7 +207,7 @@ export default function PersonalOverviewView({ onNavigate }) {
                     <p className="text-sm text-muted-foreground">{t('dashboard.personalPlacementEmpty')}</p>
                     <button
                       type="button"
-                      onClick={() => onNavigate?.('/app/collaborate/workspaces')}
+                      onClick={() => onNavigate?.('/collaborate/workspaces')}
                       className="mt-3 inline-flex h-10 items-center justify-center rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground transition hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                     >
                       {t('dashboard.personalGoWorkspaces')}
@@ -277,7 +277,7 @@ export default function PersonalOverviewView({ onNavigate }) {
                   <p className="text-sm text-muted-foreground">{t('dashboard.personalProjectsEmpty')}</p>
                   <button
                     type="button"
-                    onClick={() => onNavigate?.('/app/collaborate/workspaces')}
+                    onClick={() => onNavigate?.('/collaborate/workspaces')}
                     className="mt-3 inline-flex h-10 items-center justify-center rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground transition hover:border-primary/40 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     {t('dashboard.personalGoWorkspaces')}

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Ban,
   Check,
   ChevronDown,
   ChevronRight,
@@ -65,8 +64,6 @@ export default function FriendChatRightPanel({
   attachments,
   currentUserId,
   onClose,
-  onBlock,
-  isBlocked = false,
   onOpenProfile,
   onOpenMediaAt,
   onViewAllMedia,
@@ -195,7 +192,6 @@ export default function FriendChatRightPanel({
   const sectionBtn = `flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-foreground hover:bg-muted/70 ${MOTION_BTN}`;
   const thumbBg = 'bg-muted';
   const quickRow = `flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-foreground hover:bg-muted/70 ${MOTION_BTN}`;
-  const actionCircle = `flex flex-col items-center gap-1.5 rounded-xl p-2 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground ${MOTION_BTN}`;
 
   const renderFileRow = (f) => {
     const mime = f.fileMeta?.mimeType || '';
@@ -409,14 +405,6 @@ export default function FriendChatRightPanel({
             {friend.name}
           </button>
 
-          {typeof onBlock === 'function' ? (
-            <div className="mt-4 flex w-full justify-center">
-              <button type="button" onClick={onBlock} className={actionCircle}>
-                <Ban className="h-5 w-5" aria-hidden />
-                <span>{isBlocked ? t('friendChat.unblockUser') : t('friendChat.blockUser')}</span>
-              </button>
-            </div>
-          ) : null}
         </div>
 
         <div className={hairlineT}>

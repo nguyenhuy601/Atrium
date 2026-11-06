@@ -21,20 +21,26 @@ const PROXY_ERROR_CODES = {
   504: 'GATEWAY_SERVICE_UNAVAILABLE',
 };
 
-/** Phản hồi lỗi proxy an toàn — không lộ stack cho client (production). */
+const PROXY_MESSAGE_USER = {
+  500: 'Hệ thống tạm thời gặp sự cố. Vui lòng thử lại sau.',
+  503: 'Dịch vụ tạm thời không khả dụng. Vui lòng thử lại sau.',
+  504: 'Dịch vụ phản hồi quá chậm. Vui lòng thử lại sau.',
+};
+
+/** Phản hồi lỗi proxy an toàn — không lộ stack / tên service nội bộ cho client. */
 function sendProxyError(res, statusCode, message, err = null, meta = {}) {
   if (res.headersSent) return;
   const errorCode = PROXY_ERROR_CODES[statusCode] || 'GATEWAY_INTERNAL_ERROR';
   const body = buildApiErrorBody(statusCode, {
     errorCode,
     message,
-    messageUser: message,
-    extra: meta.serviceName ? { service: meta.serviceName } : undefined,
+    messageUser: PROXY_MESSAGE_USER[statusCode] || PROXY_MESSAGE_USER[500],
   });
   if (!isProd && err) {
     body.debug = {
       code: err.code,
       detail: err.message,
+      ...(meta.serviceName ? { service: meta.serviceName } : {}),
       ...(meta.upstreamUrl ? { upstreamUrl: meta.upstreamUrl } : {}),
     };
   }

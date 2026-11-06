@@ -1,178 +1,218 @@
 /**
- * Propose Epic/Feature/Story candidates from FR/AC sources (tempIds).
- * Default: deterministic heuristic for tests / flag-off dual path.
- * Optional generateJsonFn for LLM JSON propose (same schema).
+ * Propose Epic/Feature/Story candidates from LLM epic catalog + FR rows (tempIds).
+ * No heuristic “one epic for all” dual path — fail-closed when catalog/parentEpicId missing.
  */
 
 const { CLASSIFICATION_TYPES } = require('./constants');
 
-function buildHeuristicCandidates(opts = {}) {
+function normalizeRef(raw) {
+  return String(raw || '').trim();
+}
+
+function frIdOf(fr) {
+  return normalizeRef(fr?.id || fr?.logicalId || fr?.frId);
+}
+
+function acRefsForFr(fr) {
+  const frId = frIdOf(fr);
+  if (!frId) return [];
+  const ac = fr.ac || fr.acceptanceCriteria || '';
+  const parts = Array.isArray(ac)
+    ? ac
+    : String(ac || '')
+        .split(/\n|;/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+  if (!parts.length) return [`${frId}:AC-1`];
+  return parts.map((_, j) => `${frId}:AC-${j + 1}`);
+}
+
+/**
+ * Build candidate proposal 1:1 from epicsCatalog + FR parentEpicId (LLM SoT).
+ * @returns {{ ok: true, epics, features, stories, llmCoverageProposals } | { ok: false, code: string, message: string }}
+ */
+function materializeCandidatesFromEpicCatalog(opts = {}) {
   const frRows = Array.isArray(opts.frRows) ? opts.frRows : [];
-  const epics = [];
-  const features = [];
-  const stories = [];
+  const catalogIn = Array.isArray(opts.epicsCatalog) ? opts.epicsCatalog : [];
 
-  // Group by module/capability label when present; else one epic for all.
-  const byCapability = new Map();
-  frRows.forEach((fr, i) => {
-    const frId = String(fr.id || fr.logicalId || fr.frId || '').trim();
-    if (!frId) return;
-    const cap = String(fr.feature || fr.module || fr.capability || 'general').trim() || 'general';
-    if (!byCapability.has(cap)) byCapability.set(cap, []);
-    byCapability.get(cap).push({ fr, frId, index: i });
-  });
-
-  const epicTemp = 'tmp-epic-root';
-  epics.push({
-    tempId: epicTemp,
-    title: opts.epicTitle || 'Product outcome',
-    sourceFrIds: frRows.map((f) => String(f.id || f.logicalId || '').trim()).filter(Boolean),
-    classificationDecision: {
-      type: CLASSIFICATION_TYPES.EPIC,
-      summary: 'Shared business outcome across capabilities in this proposal',
-      capabilities: [...byCapability.keys()],
-      evidenceRefs: opts.evidenceAllowList?.slice?.(0, 2) || ['EV-ROOT'],
-    },
-  });
-
-  let fi = 0;
-  for (const [cap, rows] of byCapability.entries()) {
-    fi += 1;
-    const featureTemp = `tmp-feature-${fi}`;
-    // Only create Feature when ≥2 stories in same capability (R-NO-WRAP)
-    const makeFeature = rows.length >= 2;
-    if (makeFeature) {
-      features.push({
-        tempId: featureTemp,
-        title: `Capability: ${cap}`,
-        parentEpicTempId: epicTemp,
-        sourceFrIds: rows.map((r) => r.frId),
-        classificationDecision: {
-          type: CLASSIFICATION_TYPES.FEATURE,
-          summary: `One capability boundary: ${cap}`,
-          valueSlices: rows.map((r) => r.fr.name || r.fr.title || r.frId),
-          evidenceRefs: opts.evidenceAllowList?.slice?.(0, 2) || [`EV-F-${fi}`],
-        },
+  /** @type {Map<string, { id: string, name: string, sourceFrIds: string[] }>} */
+  const epicById = new Map();
+  for (const row of catalogIn) {
+    const id = normalizeRef(row?.id || row?.epicId);
+    if (!id) continue;
+    if (!epicById.has(id)) {
+      epicById.set(id, {
+        id,
+        name: normalizeRef(row.name || row.title) || id,
+        sourceFrIds: [],
       });
     }
-
-    rows.forEach((row, si) => {
-      const fr = row.fr;
-      const title = String(fr.name || fr.title || row.frId).trim();
-      const ac = fr.ac || fr.acceptanceCriteria || '';
-      const acRefs = Array.isArray(ac)
-        ? ac.map((x, j) => `${row.frId}:AC-${j + 1}`)
-        : String(ac || '')
-            .split(/\n|;/)
-            .map((s) => s.trim())
-            .filter(Boolean)
-            .map((_, j) => `${row.frId}:AC-${j + 1}`);
-      stories.push({
-        tempId: `tmp-story-${fi}-${si + 1}`,
-        title,
-        parentFeatureTempId: makeFeature ? featureTemp : null,
-        parentEpicTempId: makeFeature ? null : epicTemp,
-        sourceFrIds: [row.frId],
-        acRefs,
-        classificationDecision: {
-          type: CLASSIFICATION_TYPES.STORY,
-          summary: `Verifiable slice for ${title}`,
-          beneficiary: Array.isArray(fr.actors) ? fr.actors[0] : fr.actor || 'user',
-          behavior: title,
-          evidenceRefs: opts.evidenceAllowList?.slice?.(0, 1) || [`EV-${row.frId}`],
-        },
-      });
-    });
   }
 
-  // Optional: many FR → 1 story when opts.mergeFrIds provided
-  if (Array.isArray(opts.mergeFrIds) && opts.mergeFrIds.length >= 2) {
-    const ids = opts.mergeFrIds.map(String);
-    stories.push({
-      tempId: 'tmp-story-merged',
-      title: opts.mergeTitle || 'Combined value slice',
-      parentFeatureTempId: null,
-      parentEpicTempId: epicTemp,
-      sourceFrIds: ids,
-      acRefs: ids.map((id) => `${id}:AC-1`),
-      classificationDecision: {
-        type: CLASSIFICATION_TYPES.STORY,
-        summary: 'One story spanning multiple FRs with shared outcome',
-        beneficiary: 'user',
-        behavior: opts.mergeTitle || 'combined',
-        evidenceRefs: ['EV-MERGE'],
-      },
-    });
-  }
-
-  // Optional independent story (no parent)
-  if (opts.independentStory && frRows[0]) {
-    const frId = String(frRows[0].id || frRows[0].logicalId).trim();
-    stories.push({
-      tempId: 'tmp-story-independent',
-      title: opts.independentStory.title || 'Independent story',
-      parentFeatureTempId: null,
-      parentEpicTempId: null,
-      sourceFrIds: [frId],
-      acRefs: [`${frId}:AC-1`],
-      classificationDecision: {
-        type: CLASSIFICATION_TYPES.STORY,
-        summary: 'Standalone verifiable slice',
-        beneficiary: 'user',
-        behavior: opts.independentStory.title || 'independent',
-        evidenceRefs: ['EV-IND'],
-      },
-    });
-  }
-
-  // 1 FR → many stories
-  if (opts.splitFrId) {
-    const frId = String(opts.splitFrId).trim();
-    stories.push({
-      tempId: 'tmp-story-split-a',
-      title: `Split A of ${frId}`,
-      parentEpicTempId: epicTemp,
-      sourceFrIds: [frId],
-      acRefs: [`${frId}:AC-1`],
-      classificationDecision: {
-        type: CLASSIFICATION_TYPES.STORY,
-        summary: 'First value slice of shared FR',
-        beneficiary: 'user',
-        behavior: 'split-a',
-        evidenceRefs: ['EV-SPLIT-A'],
-      },
-    });
-    stories.push({
-      tempId: 'tmp-story-split-b',
-      title: `Split B of ${frId}`,
-      parentEpicTempId: epicTemp,
-      sourceFrIds: [frId],
-      acRefs: [`${frId}:AC-2`],
-      classificationDecision: {
-        type: CLASSIFICATION_TYPES.STORY,
-        summary: 'Second value slice of shared FR',
-        beneficiary: 'user',
-        behavior: 'split-b',
-        evidenceRefs: ['EV-SPLIT-B'],
-      },
-    });
-  }
-
-  const llmCoverageProposals = {
-    coverageByFrId: {},
-    coverageByAcRef: {},
-  };
+  // Fill catalog from FR parentEpicId when catalog rows incomplete / empty.
   for (const fr of frRows) {
-    const frId = String(fr.id || fr.logicalId || '').trim();
+    const frId = frIdOf(fr);
+    if (!frId) continue;
+    const pid =
+      fr.parentEpicId === undefined || fr.parentEpicId === null || fr.parentEpicId === ''
+        ? null
+        : normalizeRef(fr.parentEpicId);
+    if (!pid) continue;
+    if (!epicById.has(pid)) {
+      epicById.set(pid, { id: pid, name: pid, sourceFrIds: [] });
+    }
+    const epic = epicById.get(pid);
+    if (!epic.sourceFrIds.includes(frId)) epic.sourceFrIds.push(frId);
+  }
+
+  // Attach catalog.sourceFrIds when provided.
+  for (const row of catalogIn) {
+    const id = normalizeRef(row?.id || row?.epicId);
+    if (!id || !epicById.has(id)) continue;
+    const epic = epicById.get(id);
+    for (const frId of Array.isArray(row.sourceFrIds) ? row.sourceFrIds : []) {
+      const n = normalizeRef(frId);
+      if (n && !epic.sourceFrIds.includes(n)) epic.sourceFrIds.push(n);
+    }
+  }
+
+  if (!epicById.size) {
+    return {
+      ok: false,
+      code: 'missing_epics_catalog',
+      message:
+        'No epicsCatalog / parentEpicId — refuse heuristic one-epic-for-all. Re-run FR→Epic LLM.',
+    };
+  }
+
+  const frWithEpic = frRows.filter((fr) => {
+    const pid =
+      fr.parentEpicId === undefined || fr.parentEpicId === null || fr.parentEpicId === ''
+        ? null
+        : normalizeRef(fr.parentEpicId);
+    return Boolean(pid && epicById.has(pid));
+  });
+  if (!frWithEpic.length) {
+    return {
+      ok: false,
+      code: 'missing_parent_epic_on_fr',
+      message: 'FR rows lack parentEpicId linking to epics catalog — refuse one-epic fallback.',
+    };
+  }
+
+  const epics = [];
+  const epicTempById = new Map();
+  for (const epic of epicById.values()) {
+    const tempId = `tmp-epic-${epic.id}`;
+    epicTempById.set(epic.id, tempId);
+    const caps = [
+      ...new Set(
+        frWithEpic
+          .filter((fr) => normalizeRef(fr.parentEpicId) === epic.id)
+          .map((fr) => normalizeRef(fr.feature || fr.module || fr.capability || epic.name))
+          .filter(Boolean)
+      ),
+    ];
+    epics.push({
+      tempId,
+      title: epic.name,
+      sourceFrIds: epic.sourceFrIds.length
+        ? epic.sourceFrIds
+        : frWithEpic
+            .filter((fr) => normalizeRef(fr.parentEpicId) === epic.id)
+            .map(frIdOf)
+            .filter(Boolean),
+      classificationDecision: {
+        type: CLASSIFICATION_TYPES.EPIC,
+        summary: `Business goal grouping for ${epic.name}`,
+        capabilities: caps.length ? caps : [epic.name],
+        evidenceRefs: [`EV-${epic.id}`],
+      },
+      /** Prefer catalog id after pipeline mint (see applyEpicCatalogIds). */
+      catalogEpicId: epic.id,
+    });
+  }
+
+  /** Feature groups: same parentEpicId + parentFeatureId (or capability when ≥2 FR). */
+  const features = [];
+  const featureTempByKey = new Map();
+  const byEpicCapability = new Map();
+  for (const fr of frWithEpic) {
+    const frId = frIdOf(fr);
+    const epicId = normalizeRef(fr.parentEpicId);
+    const featureId = normalizeRef(fr.parentFeatureId);
+    const cap = featureId || normalizeRef(fr.feature || fr.module || fr.capability) || '';
+    if (!cap) continue;
+    const key = `${epicId}::${cap}`;
+    if (!byEpicCapability.has(key)) byEpicCapability.set(key, []);
+    byEpicCapability.get(key).push({ fr, frId, epicId, featureId, cap });
+  }
+
+  let fi = 0;
+  for (const [key, rows] of byEpicCapability.entries()) {
+    if (rows.length < 2 && !rows[0]?.featureId) continue;
+    fi += 1;
+    const tempId = `tmp-feature-${fi}`;
+    featureTempByKey.set(key, tempId);
+    const epicId = rows[0].epicId;
+    const title = rows[0].featureId
+      ? `Feature ${rows[0].featureId}`
+      : `Capability: ${rows[0].cap}`;
+    features.push({
+      tempId,
+      title,
+      parentEpicTempId: epicTempById.get(epicId) || null,
+      sourceFrIds: rows.map((r) => r.frId),
+      classificationDecision: {
+        type: CLASSIFICATION_TYPES.FEATURE,
+        summary: `Capability boundary under ${epicId}`,
+        valueSlices: rows.map((r) => r.fr.name || r.fr.title || r.frId),
+        evidenceRefs: [`EV-F-${fi}`],
+      },
+    });
+  }
+
+  const stories = [];
+  let si = 0;
+  for (const fr of frWithEpic) {
+    si += 1;
+    const frId = frIdOf(fr);
+    const epicId = normalizeRef(fr.parentEpicId);
+    const featureId = normalizeRef(fr.parentFeatureId);
+    const cap = featureId || normalizeRef(fr.feature || fr.module || fr.capability) || '';
+    const featureKey = cap ? `${epicId}::${cap}` : '';
+    const parentFeatureTempId = featureKey ? featureTempByKey.get(featureKey) || null : null;
+    const title = normalizeRef(fr.name || fr.title || frId) || frId;
+    stories.push({
+      tempId: `tmp-story-${si}`,
+      title,
+      parentFeatureTempId,
+      parentEpicTempId: parentFeatureTempId ? null : epicTempById.get(epicId) || null,
+      sourceFrIds: [frId],
+      acRefs: acRefsForFr(fr),
+      classificationDecision: {
+        type: CLASSIFICATION_TYPES.STORY,
+        summary: `Verifiable slice for ${title}`,
+        beneficiary: Array.isArray(fr.actors) ? fr.actors[0] : fr.actor || 'user',
+        behavior: title,
+        evidenceRefs: [`EV-${frId}`],
+      },
+    });
+  }
+
+  const llmCoverageProposals = { coverageByFrId: {}, coverageByAcRef: {} };
+  for (const fr of frWithEpic) {
+    const frId = frIdOf(fr);
     if (!frId) continue;
     llmCoverageProposals.coverageByFrId[frId] = {
       status: 'PARTIALLY_COVERED',
       evidenceRefs: [`EV-${frId}`],
-      summary: 'Heuristic semantic coverage proposal',
+      summary: 'Catalog-materialized coverage proposal',
     };
   }
 
   return {
+    ok: true,
     epics,
     features,
     stories,
@@ -180,40 +220,39 @@ function buildHeuristicCandidates(opts = {}) {
   };
 }
 
+/**
+ * @deprecated Heuristic dual path removed — use materializeCandidatesFromEpicCatalog.
+ */
+function buildHeuristicCandidates() {
+  throw new Error(
+    'buildHeuristicCandidates removed — one-epic-for-all dual path is forbidden; use materializeCandidatesFromEpicCatalog'
+  );
+}
+
 async function backlogProposeFromSources(opts = {}) {
-  if (typeof opts.generateJsonFn === 'function') {
-    // LLM path reserved — fall back to heuristic if shape invalid
-    try {
-      const prompt = [
-        'Propose backlog JSON only: epics[], features[], stories[] with tempId, title, sourceFrIds, acRefs, classificationDecision, parent*TempId.',
-        'Do not invent FR ids. Do not use FR id as story id. Feature only for capability boundaries.',
-        `FR_LIST=${JSON.stringify(opts.frRows || [])}`,
-      ].join('\n');
-      const out = await opts.generateJsonFn({ prompt, env: opts.env });
-      if (out?.ok && out.data && Array.isArray(out.data.stories)) {
-        return {
-          candidateProposal: out.data,
-          llmCoverageProposals: out.data.llmCoverageProposals || {},
-          source: 'llm',
-        };
-      }
-    } catch {
-      /* heuristic */
-    }
+  const built = materializeCandidatesFromEpicCatalog(opts);
+  if (!built.ok) {
+    return {
+      ok: false,
+      code: built.code,
+      message: built.message,
+      source: 'epic_catalog',
+    };
   }
-  const built = buildHeuristicCandidates(opts);
   return {
+    ok: true,
     candidateProposal: {
       epics: built.epics,
       features: built.features,
       stories: built.stories,
     },
     llmCoverageProposals: built.llmCoverageProposals,
-    source: 'heuristic',
+    source: 'epic_catalog',
   };
 }
 
 module.exports = {
+  materializeCandidatesFromEpicCatalog,
   buildHeuristicCandidates,
   backlogProposeFromSources,
 };

@@ -225,7 +225,7 @@ export default function OrganizationNotificationsWorkspacePanel({
 
     if (isVoiceRoomInviteNotification(notif)) {
       const invitePath = resolveVoiceRoomInvitePath(notif);
-      navigate(invitePath || '/app/communicate/voice');
+      navigate(invitePath || '/communicate/voice');
       return;
     }
 
@@ -251,7 +251,7 @@ export default function OrganizationNotificationsWorkspacePanel({
       }
       return;
     }
-    navigate('/app/collaborate/workspaces');
+    navigate('/collaborate/workspaces');
   };
 
   const showSkeleton =

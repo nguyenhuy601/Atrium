@@ -272,19 +272,20 @@ export default function OrganizationDepartmentCard({
             <button
               key={btn.module}
               type="button"
+              title={btn.label}
               onClick={(e) => {
                 e.stopPropagation();
                 onModuleClick(card.id, btn.module, card.raw);
               }}
-              className="relative flex flex-col items-center justify-center gap-1 rounded-[10px] bg-muted px-1.5 py-2.5 text-[0.6875rem] font-medium text-muted-foreground transition hover:-translate-y-0.5 hover:bg-primary/10 hover:text-primary hover:shadow-sm motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+              className="relative flex min-w-0 flex-col items-center justify-center gap-1 overflow-hidden rounded-[10px] bg-muted px-1 py-2.5 text-[0.625rem] font-medium text-muted-foreground transition hover:-translate-y-0.5 hover:bg-primary/10 hover:text-primary hover:shadow-sm motion-reduce:transition-none motion-reduce:hover:translate-y-0 sm:text-[0.6875rem]"
             >
               {btn.badge > 0 ? (
-                <span className="absolute right-1.5 top-1 min-w-[15px] rounded-full bg-primary px-1 text-[0.5rem] font-bold text-primary-foreground">
+                <span className="absolute right-1 top-1 min-w-[15px] rounded-full bg-primary px-1 text-[0.5rem] font-bold text-primary-foreground">
                   {btn.badge > 99 ? '99+' : btn.badge}
                 </span>
               ) : null}
-              <btn.icon size={15} className={btn.color} />
-              {btn.label}
+              <btn.icon size={15} className={`shrink-0 ${btn.color}`} />
+              <span className="w-full truncate text-center leading-tight">{btn.label}</span>
             </button>
           ))}
         </div>

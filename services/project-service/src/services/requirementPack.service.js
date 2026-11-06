@@ -22,6 +22,7 @@ const { createProject } = require('./project.service');
 const objectStorage = require('../utils/common/objectStorage');
 const { XLSX_MIME } = require('../utils/requirement/requirementExcelPreview');
 const { ensurePackPreviewViews } = require('../utils/requirement/requirementPackPreviewFallback');
+const { normalizePackView } = require('../utils/requirement/requirementPackViews');
 const { assertCanSoftDeleteRequirementPack } = require('../utils/requirement/requirementPackDelete');
 const {
   importRequirementPackWorkItems,
@@ -66,18 +67,17 @@ function resolveLinkedProjectId(projectId) {
   return s && s !== '[object Object]' ? s : null;
 }
 
-async function listRequirementPacks({ userId, organizationId, status }) {
+async function listRequirementPacks({ userId, organizationId, status, projectId = null }) {
   await assertRequirementPermission({ userId, organizationId, permission: 'requirement:view' });
   const filter = { organizationId, isActive: true };
   if (status) filter.status = String(status);
+  const pid = String(projectId || '').trim();
+  if (pid && mongoose.isValidObjectId(pid)) {
+    filter.projectId = pid;
+  }
   const rows = await queryRequirementPackList(RequirementPack, filter);
   const ensured = await ensurePlanningReadinessOnListRows(RequirementPack, rows);
   return mapRequirementPackList(ensured);
-}
-
-function normalizePackView(view) {
-  const v = String(view || 'full').trim().toLowerCase();
-  return v === 'wizard' ? 'wizard' : 'full';
 }
 
 /**
@@ -114,8 +114,67 @@ async function getRequirementPackWizard({ packId, organizationId }) {
 }
 
 /**
+ * AI HITL projection: aiAnalysis + FR + status — no excelPreview rebuild / payload.
+ */
+async function getRequirementPackHitl({ packId, organizationId, gateRowOffset, gateRowLimit }) {
+  const t0 = Date.now();
+  const { buildHitlPackAggregation } = require('../utils/requirement/requirementPackHitlQuery');
+  const { scrubFailedAnalysisBloat } = require('../utils/aiAnalysis/scrubFailedAnalysisBloat');
+  const { slimAiAnalysisForHitl } = require('../utils/aiAnalysis/slimAiAnalysisForHitl');
+
+  const rows = await RequirementPack.aggregate(
+    buildHitlPackAggregation({ packId, organizationId })
+  );
+  const pack = rows[0] || null;
+  const mongoMs = Date.now() - t0;
+  if (!pack) {
+    const err = new Error('Requirement pack không tồn tại');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  // Persist-scrub FAILED tool ID dumps once so next HITL reads skip WiredTiger bloat.
+  if (pack.aiAnalysis) {
+    const scrubbed = scrubFailedAnalysisBloat(pack.aiAnalysis);
+    if (scrubbed.changed) {
+      pack.aiAnalysis = scrubbed.value;
+      RequirementPack.updateOne(
+        { _id: pack._id },
+        { $set: { aiAnalysis: scrubbed.value } }
+      ).catch((err) => {
+        logger.warn(
+          '[getRequirementPackHitl] scrub persist failed pack=%s: %s',
+          String(packId),
+          err?.message || err
+        );
+      });
+      logger.info(
+        `[getRequirementPackHitl] scrubbed FAILED bloat pack=${packId} cleared=${scrubbed.cleared} idsDropped=${scrubbed.idsDropped}`
+      );
+    }
+  }
+
+  const { attachLiveRunToPackAiAnalysis } = require('../utils/aiAnalysis/attachLiveRun');
+  const page =
+    gateRowOffset != null && String(gateRowOffset) !== ''
+      ? { offset: gateRowOffset, limit: gateRowLimit }
+      : null;
+  const tLive = Date.now();
+  const withLive = await attachLiveRunToPackAiAnalysis(pack, page);
+  const liveMs = Date.now() - tLive;
+  if (withLive?.aiAnalysis) {
+    withLive.aiAnalysis = slimAiAnalysisForHitl(withLive.aiAnalysis);
+  }
+  logger.info(
+    `[getRequirementPackHitl] timing pack=${packId} mongoMs=${mongoMs} liveMs=${liveMs} totalMs=${Date.now() - t0}`
+  );
+  // Skip ensurePackPreviewViews — synthetic excelPreview is unused on HITL UI and is costly.
+  return attachPlanningReadiness(withLive);
+}
+
+/**
  * @param {{ userId: string, organizationId: string, packId: string, view?: string }} args
- * @param {string} [args.view='full'] `full` (default) | `wizard`
+ * @param {string} [args.view='full'] `full` (default) | `wizard` | `hitl`
  */
 async function getRequirementPack({
   userId,
@@ -126,8 +185,12 @@ async function getRequirementPack({
   gateRowLimit,
 }) {
   await assertRequirementPermission({ userId, organizationId, permission: 'requirement:view' });
-  if (normalizePackView(view) === 'wizard') {
+  const normalized = normalizePackView(view);
+  if (normalized === 'wizard') {
     return getRequirementPackWizard({ packId, organizationId });
+  }
+  if (normalized === 'hitl') {
+    return getRequirementPackHitl({ packId, organizationId, gateRowOffset, gateRowLimit });
   }
   const pack = await RequirementPack.findOne({ _id: packId, organizationId, isActive: true }).lean();
   if (!pack) {

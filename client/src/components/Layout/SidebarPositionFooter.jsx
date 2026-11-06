@@ -3,6 +3,7 @@ import { Briefcase, Shield } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import useCompanyAdminAccess from '../../hooks/useCompanyAdminAccess';
+import { useOrgMyProfile } from '../../hooks/queries/useOrgMyProfile';
 import { useAppStrings } from '../../locales/appStrings';
 import { coalesceJobTitle } from '../../utils/jobTitleProfile';
 import {
@@ -29,34 +30,68 @@ export function formatSidebarPositionLabel(raw) {
 }
 
 /**
- * Footer SoT (ban-giao): ưu tiên Vai trò tổ chức / Nhà cung cấp; chức danh HR là dòng phụ.
+ * Footer SoT: Vai trò tổ chức + Vị trí tổ chức (assignment từ my-profile).
+ * Chức danh HR hồ sơ chỉ hiện phụ nếu khác vị trí.
  */
 export default function SidebarPositionFooter({ collapsed = false, wrap = true }) {
   const { t } = useAppStrings();
   const { user } = useAuth();
-  const { company, activeWorkspace } = useWorkspace();
+  const { company, activeWorkspace, lastOrganizationId } = useWorkspace();
   const { isSystemAdmin } = useCompanyAdminAccess();
+
+  const orgId = String(
+    company?.id ||
+      company?._id ||
+      activeWorkspace?._id ||
+      activeWorkspace?.id ||
+      lastOrganizationId ||
+      ''
+  ).trim();
+  const profileQuery = useOrgMyProfile(orgId, {
+    enabled: Boolean(orgId) && !isSystemAdmin,
+  });
+  const profile = profileQuery.data || null;
 
   const orgRoleLabel = useMemo(() => {
     if (isSystemAdmin || memberIsSystemAdmin(user)) {
       return t('adminUsers.roleVendor');
     }
     const rows =
+      profile?.myOrganizationRoles ||
       company?.myOrganizationRoles ||
       activeWorkspace?.myOrganizationRoles ||
       [];
     return formatOrgRoleRowsLabel(rows, t);
-  }, [isSystemAdmin, user, company?.myOrganizationRoles, activeWorkspace?.myOrganizationRoles, t]);
+  }, [
+    isSystemAdmin,
+    user,
+    profile?.myOrganizationRoles,
+    company?.myOrganizationRoles,
+    activeWorkspace?.myOrganizationRoles,
+    t,
+  ]);
 
-  const positionLabel = useMemo(() => {
+  const orgPositionLabel = useMemo(() => {
+    const pos = profile?.myPosition || company?.myPosition || null;
+    const raw = String(pos?.name || pos?.code || '').trim();
+    if (!raw) return '';
+    return localizedPositionLabel(raw, formatSidebarPositionLabel(raw), t);
+  }, [profile?.myPosition, company?.myPosition, t]);
+
+  const hrJobTitleLabel = useMemo(() => {
     const raw = coalesceJobTitle(user);
     return localizedPositionLabel(raw, formatSidebarPositionLabel(raw), t);
   }, [user, t]);
 
   const primary = orgRoleLabel || '';
+  const positionLabel = orgPositionLabel || '';
   const showPosition =
     Boolean(positionLabel) &&
     positionLabel.toLowerCase() !== String(primary || '').toLowerCase();
+  const showHrJobTitle =
+    Boolean(hrJobTitleLabel) &&
+    hrJobTitleLabel.toLowerCase() !== String(positionLabel || '').toLowerCase() &&
+    hrJobTitleLabel.toLowerCase() !== String(primary || '').toLowerCase();
 
   const body = collapsed ? (
     <div
@@ -97,13 +132,25 @@ export default function SidebarPositionFooter({ collapsed = false, wrap = true }
             {t('nav.yourPosition')}
           </div>
           <span
-            title={`${positionLabel} — ${t('nav.positionNotPermission')}`}
+            title={positionLabel}
             className="inline-block max-w-full whitespace-normal break-words rounded border border-white/15 bg-white/10 px-1.5 py-0.5 text-left text-[0.625rem] font-semibold leading-snug tracking-wide text-white/85"
           >
             {positionLabel}
           </span>
-          <p className="mt-1 text-[0.5rem] leading-snug text-white/30">{t('nav.positionNotPermission')}</p>
         </div>
+      ) : (
+        <div>
+          <div className="mb-1 flex items-center gap-1.5 text-[0.55rem] font-bold uppercase tracking-wider text-white/35">
+            <Briefcase size={10} aria-hidden />
+            {t('nav.yourPosition')}
+          </div>
+          <p className="text-[0.625rem] text-white/45">{t('nav.positionUnassigned')}</p>
+        </div>
+      )}
+      {showHrJobTitle ? (
+        <p className="text-[0.55rem] leading-snug text-white/35" title={hrJobTitleLabel}>
+          {t('nav.hrJobTitleHint')}: {hrJobTitleLabel}
+        </p>
       ) : null}
     </div>
   );

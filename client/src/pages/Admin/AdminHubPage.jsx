@@ -113,5 +113,5 @@ export default function AdminHubPage() {
 
 /** Redirect bookmark cũ /app/admin/overview → hub. */
 export function AdminOverviewRedirect() {
-  return <Navigate to="/app/admin" replace />;
+  return <Navigate to="/admin" replace />;
 }

@@ -9,7 +9,7 @@ const ORGANIZATION_SERVICE_URL = String(process.env.ORGANIZATION_SERVICE_URL || 
   .trim()
   .replace(/\/+$/, '');
 
-const VISIBILITY_CACHE_TTL_MS = 15_000;
+const VISIBILITY_CACHE_TTL_MS = 60_000;
 const visibilityCache = createTtlCoalesceCache({ ttlMs: VISIBILITY_CACHE_TTL_MS });
 
 /** @type {null | ((url: string, opts: object) => Promise<{ status: number, data?: unknown }>)} */

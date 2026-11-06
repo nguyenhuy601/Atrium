@@ -54,6 +54,7 @@ function buildSecSharedAnnotations() {
     currentToolName: Annotation({
       reducer: mergeCurrentToolName,
     }),
+    riskScope: field(),
   };
 }
 

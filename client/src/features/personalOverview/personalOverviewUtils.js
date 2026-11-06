@@ -4,10 +4,30 @@ import { localizedProjectRoleShortLabel } from '../../utils/projectRoleLocale';
 import { resolveOrgRolesForUser } from '../../utils/userTaxonomyUtils';
 
 /**
+ * Prefer server-resolved placement from GET …/my-profile (no structure tree).
+ */
+export function resolvePlacementFromProfile(profile) {
+  const p = profile?.placement || {};
+  const structureRoles = Array.isArray(p.structureRoles) ? p.structureRoles : [];
+  return {
+    departmentId: p.departmentId || null,
+    departmentName: String(p.departmentName || ''),
+    teamId: p.teamId || null,
+    teamName: String(p.teamName || ''),
+    divisionId: p.divisionId || null,
+    divisionName: String(p.divisionName || ''),
+    memberReady: Boolean(profile?.memberReady),
+    structureRoles,
+    flat: { departments: [], teams: [], divisions: [] },
+  };
+}
+
+/**
+ * @deprecated Prefer resolvePlacementFromProfile (my-profile). Kept for tests/compat.
  * Resolve department/team display names from org shell structure + access.scope.
  */
 export function resolvePlacementFromShell(shell, userId) {
-  const scope = shell?.access?.scope || {};
+  const scope = shell?.access?.scope || shell?.scope || {};
   const branches = shell?.structureSummary?.branches || [];
   const flat = flattenOrgStructure({ branches });
   const departmentId = String(scope.departmentId || '').trim();
@@ -28,7 +48,7 @@ export function resolvePlacementFromShell(shell, userId) {
     teamName: team ? unitName(team) : '',
     divisionId: divisionId || null,
     divisionName: division ? unitName(division) : '',
-    memberReady: Boolean(shell?.access?.memberReady),
+    memberReady: Boolean(shell?.access?.memberReady ?? shell?.memberReady),
     structureRoles,
     flat,
   };

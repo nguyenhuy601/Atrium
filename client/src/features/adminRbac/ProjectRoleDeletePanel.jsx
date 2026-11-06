@@ -61,7 +61,7 @@ export default function ProjectRoleDeletePanel({ orgId, embedded = false }) {
     try {
       await projectRolesAPI.deleteRole(orgId, roleId);
       toast.success(t('common.deleteSuccess'));
-      navigate('/app/admin/rbac/project-roles');
+      navigate('/admin/rbac/project-roles');
     } catch (error) {
       toast.error(resolveApiErrorMessage(error, { t, fallback: t('common.deleteFail') }));
     } finally {
@@ -119,7 +119,7 @@ export default function ProjectRoleDeletePanel({ orgId, embedded = false }) {
             {busy ? t('common.deleting') : t('adminDomains.rbac.delete')}
           </button>
         ) : null}
-        <button type="button" disabled={busy} className={adminSecondaryBtnClass()} onClick={() => navigate('/app/admin/rbac/project-roles')}>
+        <button type="button" disabled={busy} className={adminSecondaryBtnClass()} onClick={() => navigate('/admin/rbac/project-roles')}>
           {t('common.cancel')}
         </button>
       </div>

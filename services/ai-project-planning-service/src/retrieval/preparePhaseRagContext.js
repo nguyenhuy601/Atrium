@@ -15,6 +15,8 @@ const {
 } = require('./bindRequiredInputs');
 const { buildWhatRetrieveQuery } = require('./formatRetrievedContext');
 const { preGenerateContextCheck } = require('./preGenerateContextCheck');
+const { historyIntentForEngine } = require('./employeeHistoryIntent');
+const { classifyQueryIntent } = require('./ragPipelineSchemas');
 
 async function maybeIngest({
   snapshot,
@@ -104,6 +106,13 @@ async function preparePhaseRagContext(input = {}) {
           taskPurpose: input.taskPurpose || 'requirements',
         })
       : 'how planning');
+
+  const intent =
+    input.intent ||
+    (phase === 'how'
+      ? historyIntentForEngine(input.engine || input.taskPurpose, query) ||
+        classifyQueryIntent(query)
+      : classifyQueryIntent(query));
 
   const ragRequired =
     input.ragRequired !== false && mode !== 'off' && mode !== 'stub';
@@ -243,6 +252,7 @@ async function preparePhaseRagContext(input = {}) {
         mode: retrievalStatus === 'failed' ? 'keyword' : mode,
         env,
         scope,
+        intent,
       });
     } catch (retrieveErr) {
       retrievalStatus = retrievalStatus === 'failed' ? 'failed' : 'degraded';
@@ -256,6 +266,7 @@ async function preparePhaseRagContext(input = {}) {
           mode: 'keyword',
           env,
           scope,
+          intent,
         });
       } catch (kwErr) {
         retrievalStatus = 'failed';
@@ -384,10 +395,18 @@ async function assembleTaskContext(input = {}) {
       customerRawChunk: bind.requiredInputs[0],
     });
 
+  const phase = input.phase === 'how' ? 'how' : 'what';
+  const intent =
+    input.intent ||
+    (phase === 'how'
+      ? historyIntentForEngine(input.engine || input.taskPurpose, query) ||
+        classifyQueryIntent(query)
+      : classifyQueryIntent(query));
+
   const corpus = Array.isArray(input.corpus)
     ? input.corpus
     : buildCorpusFromSnapshot(input.snapshot, {
-        phase: input.phase || 'what',
+        phase,
         pack: input.pack,
         scope,
       });
@@ -404,6 +423,7 @@ async function assembleTaskContext(input = {}) {
       env: input.env,
       scope,
       topK: input.topK,
+      intent,
     });
   } catch (err) {
     retrievalStatus = 'degraded';
@@ -414,6 +434,7 @@ async function assembleTaskContext(input = {}) {
       mode: 'keyword',
       env: input.env,
       scope,
+      intent,
     });
   }
 

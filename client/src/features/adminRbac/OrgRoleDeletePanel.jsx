@@ -71,7 +71,7 @@ export default function OrgRoleDeletePanel({ orgId, embedded = false }) {
     try {
       await orgRoleCatalogAPI.deleteCatalog(orgId, roleId);
       toast.success(t('common.deleteSuccess'));
-      navigate('/app/admin/rbac/org-roles');
+      navigate('/admin/rbac/org-roles');
     } catch (error) {
       const msg = resolveApiErrorMessage(error, { t, fallback: t('common.deleteFail') });
       setActionError(msg);
@@ -144,7 +144,7 @@ export default function OrgRoleDeletePanel({ orgId, embedded = false }) {
             {busy ? t('common.deleting') : t('adminDomains.rbac.delete')}
           </button>
         ) : null}
-        <button type="button" disabled={busy} className={adminSecondaryBtnClass()} onClick={() => navigate('/app/admin/rbac/org-roles')}>
+        <button type="button" disabled={busy} className={adminSecondaryBtnClass()} onClick={() => navigate('/admin/rbac/org-roles')}>
           {t('common.cancel')}
         </button>
       </div>

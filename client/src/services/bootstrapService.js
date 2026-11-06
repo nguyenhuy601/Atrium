@@ -54,11 +54,6 @@ export function hydrateBootstrapCache(payload) {
     );
   }
 
-  if (Array.isArray(payload.friendsPending)) {
-    queryClient.setQueryData(queryKeys.friends.pending(), payload.friendsPending, {
-      updatedAt: Date.now(),
-    });
-  }
 }
 
 /** Payload shell gần nhất (sau loadBootstrapShell không suite). */

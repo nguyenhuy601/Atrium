@@ -523,7 +523,7 @@ export default function OrganizationRbacSettings({ orgId }) {
       <div className="flex flex-col gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">{t('adminRbac.adminHubHint')}</p>
         <Link
-          to="/app/admin/rbac/roles"
+          to="/admin/rbac/roles"
           className={`shrink-0 text-sm font-medium text-primary underline-offset-2 hover:underline ${MOTION_BTN}`}
         >
           {t('adminRbac.adminHubLink')}

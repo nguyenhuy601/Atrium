@@ -813,6 +813,15 @@ const OrganizationMainPanel = ({
     departmentWorkspaceActive && resolvedDepartmentId && !selectedTeamId
   );
 
+  // Trong dept workspace: mặc định lọc task theo phòng hiện tại (không 'all').
+  useEffect(() => {
+    if (resolvedDepartmentId && (deptWorkspaceContext || selectedTeamId || departmentWorkspaceActive)) {
+      setTaskDepartmentFilter(resolvedDepartmentId);
+      return;
+    }
+    setTaskDepartmentFilter('all');
+  }, [resolvedDepartmentId, deptWorkspaceContext, selectedTeamId, departmentWorkspaceActive]);
+
   const openWorkspaceChat = () => {
     const next = deptWorkspaceContext ? 'announcement' : 'chat';
     setWorkspaceTab(next);
@@ -1103,14 +1112,31 @@ const OrganizationMainPanel = ({
     setLoadingTaskBoards(true);
     try {
       const filters = { ...taskBoardApiCtx };
-      // Org-level projects: list theo organizationId (không filter department ownership).
+      // Additive scope — BE có thể bỏ qua; client vẫn lọc theo space khi có dept/team.
       if (selectedTeamId) {
         filters.teamId = String(selectedTeamId);
+      } else if (resolvedDepartmentId) {
+        filters.departmentId = String(resolvedDepartmentId);
       }
       const res = await projectAPI.list(filters);
       const payload = unwrapTaskApiPayload(res);
       const raw = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
-      const list = mapProjectsToBoardPickerRows(raw);
+      const scoped = (Array.isArray(raw) ? raw : []).filter((p) => {
+        if (selectedTeamId) {
+          const pTeam = String(p?.teamId || p?.team?._id || p?.team || '').trim();
+          if (pTeam && pTeam !== String(selectedTeamId)) return false;
+        } else if (resolvedDepartmentId) {
+          const pDept = String(
+            p?.departmentId || p?.department?._id || p?.department || p?.scopeId || ''
+          ).trim();
+          const scopeType = String(p?.scopeType || '').toLowerCase();
+          if (scopeType === 'department' && pDept && pDept !== String(resolvedDepartmentId)) {
+            return false;
+          }
+        }
+        return true;
+      });
+      const list = mapProjectsToBoardPickerRows(scoped);
       setTaskBoards(list);
       if (!list.some((b) => String(b._id) === String(selectedTaskBoardId))) {
         setSelectedTaskBoardId(list[0]?._id ? String(list[0]._id) : '');
@@ -1124,6 +1150,7 @@ const OrganizationMainPanel = ({
   }, [
     taskBoardApiCtx,
     selectedTeamId,
+    resolvedDepartmentId,
     organizationId,
     selectedTaskBoardId,
     t,

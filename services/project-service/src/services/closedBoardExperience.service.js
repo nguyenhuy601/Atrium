@@ -12,6 +12,7 @@ const Project = require('../models/Project');
 const {
   buildClosedBoardExperiences,
   techListFromProjectStack,
+  resolveProjectDomain,
 } = require('../utils/project/boardCloseExperience');
 const { appendClosedBoardExperience } = require('../clients/userService.client');
 
@@ -92,7 +93,7 @@ async function persistClosedProjectExperiences({ project, closedAt, snapshot, de
     projectId,
     isActive: { $ne: false },
   })
-    .select('assigneeId assignments status completedAt tags')
+    .select('assigneeId assignments status completedAt tags title name')
     .lean();
 
   const evidenceId = String(board?._id || projectId);
@@ -100,6 +101,7 @@ async function persistClosedProjectExperiences({ project, closedAt, snapshot, de
     project.expectedEndDate || project.endDate || closedAt || project.closedAt || new Date();
   const startRaw =
     project.startDate || project.expectedStartDate || project.createdAt || null;
+  const domain = resolveProjectDomain(project);
   const boardLike = {
     _id: evidenceId,
     title: String(project.title || board?.title || 'Dự án').trim() || 'Dự án',
@@ -108,6 +110,10 @@ async function persistClosedProjectExperiences({ project, closedAt, snapshot, de
     startDate: startRaw,
     createdAt: project.createdAt || null,
     closedAt: closedAt || project.closedAt || null,
+    domain: project.domain,
+    businessDomain: project.businessDomain,
+    industry: project.industry,
+    domainTags: project.domainTags,
   };
 
   const technologies = techListFromProjectStack(snap?.techStack || project);
@@ -118,6 +124,8 @@ async function persistClosedProjectExperiences({ project, closedAt, snapshot, de
     tasks,
     technologies,
     byUserSummary: byUserSummaryFromSnapshot(snap),
+    domain,
+    sourceProjectId: projectId,
   });
 
   let appended = 0;
@@ -182,7 +190,7 @@ async function persistClosedBoardExperiences(board, deps = {}) {
     boardId,
     isActive: { $ne: false },
   })
-    .select('assigneeId assignments status completedAt')
+    .select('assigneeId assignments status completedAt title name')
     .lean();
 
   const rows = buildClosedBoardExperiences({
@@ -190,6 +198,7 @@ async function persistClosedBoardExperiences(board, deps = {}) {
     memberships,
     roles: LEGACY_BOARD_ROLES,
     tasks,
+    sourceProjectId: projectId || undefined,
   });
 
   let appended = 0;

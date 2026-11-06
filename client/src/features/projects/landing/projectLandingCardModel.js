@@ -214,9 +214,12 @@ export function buildProjectLandingCard(p, locale = 'vi', idx = 0) {
   const initial = String(name).trim().charAt(0).toUpperCase() || 'P';
   const [gradStart, gradEnd] = pickGrad(id);
   const memberCount = Number(p?.memberCount ?? p?.membersCount ?? p?.totalMembers ?? 0);
-  const relatedDeptCount = Array.isArray(p?.relatedDepartmentIds)
-    ? p.relatedDepartmentIds.length
-    : 0;
+  const relatedDeptCount =
+    p?.relatedDepartmentCount != null && Number.isFinite(Number(p.relatedDepartmentCount))
+      ? Math.max(0, Math.floor(Number(p.relatedDepartmentCount)))
+      : Array.isArray(p?.relatedDepartmentIds)
+        ? p.relatedDepartmentIds.length
+        : 0;
   const status = normalizeProjectStatus(p?.status);
   const priority = normalizeProjectPriority(p?.priority);
   const health = normalizeProjectHealth(p?.health);

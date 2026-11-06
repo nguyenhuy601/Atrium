@@ -208,6 +208,27 @@ export function resolveOverdueScopeLabel(item) {
 }
 
 /**
+ * Dedupe overdue rows by task/card id (first wins).
+ * @param {unknown[]} items
+ */
+export function dedupeOverdueItemsById(items = []) {
+  const rows = Array.isArray(items) ? items : [];
+  const seen = new Set();
+  const out = [];
+  for (const item of rows) {
+    const key = String(item?.id || item?.taskId || item?.cardId || item?._id || '').trim();
+    if (!key) {
+      out.push(item);
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+/**
  * Gắn identity dự án lên overdueItems (BE trước, rồi board-health map, rồi index projects).
  * @param {unknown[]} items
  * @param {unknown[]} boardHealthRows — boards đã enrich (có thể chỉ top 5)
@@ -240,7 +261,7 @@ export function enrichOverdueItems(items = [], boardHealthRows = [], projects = 
     });
   });
 
-  return rows.map((item) => {
+  const enriched = rows.map((item) => {
     const row = item && typeof item === 'object' ? item : {};
     const boardId = asId(row.boardId);
     const hitHealth = boardId ? byBoardFromHealth.get(boardId) : null;
@@ -268,4 +289,6 @@ export function enrichOverdueItems(items = [], boardHealthRows = [], projects = 
       projectCode,
     };
   });
+
+  return dedupeOverdueItemsById(enriched);
 }

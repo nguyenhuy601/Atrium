@@ -1,4 +1,5 @@
 import userService from '../../services/userService';
+import { memberDepartmentId } from '../../utils/filterTeamMembers';
 import { resolveEnrichedMemberContact } from './enrichOrgMembersContact';
 
 export { resolveEnrichedMemberContact } from './enrichOrgMembersContact';
@@ -46,7 +47,7 @@ export async function enrichMembershipsWithProfiles(members, options = {}) {
         userId: uid,
         role: String(m?.role || 'member').toLowerCase(),
         divisionId: m?.division ? String(m.division) : '',
-        departmentId: String(m?.departmentId || m?.department || '').trim(),
+        departmentId: memberDepartmentId(m),
         teamId: String(m?.teamId || m?.team || '').trim(),
         displayName: contact.displayName,
         email: contact.email,

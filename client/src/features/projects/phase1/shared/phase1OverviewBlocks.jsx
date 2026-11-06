@@ -111,6 +111,8 @@ export function Phase1ReviewAttentionBlock({
   organizationId,
   navigate,
   t,
+  chipsLocked = false,
+  chipsLockedHint = '',
 }) {
   const pending = attention?.pendingReview || { total: 0, byKind: {} };
   const changes = attention?.changesRequested || { total: 0, byKind: {} };
@@ -212,6 +214,8 @@ export function Phase1ReviewAttentionBlock({
               organizationId={organizationId}
               navigate={navigate}
               emphasize
+              locked={chipsLocked}
+              lockedHint={chipsLockedHint}
             />
           ))
         ) : (

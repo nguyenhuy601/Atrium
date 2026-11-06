@@ -1,10 +1,10 @@
-import { useCallback, useEffect } from 'react';
+import { lazy, Suspense, useCallback, useEffect } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { SpaceProvider, SPACE_KIND } from '../../../../context/SpaceContext';
 import { AdminLoadErrorState } from '../../../../components/adminUsers/adminPanelStates';
-import { fetchProjectHubProject } from '../useProjectHubQueries';
+import { fetchProjectHubProject, STALE_PROJECT_HUB_MS } from '../useProjectHubQueries';
 import { queryKeys } from '../../../../lib/queryKeys';
 import { resolveApiErrorMessage } from '../../../../utils/resolveApiErrorMessage';
 import {
@@ -25,10 +25,19 @@ import SpaceCalendarModule from '../../../spaceModules/SpaceCalendarModule';
 import SpaceDocumentsModule from '../../../spaceModules/SpaceDocumentsModule';
 import SpaceProjectChatModule from '../../../spaceModules/SpaceProjectChatModule';
 import { isPhase4DeliveryPhase } from './phase4Ui';
+import {
+  canEnterProjectSettings,
+  shouldDenyProjectEntry,
+} from '../projectEntryGuard';
+import ProjectRoleDeniedRedirect from '../../ProjectRoleDeniedRedirect';
+import { isProjectMembershipDenied } from '../../../../config/routeDeniedNotice';
 import Phase4OverviewPage from './Phase4OverviewPage';
 import Phase4HandoverChecklistPage from './Phase4HandoverChecklistPage';
 import Phase4DeployEvidencePage from './Phase4DeployEvidencePage';
 import Phase4ReleaseNotesPage from './Phase4ReleaseNotesPage';
+import { resolveHubCapabilities } from '../hubCaps';
+
+const ProjectClosureReportPage = lazy(() => import('../reports/ProjectClosureReportPage'));
 
 /**
  * Phase 4 release_handover workspace — primary tabs + tra cứu (board/TC/CR).
@@ -51,7 +60,8 @@ export default function Phase4Shell({ module: moduleProp } = {}) {
     queryKey: queryKeys.projectHub.project(projectId),
     queryFn: () => fetchProjectHubProject(projectId),
     enabled: Boolean(projectId),
-    staleTime: 15_000,
+    staleTime: STALE_PROJECT_HUB_MS,
+    refetchOnMount: false,
   });
 
   const deliveryPhase = projectRow ? coerceDeliveryPhase(projectRow.deliveryPhase) : null;
@@ -96,6 +106,15 @@ export default function Phase4Shell({ module: moduleProp } = {}) {
   }
 
   if (projectError && !projectRow) {
+    if (isProjectMembershipDenied(projectQueryError)) {
+      return (
+        <Navigate
+          to={buildProjectsPickerPath(orgId)}
+          replace
+          state={{ routeDenied: 'project' }}
+        />
+      );
+    }
     return (
       <div className="flex min-h-[12rem] items-center justify-center p-6">
         <AdminLoadErrorState
@@ -109,6 +128,24 @@ export default function Phase4Shell({ module: moduleProp } = {}) {
     );
   }
 
+  if (
+    shouldDenyProjectEntry({
+      projectRow,
+      isError: projectError,
+      error: projectQueryError,
+    })
+  ) {
+    return <ProjectRoleDeniedRedirect projectId={projectId} orgId={orgId} />;
+  }
+
+  if (
+    projectRow &&
+    module === 'settings' &&
+    !canEnterProjectSettings(projectRow.capabilities)
+  ) {
+    return <Navigate to={buildProjectsModulePath(projectId, 'overview')} replace />;
+  }
+
   if (projectRow && !isPhase4DeliveryPhase(deliveryPhase)) {
     return (
       <Navigate to={buildProjectsModulePath(projectId, phaseHomeModule(deliveryPhase))} replace />
@@ -120,12 +157,37 @@ export default function Phase4Shell({ module: moduleProp } = {}) {
     return <Navigate to={buildProjectsModulePath(projectId, 'handover')} replace />;
   }
 
-  if (projectRow && !isModuleAllowedForPhase(module, deliveryPhase)) {
+  if (
+    projectRow &&
+    !isModuleAllowedForPhase(module, deliveryPhase, {
+      projectStatus: projectRow?.status,
+    })
+  ) {
     return <Navigate to={buildProjectsModulePath(projectId, 'overview')} replace />;
   }
 
+  if (projectRow && module === 'reports') {
+    const reportCaps = resolveHubCapabilities(projectRow);
+    if (!reportCaps.canViewReport) {
+      return <Navigate to={buildProjectsModulePath(projectId, 'overview')} replace />;
+    }
+  }
+
   let body = null;
-  if (module === 'overview') {
+  if (module === 'reports') {
+    body = (
+      <Suspense
+        fallback={
+          <div className="flex min-h-[12rem] items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+            <span>{t('common.loading')}</span>
+          </div>
+        }
+      >
+        <ProjectClosureReportPage projectId={projectId} />
+      </Suspense>
+    );
+  } else if (module === 'overview') {
     body = <Phase4OverviewPage projectId={projectId} />;
   } else if (module === 'handover') {
     body = <Phase4HandoverChecklistPage projectId={projectId} />;

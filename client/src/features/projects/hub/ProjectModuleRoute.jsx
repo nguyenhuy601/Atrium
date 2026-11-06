@@ -1,7 +1,8 @@
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useCallback, useEffect } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import ProjectHubPage from '../../../pages/Projects/ProjectHubPage';
 import SpaceCalendarModule from '../../spaceModules/SpaceCalendarModule';
 import SpaceDocumentsModule from '../../spaceModules/SpaceDocumentsModule';
@@ -16,8 +17,10 @@ import {
   isModuleAllowedForPhase,
   isPhase1DeliveryPhase,
   phaseHomeModule,
-  PROJECT_COLLAB_OPS_MODULES,
 } from '../../../utils/projectPhaseNav';
+import { resolveHubCapabilities } from './hubCaps';
+
+const ProjectClosureReportPage = lazy(() => import('./reports/ProjectClosureReportPage'));
 import {
   ARTIFACT_KIND_BY_MODULE,
   PLANNING_KIND_BY_MODULE,
@@ -31,14 +34,23 @@ import {
 } from '../../../utils/suitePathUtils';
 import { writeStoredLastProjectId } from '../picker/projectPickerRemember';
 import { SpaceProvider, SPACE_KIND } from '../../../context/SpaceContext';
-import { fetchProjectHubProject } from './useProjectHubQueries';
+import { fetchProjectHubProject, STALE_PROJECT_HUB_MS } from './useProjectHubQueries';
 import { queryKeys } from '../../../lib/queryKeys';
 import { useAppStrings } from '../../../locales/appStrings';
 import { AdminLoadErrorState } from '../../../components/adminUsers/adminPanelStates';
 import { isProjectMembershipDenied } from '../../../config/routeDeniedNotice';
 import { resolveApiErrorMessage } from '../../../utils/resolveApiErrorMessage';
 import { isAiHitlIncomplete, resolveAiProjectEntryPath } from '../phase1/aiHitl/aiHitlNavState';
-import { loadLinkedPackForAiNav } from '../phase1/aiHitl/loadLinkedPackForAiNav';
+import {
+  aiHitlNavLinkedPackQueryKey,
+  loadLinkedPackForAiNav,
+} from '../phase1/aiHitl/loadLinkedPackForAiNav';
+import {
+  canEnterProjectSettings,
+  isAiHitlCollabOpsModule,
+  shouldDenyProjectEntry,
+} from './projectEntryGuard';
+import ProjectRoleDeniedRedirect from '../ProjectRoleDeniedRedirect';
 
 const PHASE1_MODULES = new Set([
   'overview',
@@ -81,7 +93,8 @@ export default function ProjectModuleRoute() {
     queryKey: queryKeys.projectHub.project(projectId),
     queryFn: () => fetchProjectHubProject(projectId),
     enabled: Boolean(projectId),
-    staleTime: 30_000,
+    staleTime: STALE_PROJECT_HUB_MS,
+    refetchOnMount: false,
   });
   // Only coerce after row exists — loading must not imply development (Phase 2 hub flash).
   const deliveryPhase = projectRow ? coerceDeliveryPhase(projectRow.deliveryPhase) : null;
@@ -95,7 +108,7 @@ export default function ProjectModuleRoute() {
     (deliveryPhase === 'requirement_analysis' || !projectRow?.deliveryPhase);
 
   const { data: linkedPack, isPending: packPending } = useQuery({
-    queryKey: ['aiHitlNavLinkedPack', String(orgId || ''), String(projectId || '')],
+    queryKey: aiHitlNavLinkedPackQueryKey(orgId, projectId),
     queryFn: () => loadLinkedPackForAiNav(orgId, projectId),
     enabled: needsAiHitlGuard,
     staleTime: 30_000,
@@ -108,6 +121,23 @@ export default function ProjectModuleRoute() {
   useEffect(() => {
     if (orgId) writeStoredLastOrganizationId(orgId);
   }, [orgId]);
+
+  const phaseRedirectToastRef = useRef('');
+  useEffect(() => {
+    if (!projectRow || module === 'ai-hitl') return;
+    if (
+      isModuleAllowedForPhase(module, deliveryPhase, {
+        projectStatus: projectRow?.status,
+      })
+    ) {
+      return;
+    }
+    const home = phaseHomeModule(deliveryPhase);
+    const key = `${projectId}:${module}:${home}`;
+    if (phaseRedirectToastRef.current === key) return;
+    phaseRedirectToastRef.current = key;
+    toast(t('nav.projectPhaseModuleRedirect'), { id: 'project-phase-module-redirect' });
+  }, [projectRow, module, deliveryPhase, projectId, t]);
 
   const onModuleChange = useCallback(
     (tabId) => {
@@ -160,6 +190,24 @@ export default function ProjectModuleRoute() {
     );
   }
 
+  if (
+    shouldDenyProjectEntry({
+      projectRow,
+      isError: projectError,
+      error: projectLoadError,
+    })
+  ) {
+    return <ProjectRoleDeniedRedirect projectId={projectId} orgId={orgId} />;
+  }
+
+  if (
+    projectRow &&
+    module === 'settings' &&
+    !canEnterProjectSettings(projectRow.capabilities)
+  ) {
+    return <Navigate to={buildProjectsModulePath(projectId, 'overview')} replace />;
+  }
+
   if (needsAiHitlGuard && packPending && linkedPack === undefined) {
     return (
       <div className="flex min-h-[12rem] items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
@@ -174,9 +222,7 @@ export default function ProjectModuleRoute() {
     isAiHitlIncomplete({ project: projectRow, pack: linkedPack || null });
 
   // Incomplete AI → stay on ai-hitl; still allow Collaboration/Operations modules.
-  const collabOpsAllowed =
-    module === 'ai-hitl' || PROJECT_COLLAB_OPS_MODULES.includes(module);
-  if (aiHitlIncomplete && !collabOpsAllowed) {
+  if (aiHitlIncomplete && !isAiHitlCollabOpsModule(module)) {
     const hitlPath = resolveAiProjectEntryPath({
       projectId,
       project: projectRow,
@@ -190,11 +236,22 @@ export default function ProjectModuleRoute() {
   if (
     projectRow &&
     module !== 'ai-hitl' &&
-    !isModuleAllowedForPhase(module, deliveryPhase)
+    !isModuleAllowedForPhase(module, deliveryPhase, {
+      projectStatus: projectRow?.status,
+    })
   ) {
     return (
       <Navigate to={buildProjectsModulePath(projectId, phaseHomeModule(deliveryPhase))} replace />
     );
+  }
+
+  if (projectRow && module === 'reports') {
+    const reportCaps = resolveHubCapabilities(projectRow);
+    if (!reportCaps.canViewReport) {
+      return (
+        <Navigate to={buildProjectsModulePath(projectId, phaseHomeModule(deliveryPhase))} replace />
+      );
+    }
   }
 
   if (
@@ -218,7 +275,20 @@ export default function ProjectModuleRoute() {
   const hubTab = MODULE_TO_HUB_TAB[module] || null;
 
   let body = null;
-  if (module === 'chat') {
+  if (module === 'reports') {
+    body = (
+      <Suspense
+        fallback={
+          <div className="flex min-h-[12rem] items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+            <span>{t('common.loading')}</span>
+          </div>
+        }
+      >
+        <ProjectClosureReportPage projectId={projectId} />
+      </Suspense>
+    );
+  } else if (module === 'chat') {
     body = <SpaceProjectChatModule />;
   } else if (module === 'calendar') {
     body = (

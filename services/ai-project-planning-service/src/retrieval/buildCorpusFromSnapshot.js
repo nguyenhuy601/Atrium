@@ -673,7 +673,9 @@ function buildCorpusFromSnapshot(snapshot, opts = {}) {
     if (label) pushTech(label, 'environment');
   }
 
-  // employee_history — role/domain/months only (no PII / email)
+  // employee_history — rich HOW staffing text (no PII / email; no quality KPI digits)
+  const EMPLOYEE_HISTORY_TEXT_CAP = 280;
+  const EMPLOYEE_HISTORY_CORPUS_VERSION = 'eh-v2';
   const employees = Array.isArray(projected.employees) ? projected.employees : [];
   for (const emp of employees) {
     const empKey = String(emp?.employeeId || emp?.id || 'emp');
@@ -684,24 +686,70 @@ function buildCorpusFromSnapshot(snapshot, opts = {}) {
         : [];
     history.forEach((h, i) => {
       if (!h || typeof h !== 'object') return;
+      const statusRaw = String(h.status || '').trim().toLowerCase();
+      if (statusRaw === 'rejected') return;
       const role = String(h.role || h.title || '').trim();
       const domain = String(h.domain || h.area || '').trim();
-      const months = h.months != null ? String(h.months) : h.durationMonths != null
-        ? String(h.durationMonths)
-        : '';
-      const text = [role, domain, months ? `${months} months` : '']
-        .filter(Boolean)
-        .join(' ');
+      const monthsVal =
+        h.months != null && Number.isFinite(Number(h.months))
+          ? Number(h.months)
+          : h.durationMonths != null && Number.isFinite(Number(h.durationMonths))
+            ? Number(h.durationMonths)
+            : null;
+      const projectName = String(h.projectName || h.name || '').trim();
+      const work = String(h.work || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 120);
+      const techList = [
+        ...new Set(
+          (Array.isArray(h.technologies)
+            ? h.technologies
+            : Array.isArray(h.technologiesHandled)
+              ? h.technologiesHandled
+              : []
+          )
+            .map((t) => String(t || '').trim())
+            .filter(Boolean)
+            .slice(0, 40)
+        ),
+      ];
+      const segments = [];
+      if (role) segments.push(`role:${role}`);
+      if (domain) segments.push(`domain:${domain}`);
+      if (monthsVal != null) segments.push(`experience:${monthsVal} months`);
+      if (projectName) segments.push(`project:${projectName}`);
+      if (work) segments.push(`work:${work}`);
+      if (techList.length) segments.push(`technologies:${techList.join(', ')}`);
+      const text = segments.join(' | ').slice(0, EMPLOYEE_HISTORY_TEXT_CAP);
       if (!text) return;
       const sourceId = `hist:${empKey}:${i}`;
+      const sourceProjectId = String(
+        h.sourceProjectId || h.projectId || scope.projectId || ''
+      ).trim();
+      const origin =
+        String(h.source || '').trim() === 'closed_board'
+          ? ORIGIN.CLOSED_BOARD
+          : ORIGIN.SYSTEM;
+      const approvalStatus =
+        statusRaw === 'verified' ? APPROVAL.APPROVED : APPROVAL.DRAFT;
       pushDoc(docs, {
         id: sourceId,
         sourceId,
         docType: 'employee_history',
         text,
         metadata: metaBase(
-          { spanId: sourceId },
-          { origin: ORIGIN.SYSTEM, approvalStatus: APPROVAL.DRAFT }
+          {
+            spanId: sourceId,
+            empKey,
+            role: role || undefined,
+            domain: domain ? [domain] : undefined,
+            technologies: techList.length ? techList : undefined,
+            sourceProjectId: sourceProjectId || undefined,
+            projectId: sourceProjectId || scope.projectId || undefined,
+            corpusVersion: EMPLOYEE_HISTORY_CORPUS_VERSION,
+          },
+          { origin, approvalStatus }
         ),
       });
     });
@@ -725,4 +773,6 @@ module.exports = {
   WHAT_CORPUS_DOC_TYPES,
   applyIndexCap,
   splitAcceptanceCriteria,
+  EMPLOYEE_HISTORY_TEXT_CAP: 280,
+  EMPLOYEE_HISTORY_CORPUS_VERSION: 'eh-v2',
 };

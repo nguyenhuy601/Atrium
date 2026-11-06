@@ -190,7 +190,7 @@ export default function DeptOrgRolesPanel({ orgId, embedded = false }) {
         <div className="space-y-2 text-sm text-muted-foreground">
           <p>{t('adminOrg.deptOrgRolesNeedMembers')}</p>
           <Link
-            to={`/app/admin/org-structure/departments/members?unitId=${encodeURIComponent(selectedId)}`}
+            to={`/admin/org-structure/departments/members?unitId=${encodeURIComponent(selectedId)}`}
             className={adminSecondaryBtnClass()}
           >
             {t('adminDomains.orgStructure.deptMembers')}

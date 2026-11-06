@@ -29,7 +29,7 @@ import {
   localizedPositionLabel,
 } from '../../utils/positionLocale';
 
-const RBAC_POS_BASE = '/app/admin/rbac/positions';
+const RBAC_POS_BASE = '/admin/rbac/positions';
 
 export default function PosListPanel({ orgId }) {
   const { t } = useAppStrings();

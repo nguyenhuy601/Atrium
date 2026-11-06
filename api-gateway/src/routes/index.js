@@ -25,7 +25,7 @@ router.use(publicBffRouter);
 // Apply permission middleware để kiểm tra quyền truy cập
 router.use(permissionMiddleware);
 
-// BFF — org shell / documents-overview (cache + coalesce, trước proxy)
+// BFF org router (hiện empty — documents-overview đi REST proxy)
 router.use(orgBffRouter);
 
 // Apply proxy middleware cho tất cả routes

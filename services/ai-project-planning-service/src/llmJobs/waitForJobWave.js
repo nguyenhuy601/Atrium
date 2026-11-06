@@ -12,27 +12,17 @@ const {
   resolveLlmJobsTransport,
   resolveLlmJobsPollMs,
   resolveWaveTimeoutMs,
-  resolveLlmJobsConcurrency,
 } = require('./llmJobContract');
 const { processLlmJob } = require('./processLlmJob');
-const { drainMemoryMessages, listMemoryMessages } = require('./llmJobPublisher');
+const { drainMemoryMessages } = require('./llmJobPublisher');
+const { runScaledPool } = require('../runtime/workerScale');
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function mapPool(items, concurrency, fn) {
-  const list = Array.isArray(items) ? items : [];
-  const limit = Math.max(1, concurrency);
-  let idx = 0;
-  const workers = Array.from({ length: Math.min(limit, list.length || 1) }, async () => {
-    while (idx < list.length) {
-      const cur = idx;
-      idx += 1;
-      await fn(list[cur]);
-    }
-  });
-  await Promise.all(workers);
+async function mapPool(items, _concurrency, fn) {
+  await runScaledPool(items, fn);
 }
 
 /**
@@ -53,8 +43,6 @@ async function waitForJobWave(jobIds, opts = {}) {
   const started = Date.now();
   const waitMs = resolveWaveTimeoutMs(env);
   const pollMs = resolveLlmJobsPollMs(env);
-  const concurrency = resolveLlmJobsConcurrency(env);
-
   for (;;) {
     const jobs = await listLlmJobsByIds(ids, env);
     const byId = new Map(jobs.map((j) => [j.jobId, j]));
@@ -99,14 +87,17 @@ async function waitForJobWave(jobIds, opts = {}) {
       // Also drain any published messages (keeps publisher list in sync)
       drainMemoryMessages();
       if (todo.length) {
-        await mapPool(todo, concurrency, (job) =>
-          processLlmJob(job.jobId, {
-            env,
-            generateJsonFn: opts.generateJsonFn,
-            invokeFn: opts.invokeFn,
-            useEchoStub: opts.useEchoStub,
-            allowEchoFallback: opts.allowEchoFallback,
-          })
+        await runScaledPool(
+          todo,
+          (job) =>
+            processLlmJob(job.jobId, {
+              env,
+              generateJsonFn: opts.generateJsonFn,
+              invokeFn: opts.invokeFn,
+              useEchoStub: opts.useEchoStub,
+              allowEchoFallback: opts.allowEchoFallback,
+            }),
+          env
         );
         continue;
       }

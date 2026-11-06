@@ -60,11 +60,9 @@ export default function DashboardFigmaView({
   upcomingMeetings,
   meetingsEmptyLabel,
   workspaces,
-  addFriendLabel,
   hideWorkspacesPanel = false,
   onCreateRoom,
   onCreateWorkspace,
-  onAddFriend,
   onWorkspaceClick,
 }) {
   const { t } = useAppStrings();
@@ -134,17 +132,15 @@ export default function DashboardFigmaView({
             meetings={upcomingMeetings}
             meetingsEmptyLabel={meetingsEmptyLabel}
             workspaces={workspaces}
-            addFriendLabel={addFriendLabel}
             hideWorkspacesPanel={hideWorkspacesPanel}
-            onMessagesViewAll={() => onNavigate('/app/communicate/chat/friends')}
-            onMessageClick={() => onNavigate('/app/communicate/chat/friends')}
-            onCalendarClick={() => onNavigate('/app/me/calendar')}
-            onMeetingClick={() => onNavigate('/app/communicate/voice')}
+            onMessagesViewAll={() => onNavigate('/communicate/chat/friends')}
+            onMessageClick={() => onNavigate('/communicate/chat/friends')}
+            onCalendarClick={() => onNavigate('/me/calendar')}
+            onMeetingClick={() => onNavigate('/communicate/voice')}
             onCreateRoom={onCreateRoom}
             onWorkspacesViewAll={() => onNavigate(buildCompanyWorkspacePath())}
             onWorkspaceClick={onWorkspaceClick}
             onCreateWorkspace={onCreateWorkspace}
-            onAddFriend={onAddFriend}
           />
         </section>
       </div>

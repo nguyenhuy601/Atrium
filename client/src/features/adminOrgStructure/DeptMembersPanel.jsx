@@ -140,7 +140,7 @@ export default function DeptMembersPanel({ orgId, embedded = false }) {
               {t('adminOrg.deptMembersHeadNote')}{' '}
               <Link
                 className="underline"
-                to={`/app/admin/org-structure/departments/head?unitId=${encodeURIComponent(selectedId)}`}
+                to={`/admin/org-structure/departments/head?unitId=${encodeURIComponent(selectedId)}`}
               >
                 {t('adminDomains.orgStructure.deptHead')}
               </Link>
@@ -213,7 +213,7 @@ export default function DeptMembersPanel({ orgId, embedded = false }) {
               <p className="text-sm text-muted-foreground">{t('adminOrg.grantDenied')}</p>
             )}
             <Link
-              to={`/app/admin/org-structure/departments/org-roles?unitId=${encodeURIComponent(selectedId)}`}
+              to={`/admin/org-structure/departments/org-roles?unitId=${encodeURIComponent(selectedId)}`}
               className={adminSecondaryBtnClass()}
             >
               {t('adminDomains.orgStructure.deptOrgRoles')}

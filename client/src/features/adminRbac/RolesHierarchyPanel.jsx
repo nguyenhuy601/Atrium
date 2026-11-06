@@ -76,7 +76,7 @@ function RoleCardBody({ role }) {
   const id = normalizeRoleId(role);
   return (
     <Link
-      to={`/app/admin/rbac/edit?roleId=${encodeURIComponent(id)}`}
+      to={`/admin/rbac/edit?roleId=${encodeURIComponent(id)}`}
       className="block rounded-lg border border-border bg-card px-3 py-2.5 text-sm font-semibold text-foreground no-underline shadow-sm transition-colors duration-150 hover:bg-muted hover:no-underline motion-reduce:transition-none"
       draggable={false}
     >
@@ -160,13 +160,13 @@ export default function RolesHierarchyPanel({ orgId }) {
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
-            to="/app/admin/rbac/roles"
+            to="/admin/rbac/roles"
             className="rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
           >
             {t('adminDomains.rbac.roles')}
           </Link>
           <Link
-            to="/app/admin/rbac/create"
+            to="/admin/rbac/create"
             className="rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
           >
             {t('adminDomains.rbac.create')}

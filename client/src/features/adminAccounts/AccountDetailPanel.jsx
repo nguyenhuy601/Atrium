@@ -121,42 +121,42 @@ export default function AccountDetailPanel({ orgId }) {
                 </p>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {canDisable ? (
-                    <ActionLink to={adminUserHubLink('/app/admin/accounts/access', userId, 'lock')} icon={Lock}>
+                    <ActionLink to={adminUserHubLink('/admin/accounts/access', userId, 'lock')} icon={Lock}>
                       {t('adminDomains.accounts.lock')}
                     </ActionLink>
                   ) : null}
                   {canResetPassword ? (
                     <>
-                      <ActionLink to={adminUserHubLink('/app/admin/accounts/password', userId, 'reset')} icon={Mail}>
+                      <ActionLink to={adminUserHubLink('/admin/accounts/password', userId, 'reset')} icon={Mail}>
                         {t('adminDomains.accounts.resetPassword')}
                       </ActionLink>
-                      <ActionLink to={adminUserHubLink('/app/admin/accounts/password', userId, 'force')} icon={KeyRound}>
+                      <ActionLink to={adminUserHubLink('/admin/accounts/password', userId, 'force')} icon={KeyRound}>
                         {t('adminDomains.accounts.forcePassword')}
                       </ActionLink>
-                      <ActionLink to={adminUserHubLink('/app/admin/accounts/password', userId, 'set')} icon={KeyRound}>
+                      <ActionLink to={adminUserHubLink('/admin/accounts/password', userId, 'set')} icon={KeyRound}>
                         {t('adminDomains.accounts.setPassword')}
                       </ActionLink>
                     </>
                   ) : null}
                   {canUpdate && summary?.pendingActivation ? (
-                    <ActionLink to={adminUserHubLink('/app/admin/accounts/access', userId, 'activate')} icon={ShieldCheck}>
+                    <ActionLink to={adminUserHubLink('/admin/accounts/access', userId, 'activate')} icon={ShieldCheck}>
                       {t('adminDomains.accounts.activate')}
                     </ActionLink>
                   ) : null}
                   {canDisable ? (
-                    <ActionLink to={adminUserHubLink('/app/admin/accounts/access', userId, 'revoke')} icon={LogOut}>
+                    <ActionLink to={adminUserHubLink('/admin/accounts/access', userId, 'revoke')} icon={LogOut}>
                       {t('adminDomains.accounts.revokeSessions')}
                     </ActionLink>
                   ) : null}
                   {canUpdate ? (
                     <ActionLink
-                      to={adminUserHubLink('/app/admin/accounts/verification', userId, 'resend')}
+                      to={adminUserHubLink('/admin/accounts/verification', userId, 'resend')}
                       icon={MailCheck}
                     >
                       {t('adminDomains.accounts.resendVerification')}
                     </ActionLink>
                   ) : null}
-                  <ActionLink to={`/app/admin/accounts/login-history${q}`} icon={History}>
+                  <ActionLink to={`/admin/accounts/login-history${q}`} icon={History}>
                     {t('adminDomains.accounts.loginHistory')}
                   </ActionLink>
                 </div>
@@ -166,7 +166,7 @@ export default function AccountDetailPanel({ orgId }) {
                 <p className="text-xs text-muted-foreground">
                   {t('adminAccounts.profileLinkHint')}{' '}
                   <Link
-                    to={adminUserHubLink('/app/admin/users/people-ops', userId, 'edit')}
+                    to={adminUserHubLink('/admin/users/people-ops', userId, 'edit')}
                     className="rounded font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {t('adminDomains.users.edit')}

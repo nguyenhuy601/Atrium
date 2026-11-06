@@ -19,7 +19,7 @@ import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
 import AdminTaskBoardPicker from './AdminTaskBoardPicker';
 import { aggregateBoardLabels } from './adminLabelsUtils';
 
-const MANAGE_PATH = '/app/admin/projects/manage';
+const MANAGE_PATH = '/admin/projects/manage';
 
 function manageLinkForLabel(boardId, label) {
   const params = new URLSearchParams({ boardId, tag: label });

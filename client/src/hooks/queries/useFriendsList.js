@@ -13,6 +13,7 @@ export function useFriendsList({ status = 'accepted', enabled: enabledProp = tru
     queryKey: queryKeys.friends.list(normalizedStatus),
     queryFn: () => fetchFriendsList(normalizedStatus),
     staleTime: STALE_TIME_FRIENDS_MS,
+    refetchOnWindowFocus: false,
     enabled,
   });
 }

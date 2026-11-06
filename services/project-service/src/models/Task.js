@@ -545,6 +545,10 @@ taskSchema.index({ serverId: 1 });
 taskSchema.index({ createdBy: 1 });
 taskSchema.index({ dueDate: 1 });
 taskSchema.index({ isActive: 1, status: 1, dueDate: 1, assigneeId: 1 });
+/** Dashboard summary $facet: $match org + isActive rồi lọc status/dueDate */
+taskSchema.index({ organizationId: 1, isActive: 1, status: 1, dueDate: 1 });
+/** Dashboard myOpen / myOverdue / myDueThisWeek trong cùng org */
+taskSchema.index({ organizationId: 1, isActive: 1, assigneeId: 1, status: 1 });
 taskSchema.index({ priority: 1, status: 1 });
 
 const Task = mongoose.model('Task', taskSchema);

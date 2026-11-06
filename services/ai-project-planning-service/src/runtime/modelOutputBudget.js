@@ -1,6 +1,6 @@
 /**
  * Completion budget for the configured chat model.
- * qwen-max rejects max_tokens above 8192. qwen-plus and qwen-flash allow 32768.
+ * qwen-max rejects max_tokens above 8192. Other DashScope chat models allow ≤16384.
  */
 
 const { resolveChatMaxOutputTokens } = require('@enterprise/shared/llm/openaiCompatibleClient');

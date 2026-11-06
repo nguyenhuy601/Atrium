@@ -12,14 +12,13 @@ const {
   MemorySaver,
   Send,
 } = require('@langchain/langgraph');
+const { AIMessage } = require('@langchain/core/messages');
+const { nextLayer } = require('../agents/how/howSupervisor');
 const { assembleContextPackageAsync } = require('../retrieval/contextAssembly');
 const { buildCorpusFromSnapshot } = require('../retrieval/buildCorpusFromSnapshot');
 const {
   appendList,
   appendMessages,
-  createSelectToolsNode,
-  routeAfterSelectTools,
-  lastAiMessage,
   stateForToolSend,
 } = require('./toolSelectNodes');
 const { deepMergePlanningContainers } = require('../tools/mergePlanningContainers');
@@ -27,16 +26,13 @@ const {
   mergeCurrentToolName,
   mergeStopReason,
 } = require('./howPhaseToolNodes');
-const { CANONICAL_ORDER } = require('./howToolDag');
 const {
   HOW_SEC_TOOL_NAMES,
   getHowSecToolSubgraph,
 } = require('./toolSubgraphAdapter');
 const {
   PLAIN_TOOLS_NODE,
-  listPlainToolNames,
   buildPlainToolsNode,
-  toolCallsFromMessage,
 } = require('./phasePlainToolNode');
 const { buildHowBacklogRetrieveQuery } = require('./howContextQueries');
 const { logHowCtx, buildCtxPromptFragment } = require('./howProposalNodes');
@@ -322,19 +318,26 @@ function buildHowPhaseGraph(hooks = {}) {
     };
   });
 
-  graph.addNode('selectTools',
-    createSelectToolsNode({
-      phase: 'how',
-      onProgress,
-      decideToolCalls: hooks.decideToolCalls,
-    })
-  );
+  graph.addNode('prepareLayer', async (state) => {
+    onProgress?.({ node: 'prepareLayer', phase: 'how' });
+    const plan = nextLayer(state);
+    const skipped = plan.skipped || [];
+    return {
+      layerBase: state.container || null,
+      agentResults: skipped,
+      history: ['prepareLayer'],
+    };
+  });
+
+  graph.addNode('joinLayer', async (state) => {
+    onProgress?.({ node: 'joinLayer', phase: 'how' });
+    return {
+      layerBase: state.container || state.layerBase || null,
+      history: ['joinLayer'],
+    };
+  });
 
   /** Pattern B sec subgraphs (Send) + Hybrid A plainTools (ToolNode). */
-  const howSecNames = new Set(HOW_SEC_TOOL_NAMES);
-  const howPlainNames = new Set(listPlainToolNames('how'));
-  const howKnownNames = new Set([...CANONICAL_ORDER, ...HOW_SEC_TOOL_NAMES]);
-
   for (const toolName of HOW_SEC_TOOL_NAMES) {
     const secCompiled = getHowSecToolSubgraph(toolName);
     graph.addNode(toolName, async (state, config) => {
@@ -467,54 +470,39 @@ function buildHowPhaseGraph(hooks = {}) {
     return finalizePlanNode(state);
   });
 
-  function routeAfterSelectToolsHow(state) {
-    const {
-      isHowReadyForFinalize,
-      detectHowSelectDeadlock,
-      isHowDeadlockStopReason,
-    } = require('./computeEligibleHowTools');
-    const stop = String(state?.stopReason || '');
-    const budgetOrHardFail =
-      stop.startsWith('BUDGET_') ||
-      stop === 'TOOL_FAILED' ||
-      stop.startsWith('TOOL_FAILED:');
-    if (isHowDeadlockStopReason(stop) || budgetOrHardFail) {
-      return isHowReadyForFinalize(state) ? 'finalizePlan' : 'emitIncomplete';
+  function routeReadyLayer(state) {
+    const plan = nextLayer(state);
+    if (!plan.nodes.length) {
+      return plan.finalize ? 'finalizePlan' : 'emitIncomplete';
     }
-    if (routeAfterSelectTools(state) === 'assemble') {
-      if (isHowReadyForFinalize(state)) return 'finalizePlan';
-      const deadlock = detectHowSelectDeadlock(state);
-      return deadlock.deadlocked ? 'emitIncomplete' : 'assemble';
-    }
-    const ai = lastAiMessage(state.messages);
-    const calls = toolCallsFromMessage(ai);
-    if (!calls.length) {
-      if (isHowReadyForFinalize(state)) return 'finalizePlan';
-      const deadlock = detectHowSelectDeadlock(state);
-      return deadlock.deadlocked ? 'emitIncomplete' : 'assemble';
-    }
-    const sends = [];
-    let plainQueued = false;
-    for (const call of calls) {
-      const toolName = call.name || call.toolName;
-      if (!toolName || !howKnownNames.has(toolName)) continue;
-      if (howSecNames.has(toolName)) {
-        sends.push(
-          new Send(toolName, stateForToolSend(state, { clearMessages: true }))
-        );
-        continue;
+    return plan.nodes.map((node) => {
+      const payload = stateForToolSend(
+        {
+          ...state,
+          layerBase: state.layerBase || state.container,
+          inputManifest: node.inputManifest,
+          riskScope: node.riskScope || null,
+          contextSlice: node.contextSlice,
+        },
+        { clearMessages: !node.plain }
+      );
+      if (node.plain) {
+        payload.messages = [
+          new AIMessage({
+            content: '',
+            tool_calls: [
+              {
+                id: `call_${node.id}`,
+                name: node.id,
+                args: {},
+                type: 'tool_call',
+              },
+            ],
+          }),
+        ];
       }
-      if (howPlainNames.has(toolName) && !plainQueued) {
-        plainQueued = true;
-        sends.push(
-          new Send(PLAIN_TOOLS_NODE, stateForToolSend(state, { clearMessages: false }))
-        );
-      }
-    }
-    if (sends.length) return sends;
-    if (isHowReadyForFinalize(state)) return 'finalizePlan';
-    const deadlock = detectHowSelectDeadlock(state);
-    return deadlock.deadlocked ? 'emitIncomplete' : 'assemble';
+      return new Send(node.graphNode, payload);
+    });
   }
 
   graph.addNode('assemble', async (state) => {
@@ -566,13 +554,14 @@ function buildHowPhaseGraph(hooks = {}) {
   });
 
   graph.addEdge(START, 'prepareHowContext');
-  graph.addEdge('prepareHowContext', 'selectTools');
-  graph.addConditionalEdges('selectTools', routeAfterSelectToolsHow);
+  graph.addEdge('prepareHowContext', 'prepareLayer');
+  graph.addConditionalEdges('prepareLayer', routeReadyLayer);
   for (const toolName of HOW_SEC_TOOL_NAMES) {
-    graph.addEdge(toolName, 'selectTools');
+    graph.addEdge(toolName, 'joinLayer');
   }
   graph.addEdge(PLAIN_TOOLS_NODE, 'wbsCheckpoint');
-  graph.addEdge('wbsCheckpoint', 'selectTools');
+  graph.addEdge('wbsCheckpoint', 'joinLayer');
+  graph.addEdge('joinLayer', 'prepareLayer');
   graph.addEdge('finalizePlan', 'emitReady');
   graph.addEdge('assemble', 'scoreCompleteness');
   graph.addConditionalEdges(
@@ -594,7 +583,7 @@ function buildHowPhaseGraph(hooks = {}) {
       finalizePlan: 'finalizePlan',
     }
   );
-  graph.addEdge('injectGap', 'selectTools');
+  graph.addEdge('injectGap', 'prepareLayer');
   graph.addEdge('emitReady', END);
   graph.addEdge('emitIncomplete', END);
 
@@ -608,6 +597,5 @@ module.exports = {
   buildHowPhaseGraph,
   buildHowEmit,
   STOP_REASONS,
-  routeAfterSelectTools,
   routeAfterCompleteness,
 };

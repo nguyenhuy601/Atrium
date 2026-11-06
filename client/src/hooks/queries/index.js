@@ -1,11 +1,12 @@
 export { useOrganizationsMy } from './useOrganizationsMy';
-export { useFriendPending } from './useFriendPending';
 export { useNotificationBadge } from './useNotificationBadge';
 export { useFriendsList } from './useFriendsList';
 export { useNotificationsPreview } from './useNotificationsPreview';
 export { useNotificationsInfinite } from './useNotificationsInfinite';
 export { useDashboardSummary } from './useDashboardSummary';
-export { useOrgShell } from './useOrgShell';
+export { useOrgMyProfile } from './useOrgMyProfile';
+export { useOrgStructure, useOrgStructureNav } from './useOrgStructure';
+export { useOrgAccessibleChannels } from './useOrgAccessibleChannels';
 export { useOrganizationDocumentsOverview } from './useOrganizationDocumentsOverview';
 export { useOrgChannelMessages } from './useOrgChannelMessages';
 export * from './fetchers';

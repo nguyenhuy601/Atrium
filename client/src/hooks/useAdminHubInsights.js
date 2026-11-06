@@ -36,6 +36,6 @@ export default function useAdminHubInsights(orgId) {
     loading: membersLoading,
     pendingCount: pendingMembers.length,
     messages,
-    usersHref: '/app/admin/users',
+    usersHref: '/admin/users',
   };
 }

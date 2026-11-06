@@ -209,12 +209,43 @@ export default function ProjectChatWorkspace({
     if (!contextPickerOpen || !orgId || isAnnouncement) return undefined;
     let cancelled = false;
     setContextProjectsLoading(true);
+    const scopedPid = String(projectIdFilter || '').trim();
+
+    // Project chat: chỉ project hiện tại — không list cả org rồi lọc client.
+    if (scopedPid) {
+      projectAPI
+        .get(scopedPid)
+        .then((res) => {
+          if (cancelled) return;
+          const row = res?.data?.project ?? res?.data ?? res?.project ?? res;
+          const id = String(row?._id || row?.projectId || scopedPid).trim();
+          setContextProjects(id ? [{ ...(row && typeof row === 'object' ? row : {}), _id: id }] : []);
+        })
+        .catch(() => {
+          if (!cancelled) setContextProjects([{ _id: scopedPid }]);
+        })
+        .finally(() => {
+          if (!cancelled) setContextProjectsLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     projectAPI
       .list({ organizationId: orgId })
       .then((res) => {
         if (cancelled) return;
         const raw = res?.data?.projects ?? res?.projects ?? unwrapTaskApiPayload(res);
-        const list = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : [];
+        let list = Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : [];
+        // Fail-closed: only projects where membership is present and positive.
+        list = list.filter((p) => {
+          const mb = p?.myMembership;
+          if (!mb) return false;
+          if (typeof mb.isMember === 'boolean') return mb.isMember;
+          if (Array.isArray(mb.projectRoleKeys)) return mb.projectRoleKeys.length > 0;
+          return true;
+        });
         setContextProjects(list);
       })
       .catch(() => {
@@ -226,7 +257,7 @@ export default function ProjectChatWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [contextPickerOpen, orgId, isAnnouncement]);
+  }, [contextPickerOpen, orgId, isAnnouncement, projectIdFilter]);
 
   const chSlug = selectedChannel
     ? projectChannelDisplayLabel(selectedChannel, t)

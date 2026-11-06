@@ -1,11 +1,68 @@
 /**
- * Propose candidates from FR rows → run pipeline → backlogStructure.
- * Does not use Story.id = FR.id.
+ * Materialize backlog structure from FR rows + LLM epicsCatalog → pipeline.
+ * No heuristic one-epic-for-all dual path.
  */
 
 const { backlogProposeFromSources } = require('./backlogProposeFromSources');
 const { runBacklogStructurePipeline } = require('./runBacklogStructurePipeline');
 const { buildOperationKey, hashInput } = require('./proposalOperationStore');
+
+/**
+ * After mint, prefer catalog epic ids (multi-epic safe) over random EPIC-xxxxx.
+ */
+function applyEpicCatalogIds(structure, epicsCatalog, tempRefMap) {
+  const catalog = Array.isArray(epicsCatalog) ? epicsCatalog.filter((e) => e?.id) : [];
+  if (!catalog.length || !Array.isArray(structure?.epics) || !structure.epics.length) return;
+
+  const usedEpics = new WeakSet();
+  for (const cat of catalog) {
+    const catId = String(cat.id || '').trim();
+    if (!catId) continue;
+    const catFr = new Set(
+      (Array.isArray(cat.sourceFrIds) ? cat.sourceFrIds : []).map((id) => String(id).trim())
+    );
+    let best = null;
+    let bestScore = -1;
+    for (const epic of structure.epics) {
+      if (!epic?.id || usedEpics.has(epic)) continue;
+      let score = 0;
+      if (catFr.size) {
+        score = (epic.sourceFrIds || []).filter((id) => catFr.has(String(id).trim())).length;
+      } else {
+        const name = String(epic.name || epic.title || '').trim();
+        const catName = String(cat.name || cat.title || '').trim();
+        if (name && catName && name === catName) score = 1;
+        if (String(epic.id) === catId) score = 2;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = epic;
+      }
+    }
+    if (!best) {
+      best = structure.epics.find((e) => e?.id && !usedEpics.has(e)) || null;
+    }
+    if (!best) continue;
+
+    const oldId = best.id;
+    usedEpics.add(best);
+    best.id = catId;
+    best.name = cat.name || cat.title || best.name || best.title || catId;
+    best.title = best.name;
+
+    for (const f of structure.features || []) {
+      if (f.parentEpicId === oldId) f.parentEpicId = catId;
+    }
+    for (const s of structure.stories || []) {
+      if (s.parentEpicId === oldId) s.parentEpicId = catId;
+    }
+    if (tempRefMap && typeof tempRefMap === 'object') {
+      for (const [k, v] of Object.entries(tempRefMap)) {
+        if (v === oldId) tempRefMap[k] = catId;
+      }
+    }
+  }
+}
 
 async function buildBacklogStructureFromFr(opts = {}) {
   const frItems = Array.isArray(opts.frItems) ? opts.frItems : [];
@@ -42,11 +99,18 @@ async function buildBacklogStructureFromFr(opts = {}) {
 
   const proposed = await backlogProposeFromSources({
     frRows: frItems,
+    epicsCatalog,
     evidenceAllowList: opts.evidenceAllowList,
-    generateJsonFn: opts.generateJsonFn,
     env: opts.env,
-    epicTitle: epicsCatalog[0]?.name || epicsCatalog[0]?.title,
   });
+  if (!proposed.ok) {
+    return {
+      ok: false,
+      code: proposed.code || 'epic_catalog_required',
+      message: proposed.message || 'Epic catalog materialize failed',
+      backlogSource: 'backlog_structure',
+    };
+  }
 
   const pipeline = runBacklogStructurePipeline({
     candidateProposal: proposed.candidateProposal,
@@ -57,6 +121,7 @@ async function buildBacklogStructureFromFr(opts = {}) {
       acAllowList: [...acAllowList].sort(),
       sourceSnapshotVersion,
       purpose: 'backlog_structure',
+      epicIds: epicsCatalog.map((e) => e.id).filter(Boolean).sort(),
     },
     frAllowList,
     acAllowList,
@@ -80,25 +145,7 @@ async function buildBacklogStructureFromFr(opts = {}) {
   }
 
   const structure = pipeline.backlogStructure;
-  if (epicsCatalog.length && structure.epics?.length === 1) {
-    const cat = epicsCatalog[0];
-    if (cat?.id && structure.epics[0]) {
-      const oldId = structure.epics[0].id;
-      structure.epics[0].id = cat.id;
-      structure.epics[0].name = cat.name || cat.title || structure.epics[0].title;
-      for (const f of structure.features || []) {
-        if (f.parentEpicId === oldId) f.parentEpicId = cat.id;
-      }
-      for (const s of structure.stories || []) {
-        if (s.parentEpicId === oldId) s.parentEpicId = cat.id;
-      }
-      if (pipeline.tempRefMap) {
-        for (const [k, v] of Object.entries(pipeline.tempRefMap)) {
-          if (v === oldId) pipeline.tempRefMap[k] = cat.id;
-        }
-      }
-    }
-  }
+  applyEpicCatalogIds(structure, epicsCatalog, pipeline.tempRefMap);
 
   return {
     ok: true,
@@ -107,7 +154,7 @@ async function buildBacklogStructureFromFr(opts = {}) {
       meta: {
         ...structure.meta,
         backlogSource: 'backlog_structure',
-        proposeSource: proposed.source,
+        proposeSource: proposed.source || 'epic_catalog',
       },
     },
     tempRefMap: pipeline.tempRefMap,
@@ -118,4 +165,5 @@ async function buildBacklogStructureFromFr(opts = {}) {
 
 module.exports = {
   buildBacklogStructureFromFr,
+  applyEpicCatalogIds,
 };

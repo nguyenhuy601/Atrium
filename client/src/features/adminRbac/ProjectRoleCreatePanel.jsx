@@ -91,7 +91,7 @@ export default function ProjectRoleCreatePanel({ orgId }) {
         afterRoleId: insertPlace.afterRoleId,
       });
       toast.success(t('common.saveSuccess'));
-      navigate('/app/admin/rbac/project-roles');
+      navigate('/admin/rbac/project-roles');
     } catch (error) {
       toast.error(resolveApiErrorMessage(error, { t, fallback: t('common.saveFail') }));
     } finally {
@@ -180,7 +180,7 @@ export default function ProjectRoleCreatePanel({ orgId }) {
                 {busy ? t('common.saving') : t('common.save')}
               </button>
             ) : null}
-            <button type="button" disabled={busy} className={adminSecondaryBtnClass()} onClick={() => navigate('/app/admin/rbac/project-roles')}>
+            <button type="button" disabled={busy} className={adminSecondaryBtnClass()} onClick={() => navigate('/admin/rbac/project-roles')}>
               {t('common.cancel')}
             </button>
           </div>

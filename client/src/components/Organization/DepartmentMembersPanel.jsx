@@ -177,29 +177,30 @@ export default function DepartmentMembersPanel({
               }`}
             >
               <UserAvatar
-                name={row.name}
+                // Hồ sơ thiếu: không dùng fallback «Thành viên» → initials «TV».
+                name={row.profileIncomplete ? '' : row.name}
                 avatar={row.avatarUrl}
                 userId={row.id}
                 size="md"
                 className="shrink-0"
+                title={row.name}
               />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className={`truncate text-sm font-semibold ${title}`}>{row.name}</p>
+                  <p className={`truncate text-sm font-semibold ${title}`}>
+                    {row.profileIncomplete
+                      ? t('workspace.deptMembersProfileIncomplete')
+                      : row.name}
+                  </p>
                   {row.role === 'head' ? (
-                    <span className="rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-bold uppercase tracking-wide text-primary">
+                    <span className="rounded-md bg-primary/15 px-1.5 py-0.5 text-[0.625rem] font-bold tracking-wide text-primary">
                       {t('workspace.deptMembersHeadBadge')}
                     </span>
                   ) : (
-                    <span className={`text-[0.625rem] font-medium uppercase tracking-wide ${muted}`}>
+                    <span className={`text-[0.625rem] font-medium tracking-wide ${muted}`}>
                       {t('workspace.deptMembersMemberBadge')}
                     </span>
                   )}
-                  {row.profileIncomplete ? (
-                    <span className={`rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[0.625rem] font-semibold text-amber-700 dark:text-amber-300`}>
-                      {t('workspace.deptMembersProfileIncomplete')}
-                    </span>
-                  ) : null}
                 </div>
                 {row.email ? (
                   <p className={`mt-0.5 truncate text-xs ${muted}`}>{row.email}</p>

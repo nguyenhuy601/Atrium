@@ -11,7 +11,6 @@ import {
 } from '../../services/api/taskAPI';
 import roleAPI from '../../services/api/roleAPI';
 import userService from '../../services/userService';
-import friendService from '../../services/friendService';
 import { ConfirmDialog, Modal } from '../Shared';
 import { Plus, X } from 'lucide-react';
 import { handlePickerListKeyDown } from '../adminUsers/pickerListKeyboard';
@@ -83,6 +82,7 @@ function memberUserId(m) {
 async function fetchMembersWithRolesBundle(orgId, departmentId = '') {
   const deptId = String(departmentId || '').trim();
   const payload = await organizationAPI.getMembersWithRoles(orgId, {
+    view: 'directory',
     ...(deptId ? { departmentId: deptId } : {}),
   });
   const body = unwrapBody(payload);
@@ -242,7 +242,6 @@ function OrganizationMemberSidebar({
     assignedRoleNames: [],
     quickMessage: '',
   });
-  const [friendIdsSet, setFriendIdsSet] = useState(null);
   /** Xóa thành viên / Chặn — dùng modal thay cho window.confirm (tránh tiêu đề localhost) */
   const [memberConfirm, setMemberConfirm] = useState(null);
   /** Tab panel phải — mặc định danh sách thành viên */
@@ -895,26 +894,6 @@ function OrganizationMemberSidebar({
     return `@${tag} `;
   };
 
-  const ensureFriendIdsLoaded = useCallback(async () => {
-    if (friendIdsSet instanceof Set) return friendIdsSet;
-    try {
-      const payload = await friendService.getFriends();
-      const list = normalizeApiList(payload);
-      const next = new Set();
-      for (const item of list) {
-        const raw = item?.friendId || item;
-        const id = raw?._id || raw?.userId || raw?.id || item?.userId || item?.id;
-        if (id) next.add(String(id));
-      }
-      setFriendIdsSet(next);
-      return next;
-    } catch {
-      const empty = new Set();
-      setFriendIdsSet(empty);
-      return empty;
-    }
-  }, [friendIdsSet]);
-
   const openMemberCard = useCallback(
     async (member, anchorRect = null) => {
       if (!member?.userId) return;
@@ -950,7 +929,6 @@ function OrganizationMemberSidebar({
       const [profilePayload, selectedRoleIds] = await Promise.all([
         userService.getProfile(member.userId).catch(() => null),
         fetchSelectedRoleIdsForUser(member.userId).catch(() => ({})),
-        ensureFriendIdsLoaded(),
       ]);
       const profileBody = profilePayload ? unwrapBody(profilePayload) : null;
       const profile = profileBody?.data ?? profileBody ?? null;
@@ -967,7 +945,7 @@ function OrganizationMemberSidebar({
         };
       });
     },
-    [closeMenu, ensureFriendIdsLoaded, fetchSelectedRoleIdsForUser, menu.menuW, menu.x, menu.y, organizationRoles]
+    [closeMenu, fetchSelectedRoleIdsForUser, menu.menuW, menu.x, menu.y, organizationRoles]
   );
 
   const toggleMemberRole = useCallback(
@@ -1040,7 +1018,7 @@ function OrganizationMemberSidebar({
     if (!target?.userId) return;
     const text = String(memberCard.quickMessage || '').trim();
     setMemberCard((prev) => ({ ...prev, open: false }));
-    navigate('/app/communicate/chat/friends', {
+    navigate('/communicate/chat/friends', {
       state: {
         openDmUserId: target.userId,
         composeText: text,
@@ -1112,7 +1090,7 @@ function OrganizationMemberSidebar({
             onClick={() => {
               const m = menu.member;
               closeMenu();
-              navigate('/app/communicate/chat/friends', { state: { openDmUserId: m?.userId } });
+              navigate('/communicate/chat/friends', { state: { openDmUserId: m?.userId } });
             }}
           >
             {t('organizations.memberMenuMessage')}
@@ -1433,6 +1411,7 @@ function OrganizationMemberSidebar({
       >
         <OrgWorkspaceSearchSidebar
           organizationId={organizationId}
+          departmentId={departmentId}
           serverId={serverId}
           channels={searchChannels}
           isDarkMode={isDarkMode}

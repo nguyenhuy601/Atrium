@@ -294,6 +294,7 @@ async function listPacks(req, res) {
       userId,
       organizationId,
       status: req.query?.status,
+      projectId: req.query?.projectId,
     });
     return res.json({ success: true, data: rows });
   } catch (err) {

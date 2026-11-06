@@ -24,8 +24,8 @@ export const STALE_TIME_ORGS_MS = 120_000;
 /** Danh sách bạn — trung bình */
 export const STALE_TIME_FRIENDS_MS = 60_000;
 
-/** Dashboard BFF — khớp TTL cache gateway (~45s) */
-export const STALE_TIME_DASHBOARD_MS = 30_000;
+/** Dashboard RM — dưới DASHBOARD_RM_MAX_AGE_SEC (120s); tránh remount refetch. */
+export const STALE_TIME_DASHBOARD_MS = 90_000;
 
 /** Requirement access — sidebar + page share; ít đổi hơn list packs */
 export const STALE_TIME_REQUIREMENT_ACCESS_MS = 60_000;
@@ -83,9 +83,12 @@ export const queryClient = new QueryClient({
       refetchOnWindowFocus: false,
       networkMode: 'online',
       // Transport retry lives on axios; RQ only one soft retry for non-network failures.
+      // Do not storm on stable 4xx/5xx (friends 503 / BFF 500 previously multiplied requests).
       retry: (failureCount, error) => {
         if (networkController.shouldBlockRequests()) return false;
         if (isNetworkishQueryError(error)) return false;
+        const status = Number(error?.status || error?.response?.status || 0);
+        if (status === 401 || status === 403 || status === 404 || status >= 500) return false;
         return failureCount < 1;
       },
     },

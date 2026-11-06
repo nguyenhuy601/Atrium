@@ -10,6 +10,7 @@ import { HOME_LOCALES } from '../../locales/homePage';
 import LandingFeatureEmbed from '../../components/Landing/LandingFeatureEmbed';
 import ShellWaveBackdrop from '../../components/Layout/ShellWaveBackdrop';
 import { readSingleOrgModeFlag } from '../../utils/singleCompanyMode';
+import { getDefaultPathForSuite, readStoredSuite } from '../../utils/suitePathUtils';
 
 const TECH_STACK = ['React', 'Node.js', 'Socket.io', 'WebRTC', 'MongoDB', 'Redis', 'Docker', 'JWT'];
 
@@ -110,7 +111,7 @@ function HomePage() {
 
   useEffect(() => {
     if (!loading && isAuthenticated) {
-      navigate('/app', { replace: true });
+      navigate(getDefaultPathForSuite(readStoredSuite()), { replace: true });
     }
   }, [loading, isAuthenticated, navigate]);
 
@@ -187,7 +188,7 @@ function HomePage() {
             {isAuthenticated ? (
               <button
                 type="button"
-                onClick={() => navigate('/app')}
+                onClick={() => navigate(getDefaultPathForSuite(readStoredSuite()))}
                 className="rounded-2xl bg-gradient-to-r from-cyan-600 to-teal-600 px-4 py-2 text-sm font-bold text-white shadow-md transition hover:from-cyan-500 hover:to-teal-500 sm:px-5 sm:py-2.5"
               >
                 {copy.nav.enterApp}
@@ -253,7 +254,15 @@ function HomePage() {
               <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                 <button
                   type="button"
-                  onClick={() => navigate(isAuthenticated ? '/app' : hidePublicRegister ? '/login' : '/register')}
+                  onClick={() =>
+                    navigate(
+                      isAuthenticated
+                        ? getDefaultPathForSuite(readStoredSuite())
+                        : hidePublicRegister
+                          ? '/login'
+                          : '/register'
+                    )
+                  }
                   className="inline-flex h-14 min-w-[200px] items-center justify-center rounded-2xl bg-gradient-to-r from-cyan-600 to-teal-600 px-8 text-lg font-bold text-white shadow-[0_12px_32px_-8px_rgba(6,182,212,0.45)] transition hover:-translate-y-0.5 hover:from-cyan-500 hover:to-teal-500 motion-reduce:hover:translate-y-0"
                 >
                   {isAuthenticated ? copy.nav.enterApp : copy.hero.ctaPrimary}
@@ -473,7 +482,7 @@ function HomePage() {
               ) : !isAuthenticated ? null : (
                 <button
                   type="button"
-                  onClick={() => navigate('/app')}
+                  onClick={() => navigate(getDefaultPathForSuite(readStoredSuite()))}
                   className={`inline-flex h-14 min-w-[200px] items-center justify-center rounded-2xl border-2 px-8 text-lg font-semibold ${
                     isDarkMode ? 'border-white/20 text-white hover:bg-white/5' : 'border-slate-300 text-slate-800 hover:bg-white/80'
                   }`}
@@ -525,7 +534,7 @@ function HomePage() {
                   className="rounded-xl bg-gradient-to-r from-cyan-600 to-teal-600 px-4 py-2 text-sm font-bold"
                   onClick={() => {
                     closeModal();
-                    navigate('/app');
+                    navigate(getDefaultPathForSuite(readStoredSuite()));
                   }}
                 >
                   {copy.modal.goDashboard}

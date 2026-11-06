@@ -24,7 +24,7 @@ import { useAppStrings } from '../../locales/appStrings';
 import { unitId, unitName } from '../../utils/adminOrgStructureUtils';
 import { adminOrgUnitHubLink } from '../../utils/adminHubLinks';
 
-const BRANCH_MANAGE_HUB = '/app/admin/org-structure/branches/manage';
+const BRANCH_MANAGE_HUB = '/admin/org-structure/branches/manage';
 
 export default function BranchListPanel({ orgId }) {
   const { t } = useAppStrings();
@@ -75,7 +75,7 @@ export default function BranchListPanel({ orgId }) {
       wide
       actions={
         canCreateBranch ? (
-          <Link to="/app/admin/org-structure/branches/create" className={adminPrimaryBtnClass()}>
+          <Link to="/admin/org-structure/branches/create" className={adminPrimaryBtnClass()}>
             <Plus className="h-4 w-4" />
             {t('adminDomains.orgStructure.branchCreate')}
           </Link>
@@ -181,7 +181,7 @@ export default function BranchListPanel({ orgId }) {
                 message={t('adminOrg.noBranches')}
                 action={
                   canCreateBranch && !query.trim() ? (
-                    <Link to="/app/admin/org-structure/branches/create" className={adminPrimaryBtnClass()}>
+                    <Link to="/admin/org-structure/branches/create" className={adminPrimaryBtnClass()}>
                       <Plus className="h-4 w-4" aria-hidden />
                       {t('adminDomains.orgStructure.branchCreate')}
                     </Link>

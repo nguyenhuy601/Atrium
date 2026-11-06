@@ -12,6 +12,7 @@ const {
   resolveWbsLlmTimeoutMs,
   resolveWbsLlmMaxRepair,
   planWbsCallSlices,
+  resolveWbsPromptTokenBudget,
 } = require('../contracts/howWbsLlmContract');
 const {
   roleKeyForArea,
@@ -30,6 +31,11 @@ const {
   assessDecompositionQuality,
   formatRepairFeedback,
 } = require('./wbsDecompositionQuality');
+const {
+  buildWbsChunkSemantic,
+  trimChunkSemanticToBudget,
+  estimateWbsPromptTokens,
+} = require('./buildWbsChunkSemantic');
 
 const AREA_ENUM = Object.freeze([
   'frontend',
@@ -791,6 +797,7 @@ function resolveDecompositionOutcome({
 /**
  * Production prompt — decompose FR into independently completable tasks with separate outputs.
  * Feature nodes are not requested; ≥2 tasks on one FR are promoted later.
+ * Semantic: prompt-only wbs-chunk-semantic-v1 (never dump pack layer / requiredData).
  */
 function buildWbsStoryLlmPrompt({
   stories = [],
@@ -798,6 +805,7 @@ function buildWbsStoryLlmPrompt({
   frUnits = null,
   epics = [],
   semantic = null,
+  chunkSemantic = null,
   localeInstruction = '',
   roleAllowList = null,
   repairFeedback = null,
@@ -810,49 +818,28 @@ function buildWbsStoryLlmPrompt({
       ? frUnits
       : collectFrUnits(list, epics, semantic, null);
   const chunkFrIds = frList.map((unit) => unit.id).filter(Boolean);
-  const factsByFr = new Map();
-  for (const row of Array.isArray(semantic?.approved?.fr) ? semantic.approved.fr : []) {
-    const id = normalizeRef(row?.id);
-    if (!id || !chunkFrIds.includes(id)) continue;
-    factsByFr.set(id, row);
-  }
 
+  const resolvedChunkSemantic =
+    chunkSemantic && chunkSemantic.version
+      ? chunkSemantic
+      : buildWbsChunkSemantic({
+          semantic,
+          frUnits: frList,
+          stories: list,
+          allStories: list,
+        });
+
+  // FR= keeps AC whitelist for accept contract; meaning/rules live in WBS_SEMANTIC.
   const frPayload = frList.map((unit) => {
-    const facts = factsByFr.get(unit.id) || {};
-    const businessRules = [];
-    if (Array.isArray(unit.businessRules)) {
-      for (const rule of unit.businessRules) {
-        const text = truncate(rule, 240);
-        if (text) businessRules.push(text);
-      }
-    }
-    if (facts.businessRule) businessRules.push(truncate(facts.businessRule, 240));
-    if (Array.isArray(facts.rules)) {
-      for (const rule of facts.rules) {
-        const text = truncate(rule?.text || rule, 240);
-        if (text) businessRules.push(text);
-      }
-    }
     const row = {
       id: unit.id,
       name: truncate(unit.name || unit.id, UNIT_NAME_MAX),
       description: truncate(unit.description || unit.statement || '', UNIT_DESC_MAX) || undefined,
       ac: unitAcList({ ac: unit.ac }),
-      businessRules: businessRules.length ? businessRules.slice(0, 8) : undefined,
-      relatedData: facts.relatedData
-        ? truncate(
-            typeof facts.relatedData === 'string'
-              ? facts.relatedData
-              : JSON.stringify(facts.relatedData),
-            400
-          )
-        : undefined,
       epicId: unit.epicId || undefined,
       storyId: unit.storyId || undefined,
       module: unit.module || undefined,
       feature: unit.feature || undefined,
-      capability: facts.capability ? truncate(facts.capability, 200) : undefined,
-      intent: facts.intent ? truncate(facts.intent, 200) : undefined,
     };
     for (const key of Object.keys(row)) {
       if (row[key] == null || row[key] === '' || (Array.isArray(row[key]) && !row[key].length)) {
@@ -881,12 +868,66 @@ function buildWbsStoryLlmPrompt({
       `Schema: level is "task" only. sourceFrIds is exactly one id from FR. acRefs ⊆ FR.ac and non-empty when FR.ac is non-empty. deliverable is required. name must not copy the FR/Story title. suggestedRoleKey∈${roleHint}. area∈${AREA_ENUM.join('|')}. effortSeedHours optional. Do not invent FR ids. Do not analyze NFR or Customer-Raw CR-*.`,
     ].join('\n'),
     `FR=${JSON.stringify(frPayload)}`,
-    semantic ? `SEMANTIC=${JSON.stringify(semantic)}` : null,
+    `WBS_SEMANTIC=${JSON.stringify(resolvedChunkSemantic)}`,
     repairFeedback
       ? `REPAIR=${JSON.stringify(repairFeedback)}`
       : null,
   ].filter(Boolean);
   return lines.join('\n');
+}
+
+/**
+ * Build prompt under soft token budget (trim shared/summary; never strip FR.ac).
+ * @returns {{ prompt: string, chunkSemantic: object, estimatedTokens: number, budgetTrimSteps: string[], overBudget: boolean }}
+ */
+function buildBudgetedWbsStoryLlmPrompt(opts = {}) {
+  const env = opts.env || process.env;
+  const budget = resolveWbsPromptTokenBudget(env);
+  const frList = Array.isArray(opts.frUnits) ? opts.frUnits : [];
+  const stories = Array.isArray(opts.stories) ? opts.stories : [];
+  let chunkSemantic =
+    opts.chunkSemantic && opts.chunkSemantic.version
+      ? opts.chunkSemantic
+      : buildWbsChunkSemantic({
+          semantic: opts.semantic || null,
+          frUnits: frList,
+          stories,
+          allStories: stories,
+        });
+
+  const baseOpts = {
+    stories,
+    frUnits: frList,
+    epics: opts.epics || [],
+    semantic: opts.semantic || null,
+    localeInstruction: opts.localeInstruction || '',
+    roleAllowList: opts.roleAllowList || null,
+    repairFeedback: opts.repairFeedback || null,
+  };
+
+  let prompt = buildWbsStoryLlmPrompt({ ...baseOpts, chunkSemantic });
+  let estimatedTokens = estimateWbsPromptTokens(prompt);
+  let budgetTrimSteps = [];
+
+  if (estimatedTokens > budget) {
+    const trimmed = trimChunkSemanticToBudget(chunkSemantic, {
+      budget,
+      buildPrompt: (next) => buildWbsStoryLlmPrompt({ ...baseOpts, chunkSemantic: next }),
+    });
+    chunkSemantic = trimmed.chunkSemantic;
+    budgetTrimSteps = trimmed.steps || [];
+    prompt = buildWbsStoryLlmPrompt({ ...baseOpts, chunkSemantic });
+    estimatedTokens = estimateWbsPromptTokens(prompt);
+  }
+
+  return {
+    prompt,
+    chunkSemantic,
+    estimatedTokens,
+    budgetTrimSteps,
+    overBudget: estimatedTokens > budget,
+    budget,
+  };
 }
 
 /**
@@ -1369,13 +1410,42 @@ async function proposeWbsTasksWithLlm(opts = {}) {
   }
 
   async function runFrSliceOnce(slice, idPrefix, repairFeedback) {
-    const prompt = buildWbsStoryLlmPrompt({
+    const budgeted = buildBudgetedWbsStoryLlmPrompt({
       frUnits: slice,
+      stories,
+      epics,
       semantic,
       localeInstruction,
       roleAllowList,
       repairFeedback,
+      env,
     });
+    if (budgeted.overBudget && slice.length <= 1) {
+      return {
+        ok: false,
+        reason: 'prompt_over_budget',
+        needsReview: true,
+        budgetTrimSteps: budgeted.budgetTrimSteps,
+        estimatedTokens: budgeted.estimatedTokens,
+      };
+    }
+    if (budgeted.overBudget && slice.length > 1) {
+      const mid = Math.ceil(slice.length / 2);
+      const left = await runFrSliceOnce(slice.slice(0, mid), `${idPrefix}b0`, repairFeedback);
+      const right = await runFrSliceOnce(slice.slice(mid), `${idPrefix}b1`, repairFeedback);
+      const tasks = [...(left.tasks || []), ...(right.tasks || [])];
+      if (left.ok && right.ok) {
+        return { ok: true, tasks, clarifications: [...(left.clarifications || []), ...(right.clarifications || [])], bisect: true };
+      }
+      return {
+        ok: false,
+        reason: left.ok ? right.reason : left.reason,
+        tasks,
+        clarifications: [...(left.clarifications || []), ...(right.clarifications || [])],
+        bisect: true,
+      };
+    }
+    const prompt = budgeted.prompt;
     promptChars += prompt.length;
     const numPredict = resolveWbsLlmNumPredict(slice.length, env);
     let llmResult;
@@ -1665,6 +1735,7 @@ module.exports = {
   assertFrAcCoverage,
   resolveDecompositionOutcome,
   buildWbsStoryLlmPrompt,
+  buildBudgetedWbsStoryLlmPrompt,
   materializeWbsFromSotAndLeaves,
   stampWbsDepth,
   resolveLeafSuggestedRole,

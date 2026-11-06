@@ -1,11 +1,9 @@
 import {
   ArrowLeft,
-  Check,
   CheckCheck,
   Inbox,
   Mic,
   Trash2,
-  X,
 } from 'lucide-react';
 import { FIGMA_NOTIF_PREVIEW_PANE } from './figmaNotificationsClasses';
 import { resolveNotificationVisual } from './notificationVisualMeta';
@@ -22,8 +20,6 @@ export default function NotificationPreviewPane({
   onOpen,
   onMarkRead,
   onDelete,
-  onAcceptFriend,
-  onRejectFriend,
   onJoinVoice,
   labels = {},
 }) {
@@ -47,7 +43,6 @@ export default function NotificationPreviewPane({
 
   const meta = resolveNotificationVisual(notif);
   const Icon = meta.Icon;
-  const showFriendActions = actionKind === 'friend_request';
   const showVoiceAction =
     actionKind === 'voice_join' ||
     actionKind === 'voice_invite' ||
@@ -120,29 +115,6 @@ export default function NotificationPreviewPane({
             <CheckCheck className="h-3.5 w-3.5" aria-hidden />
             {labels.markRead || t('notifications.markOneRead')}
           </button>
-        ) : null}
-
-        {showFriendActions ? (
-          <>
-            <button
-              type="button"
-              disabled={acting}
-              onClick={() => onAcceptFriend?.(notif)}
-              className="inline-flex h-9 items-center gap-1 rounded-lg border-none bg-success px-3 text-[0.8125rem] font-semibold text-white disabled:opacity-60"
-            >
-              <Check className="h-3.5 w-3.5" aria-hidden />
-              {labels.accept || t('friendChat.invitesAccept')}
-            </button>
-            <button
-              type="button"
-              disabled={acting}
-              onClick={() => onRejectFriend?.(notif)}
-              className="inline-flex h-9 items-center gap-1 rounded-lg border-none bg-muted px-3 text-[0.8125rem] text-muted-foreground hover:text-destructive disabled:opacity-60"
-            >
-              <X className="h-3.5 w-3.5" aria-hidden />
-              {labels.reject || t('friendChat.invitesReject')}
-            </button>
-          </>
         ) : null}
 
         {showVoiceAction ? (

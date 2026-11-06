@@ -27,6 +27,7 @@ const {
   lastAiMessage,
   stateForToolSend,
 } = require('./toolSelectNodes');
+const { nextLayer: nextWhatLayer } = require('../agents/what/whatSupervisor');
 const { deepMergePlanningContainers } = require('../tools/mergePlanningContainers');
 const {
   mergeSrsProposalPatches,
@@ -408,13 +409,18 @@ function buildWhatPhaseGraph(hooks = {}) {
     };
   });
 
-  graph.addNode('selectTools',
-    createSelectToolsNode({
-      phase: 'what',
-      onProgress,
-      decideToolCalls: hooks.decideToolCalls,
-    })
-  );
+  graph.addNode('prepareLayer', async (state) => {
+    onProgress?.({ node: 'prepareLayer', phase: 'what' });
+    return {
+      layerBase: state.container || null,
+      history: ['prepareLayer'],
+    };
+  });
+
+  graph.addNode('joinLayer', async (state) => {
+    onProgress?.({ node: 'joinLayer', phase: 'what' });
+    return { history: ['joinLayer'] };
+  });
 
   const sectionByTool = Object.fromEntries(
     WHAT_SECTION_TOOLS.map((s) => [s.toolName, s.engineId])
@@ -537,6 +543,28 @@ function buildWhatPhaseGraph(hooks = {}) {
       paused: false,
     };
   });
+
+  function routeReadyWhatLayer(state) {
+    const plan = nextWhatLayer(state);
+    if (!plan.nodes.length) {
+      return plan.finalize ? 'metaGate' : 'emitIncomplete';
+    }
+    return plan.nodes.map(
+      (node) =>
+        new Send(
+          node.graphNode,
+          stateForToolSend(
+            {
+              ...state,
+              layerBase: state.layerBase || state.container,
+              inputManifest: node.inputManifest,
+              contextSlice: node.contextSlice,
+            },
+            { clearMessages: true }
+          )
+        )
+    );
+  }
 
   function routeAfterSelectToolsWhat(state) {
     const {
@@ -669,16 +697,16 @@ function buildWhatPhaseGraph(hooks = {}) {
   });
 
   graph.addEdge(START, 'prepareWhat');
-  graph.addEdge('prepareWhat', 'selectTools');
-  graph.addConditionalEdges('selectTools', routeAfterSelectToolsWhat);
-  // WhatFrTool → FR checkpoint → selectTools; other sections → selectTools
+  graph.addEdge('prepareWhat', 'prepareLayer');
+  graph.addConditionalEdges('prepareLayer', routeReadyWhatLayer);
   graph.addEdge(WHAT_FR_TOOL, 'frCheckpoint');
-  graph.addEdge('frCheckpoint', 'selectTools');
+  graph.addEdge('frCheckpoint', 'joinLayer');
   for (const toolName of whatSectionNames) {
     if (toolName === WHAT_FR_TOOL) continue;
-    graph.addEdge(toolName, 'selectTools');
+    graph.addEdge(toolName, 'joinLayer');
   }
-  graph.addEdge(PLAIN_TOOLS_NODE, 'selectTools');
+  graph.addEdge(PLAIN_TOOLS_NODE, 'joinLayer');
+  graph.addEdge('joinLayer', 'prepareLayer');
   graph.addEdge('metaGate', 'scoreCompleteness');
   graph.addConditionalEdges(
     'scoreCompleteness',
@@ -693,7 +721,7 @@ function buildWhatPhaseGraph(hooks = {}) {
       emitIncomplete: 'emitIncomplete',
     }
   );
-  graph.addEdge('injectGap', 'selectTools');
+  graph.addEdge('injectGap', 'prepareLayer');
   graph.addEdge('emitReady', END);
   graph.addEdge('emitIncomplete', END);
 

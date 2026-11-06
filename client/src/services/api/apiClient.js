@@ -125,6 +125,13 @@ function toNormalizedError(error, fallbackKey = 'errors.generic') {
 // Response interceptor - Handle errors
 apiClient.interceptors.response.use(
   (response) => {
+    if (response.config?.returnFullResponse) {
+      return {
+        data: response.data,
+        headers: response.headers,
+        status: response.status,
+      };
+    }
     return response.data;
   },
   async (error) => {

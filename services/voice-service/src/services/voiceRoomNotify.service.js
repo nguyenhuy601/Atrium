@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { trustedFrontendUrl } = require('@enterprise/shared/utils/trustedFrontendUrl');
+const { communicateVoiceJoinPath } = require('@enterprise/shared/constants/frontendAppPaths');
 
 const NOTIFICATION_SERVICE_URL = String(process.env.NOTIFICATION_SERVICE_URL || '')
   .trim()
@@ -30,7 +31,7 @@ async function notifyVoiceRoomInvite({ userId, roomId, hostName, frontendUrl }) 
   if (!NOTIFICATION_SERVICE_URL || !userId) return;
   const base = frontendUrl || process.env.FRONTEND_URL || 'https://atrium.dev';
   const baseClean = String(base).replace(/\/+$/, '');
-  const actionUrl = `${baseClean}/app/communicate/voice/${encodeURIComponent(roomId)}?join=1`;
+  const actionUrl = `${baseClean}${communicateVoiceJoinPath(roomId)}`;
   try {
     await axios.post(
       `${NOTIFICATION_SERVICE_URL}/api/notifications`,
@@ -63,7 +64,7 @@ async function notifyJoinRequestToHost({
 }) {
   if (!NOTIFICATION_SERVICE_URL || !hostUserId) return;
   const base = frontendUrl || process.env.FRONTEND_URL || 'https://atrium.dev';
-  const actionUrl = `${String(base).replace(/\/+$/, '')}/app/communicate/voice/${encodeURIComponent(roomId)}?join=1`;
+  const actionUrl = `${String(base).replace(/\/+$/, '')}${communicateVoiceJoinPath(roomId)}`;
   try {
     await axios.post(
       `${NOTIFICATION_SERVICE_URL}/api/notifications`,
@@ -143,7 +144,7 @@ async function sendVoiceRoomInviteEmail({ email, roomId, hostName, frontendUrl }
   const token = String(process.env.GATEWAY_INTERNAL_TOKEN || process.env.AUTH_INTERNAL_TOKEN || '').trim();
   const base = frontendUrl || process.env.FRONTEND_URL || 'https://atrium.dev';
   const baseClean = String(base).replace(/\/+$/, '');
-  const inviteUrl = `${baseClean}/app/communicate/voice/${encodeURIComponent(roomId)}?join=1`;
+  const inviteUrl = `${baseClean}${communicateVoiceJoinPath(roomId)}`;
 
   try {
     const headers = { 'Content-Type': 'application/json' };

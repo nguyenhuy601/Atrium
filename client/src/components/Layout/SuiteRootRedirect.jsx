@@ -3,7 +3,7 @@ import useCompanyAdminAccess from '../../hooks/useCompanyAdminAccess';
 import { getDefaultPathForSuite, readStoredSuite, SUITE, writeStoredSuite } from '../../utils/suitePathUtils';
 
 /**
- * `/app` → suite mặc định.
+ * Suite entry redirect → suite mặc định (legacy `/communicate/overview` dùng LegacyAppPrefixRedirect).
  * System admin luôn vào shell Admin (tách khỏi UI nhân viên).
  */
 const SuiteRootRedirect = () => {

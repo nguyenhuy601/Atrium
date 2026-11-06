@@ -15,10 +15,15 @@ const REMOTE_PROVIDERS = new Set([
 
 const MAX_TRANSIENT_RETRIES = 2;
 const RETRY_DELAY_MS = 800;
-/** qwen-plus / qwen-flash completion ceiling on DashScope. */
-const QWEN_PLUS_MAX_OUTPUT_TOKENS = 32768;
+/**
+ * DashScope compatible-mode hard ceiling for most chat models (qwen-plus / flash / omni).
+ * Sending 32768 → HTTP 400: "Range of max_tokens should be [1, 16384]".
+ */
+const QWEN_PLUS_MAX_OUTPUT_TOKENS = 16384;
 /** qwen-max rejects max_tokens above this (HTTP 400 invalid_parameter_error). */
 const QWEN_MAX_OUTPUT_TOKENS = 8192;
+/** Absolute remote clamp — never send above this on openai_compatible. */
+const DASHSCOPE_COMPAT_MAX_OUTPUT_TOKENS = 16384;
 
 function llmProvider(env = process.env) {
   return String(env.LLM_PROVIDER || 'ollama').trim().toLowerCase();
@@ -40,14 +45,24 @@ function openAiApiKey(env = process.env) {
 
 /**
  * Completion ceiling for the configured chat model.
- * qwen-max is 8192. qwen-plus and qwen-flash accept the 32768 window.
+ * qwen-max is 8192. Other DashScope chat models: ≤16384 (compatible-mode).
+ * Override via LLM_CHAT_MAX_OUTPUT_TOKENS (still capped at DASHSCOPE_COMPAT_MAX_OUTPUT_TOKENS).
  */
 function resolveChatMaxOutputTokens(env = process.env, modelName) {
   const model = String(modelName || chatModel(env) || '')
     .trim()
     .toLowerCase();
-  if (model.startsWith('qwen-max')) return QWEN_MAX_OUTPUT_TOKENS;
-  return QWEN_PLUS_MAX_OUTPUT_TOKENS;
+  const envCap = Number(env.LLM_CHAT_MAX_OUTPUT_TOKENS);
+  const envCeiling =
+    Number.isFinite(envCap) && envCap > 0
+      ? Math.min(DASHSCOPE_COMPAT_MAX_OUTPUT_TOKENS, Math.round(envCap))
+      : null;
+  if (model.startsWith('qwen-max')) {
+    return envCeiling != null
+      ? Math.min(QWEN_MAX_OUTPUT_TOKENS, envCeiling)
+      : QWEN_MAX_OUTPUT_TOKENS;
+  }
+  return envCeiling != null ? envCeiling : QWEN_PLUS_MAX_OUTPUT_TOKENS;
 }
 
 function parseModelList(raw) {
@@ -580,6 +595,7 @@ module.exports = {
   REMOTE_PROVIDERS,
   QWEN_PLUS_MAX_OUTPUT_TOKENS,
   QWEN_MAX_OUTPUT_TOKENS,
+  DASHSCOPE_COMPAT_MAX_OUTPUT_TOKENS,
   resolveChatMaxOutputTokens,
   DEFAULT_REMOTE_EMBED_MODEL,
   llmProvider,

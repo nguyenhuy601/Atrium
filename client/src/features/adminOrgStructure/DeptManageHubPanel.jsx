@@ -16,7 +16,7 @@ const TAB_PARENT = 'parent';
 const TAB_HEAD = 'head';
 const TAB_MEMBERS = 'members';
 const TAB_ORG_ROLES = 'org-roles';
-const DEPT_TRANSFER_PATH = '/app/admin/org-structure/departments/transfer';
+const DEPT_TRANSFER_PATH = '/admin/org-structure/departments/transfer';
 
 export default function DeptManageHubPanel({ orgId }) {
   const { t } = useAppStrings();

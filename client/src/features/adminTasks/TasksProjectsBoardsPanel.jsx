@@ -61,7 +61,7 @@ function BoardRowMenu({ id, board, busyId, onArchive, t, open, onToggle }) {
   return (
     <div className="relative inline-flex items-center gap-1">
       <Link
-        to={`/app/admin/projects/settings?boardId=${encodeURIComponent(id)}`}
+        to={`/admin/projects/settings?boardId=${encodeURIComponent(id)}`}
         className={adminManageLinkClass()}
       >
         {t('adminDomains.projects.settings')}
@@ -79,14 +79,14 @@ function BoardRowMenu({ id, board, busyId, onArchive, t, open, onToggle }) {
       {open ? (
         <div className="absolute right-0 top-full z-20 mt-1 min-w-[11rem] rounded-lg border border-border bg-card py-1 shadow-md">
           <Link
-            to={`/app/admin/projects/project-team?boardId=${encodeURIComponent(id)}`}
+            to={`/admin/projects/project-team?boardId=${encodeURIComponent(id)}`}
             className="block px-3 py-1.5 text-xs hover:bg-muted"
             onClick={onToggle}
           >
             {t('adminTasks.openTeam')}
           </Link>
           <Link
-            to={`/app/admin/projects/delegation?boardId=${encodeURIComponent(id)}`}
+            to={`/admin/projects/delegation?boardId=${encodeURIComponent(id)}`}
             className="block px-3 py-1.5 text-xs hover:bg-muted"
             onClick={onToggle}
           >

@@ -250,7 +250,7 @@ export function isPlanningUnlocked(deliveryPhase) {
 export function buildPhase1ModulePath(projectId, pathSeg, query = {}) {
   const pid = String(projectId || '').trim();
   const seg = String(pathSeg || 'overview').replace(/^\/+/, '');
-  const base = `/app/projects/${encodeURIComponent(pid)}/${seg}`;
+  const base = `/projects/${encodeURIComponent(pid)}/${seg}`;
   const params = new URLSearchParams();
   // organizationId omitted from Phase 1 module URLs (resolve via project hub payload).
   const boardId = String(query.boardId || '').trim();

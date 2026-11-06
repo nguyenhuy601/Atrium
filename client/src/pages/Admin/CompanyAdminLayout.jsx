@@ -89,7 +89,7 @@ export default function CompanyAdminLayout() {
   }
 
   if (!canAccessHub) {
-    return <Navigate to="/app/collaborate/workspaces" replace />;
+    return <Navigate to="/collaborate/workspaces" replace />;
   }
 
   if (!orgId) {
@@ -105,7 +105,7 @@ export default function CompanyAdminLayout() {
     return (
       <div className={`flex h-full min-h-0 flex-col items-center justify-center gap-3 ${FIGMA_PAGE_SHELL}`}>
         <p className="text-muted-foreground">{t('organizationSettings.notFound')}</p>
-        <button type="button" className="text-primary hover:underline" onClick={() => navigate('/app/collaborate/workspaces')}>
+        <button type="button" className="text-primary hover:underline" onClick={() => navigate('/collaborate/workspaces')}>
           {t('companyAdmin.backToWork')}
         </button>
       </div>

@@ -3,6 +3,7 @@ import {
   enrichMembershipsWithProfiles,
   memberUserId,
 } from '../../features/search/enrichOrgMembers';
+import { memberDepartmentId } from '../../utils/filterTeamMembers';
 
 function unwrapMembers(payload) {
   const body = payload?.data !== undefined ? payload.data : payload;
@@ -13,30 +14,24 @@ function unwrapMembers(payload) {
   return [];
 }
 
-function memberDepartmentId(row) {
-  const raw = row?.raw || row;
-  return String(
-    row?.departmentId ||
-      raw?.departmentId ||
-      raw?.department ||
-      (raw?.department && typeof raw.department === 'object'
-        ? raw.department._id || raw.department.id
-        : '') ||
-      ''
-  ).trim();
-}
-
 /**
  * Đồng nghiệp cùng phòng ban (rule X — kể cả Owner/Admin/HR không có phòng → list trống).
  * Dùng getMembersWithRoles để luôn có placement department.
  *
+ * @param {string} orgId
+ * @param {string} currentUserId
+ * @param {{ fallback?: string, departmentId?: string }} [options]
  * @returns {Promise<{ colleagues: object[], emptyReason: null|'no_department'|'none' }>}
  */
 export async function loadCompanyColleagues(orgId, currentUserId, options = {}) {
   const oid = String(orgId || '').trim();
   if (!oid) return { colleagues: [], emptyReason: 'none' };
 
-  const res = await organizationAPI.getMembersWithRoles(oid);
+  const optionDeptId = String(options.departmentId || '').trim();
+  const res = await organizationAPI.getMembersWithRoles(oid, {
+    view: 'directory',
+    ...(optionDeptId ? { departmentId: optionDeptId } : {}),
+  });
   const raw = unwrapMembers(res).filter((m) => String(m?.status || 'active') === 'active');
   const enriched = await enrichMembershipsWithProfiles(raw, {
     fallback: options.fallback || '—',
@@ -44,6 +39,9 @@ export async function loadCompanyColleagues(orgId, currentUserId, options = {}) 
 
   const me = String(currentUserId || '').trim();
   const myDeptIds = new Set();
+  if (optionDeptId) {
+    myDeptIds.add(optionDeptId);
+  }
   for (const row of enriched) {
     const uid = String(row.userId || memberUserId(row.raw) || '').trim();
     if (!uid || uid !== me) continue;

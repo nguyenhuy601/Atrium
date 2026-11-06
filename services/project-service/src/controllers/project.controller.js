@@ -6,6 +6,10 @@ const { setUserProjectRoles } = require('../services/projectTeam.service');
 const { listMemberCandidates } = require('../services/projectMemberCandidate.service');
 const { sendServiceError, sendErrorFromCatch } = require('../middleware/sendServiceError');
 const { isHubView, toProjectHubView } = require('../utils/project/projectHubView');
+const {
+  isClosureReportView,
+  toProjectClosureReportView,
+} = require('../utils/project/projectClosureReportView');
 const { bodyWithoutIdentity } = require('../utils/common/trustedPayload');
 
 function asUserId(req) {
@@ -164,6 +168,7 @@ async function listProjects(req, res) {
 }
 
 async function getProject(req, res) {
+  const tHandler = Date.now();
   try {
     const userId = asUserId(req);
     const { projectId } = req.params;
@@ -175,9 +180,19 @@ async function getProject(req, res) {
         message: 'projectId không hợp lệ',
       });
     }
-    const data = await projectService.getProject({ userId, projectId });
     const view = String(req.query?.view || '').trim();
-    const shaped = isHubView(view) ? toProjectHubView(data) : data;
+    const data = await projectService.getProject({ userId, projectId, view });
+    let shaped = data;
+    if (isClosureReportView(view)) {
+      shaped = toProjectClosureReportView(data);
+    } else if (isHubView(view)) {
+      shaped = toProjectHubView(data);
+    }
+    const handlerMs = Date.now() - tHandler;
+    if (isHubView(view)) {
+      res.setHeader('Server-Timing', `app;desc="project-hub";dur=${handlerMs}`);
+      res.setHeader('X-Hub-Handler-Ms', String(handlerMs));
+    }
     return res.json({ success: true, data: shaped });
   } catch (err) {
     return sendErrorFromCatch(res, err, err.statusCode || 400, 'Không thể tải dự án', 'PROJECT_GET_FAILED');

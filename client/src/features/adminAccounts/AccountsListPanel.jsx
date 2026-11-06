@@ -355,7 +355,7 @@ export default function AccountsListPanel({ orgId }) {
 
       <p className="mt-3 text-xs text-muted-foreground">
         {t('adminAccounts.listFootnote')}{' '}
-        <Link to="/app/admin/users" className={`rounded font-medium text-primary hover:underline ${FOCUS_RING_CLASS}`}>
+        <Link to="/admin/users" className={`rounded font-medium text-primary hover:underline ${FOCUS_RING_CLASS}`}>
           {t('adminDomains.users.title')}
         </Link>
       </p>

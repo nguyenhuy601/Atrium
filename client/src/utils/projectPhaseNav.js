@@ -3,6 +3,11 @@
  * Keep in sync with services/project-service/src/constants/projectDeliveryPhase.js
  */
 
+import {
+  canEnterProjectSettings,
+  normalizeProjectCapabilities,
+} from '../features/projects/projectCapabilities.js';
+
 export const DELIVERY_PHASES = Object.freeze([
   'requirement_analysis',
   'delivery_planning',
@@ -210,12 +215,28 @@ export function coerceDeliveryPhase(raw) {
   return DEFAULT_DELIVERY_PHASE_EXISTING;
 }
 
-export function isModuleAllowedForPhase(moduleKey, deliveryPhase) {
-  const phase = coerceDeliveryPhase(deliveryPhase);
-  const allowed = PHASE_NAV_MODULES[phase] || DEVELOPMENT_MODULES;
+/** Closure report tab — only when project status is closed (post-complete). */
+export function isClosedProjectStatus(status) {
+  const st = String(status || '')
+    .trim()
+    .toLowerCase();
+  return st === 'closed' || st === 'completed';
+}
+
+/**
+ * @param {string} moduleKey
+ * @param {string} deliveryPhase
+ * @param {{ projectStatus?: string }} [opts]
+ */
+export function isModuleAllowedForPhase(moduleKey, deliveryPhase, opts = {}) {
   const mod = String(moduleKey || '')
     .trim()
     .toLowerCase();
+  if (mod === 'reports') {
+    return isClosedProjectStatus(opts.projectStatus);
+  }
+  const phase = coerceDeliveryPhase(deliveryPhase);
+  const allowed = PHASE_NAV_MODULES[phase] || DEVELOPMENT_MODULES;
   return allowed.includes(mod);
 }
 
@@ -230,10 +251,19 @@ export function deliveryPhaseLabelKey(deliveryPhase) {
   return `workspace.deliveryPhase_${phase}`;
 }
 
-export function filterNavItemsByDeliveryPhase(items, deliveryPhase) {
+/**
+ * @param {array} items
+ * @param {string} deliveryPhase
+ * @param {{ projectStatus?: string }} [opts]
+ */
+export function filterNavItemsByDeliveryPhase(items, deliveryPhase, opts = {}) {
   const phase = coerceDeliveryPhase(deliveryPhase);
   const list = Array.isArray(items) ? items : [];
-  return list.filter((item) => isModuleAllowedForPhase(item.module || item.key, phase));
+  return list.filter((item) =>
+    isModuleAllowedForPhase(item.module || item.key, phase, {
+      projectStatus: opts.projectStatus,
+    })
+  );
 }
 
 /**
@@ -282,28 +312,21 @@ export function isAnalysisViewModule(moduleKey) {
 /**
  * Lock (do not drop) analysis/planning nav when view caps are false.
  * Caps come from BE permission keys on Project Role docs, not org Permission packs.
- * When capabilities is null/undefined, skip (caller not ready / legacy).
+ * When capabilities is null/undefined, treat as {} (fail-closed: hide settings, lock analysis/planning).
  * Fail-closed when capabilities object is present: items stay visible but locked.
  * Settings: drop unless settings:view | settings:update | project:roles (capability flags).
  */
 export const PHASE1_ANALYSIS_CAP_LOCK_HINT_KEY = 'workspace.phase1AnalysisCapLockedHint';
 export const PHASE1_PLANNING_CAP_LOCK_HINT_KEY = 'workspace.phase1PlanningCapLockedHint';
 
-function canEnterProjectSettings(capabilities) {
-  return (
-    Boolean(capabilities?.canViewSettings) ||
-    Boolean(capabilities?.canManageSettings) ||
-    Boolean(capabilities?.canManageProjectRoles)
-  );
-}
-
 export function filterNavItemsByCapabilities(items, capabilities) {
-  if (capabilities == null || typeof capabilities !== 'object') {
-    return Array.isArray(items) ? items : [];
-  }
-  const canViewAnalysis = Boolean(capabilities.canViewAnalysis);
-  const canViewPlanning = Boolean(capabilities.canViewPlanning);
-  const enterSettings = canEnterProjectSettings(capabilities);
+  const caps = normalizeProjectCapabilities(capabilities);
+  const canViewAnalysis = Boolean(caps.canViewAnalysis);
+  const canViewPlanning = Boolean(caps.canViewPlanning);
+  const enterSettings = canEnterProjectSettings(caps);
+  const perms = Array.isArray(caps.permissions) ? caps.permissions : [];
+  const canViewReport =
+    Boolean(caps.canViewReport) || perms.includes('report:view');
   const list = Array.isArray(items) ? items : [];
   return list
     .filter((item) => {
@@ -311,6 +334,7 @@ export function filterNavItemsByCapabilities(items, capabilities) {
         .trim()
         .toLowerCase();
       if (mod === 'settings' && !enterSettings) return false;
+      if (mod === 'reports' && !canViewReport) return false;
       return true;
     })
     .map((item) => {

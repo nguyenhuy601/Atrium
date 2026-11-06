@@ -9,7 +9,7 @@ const {
 const { createTtlCoalesceCache } = require('./ttlCoalesceCache');
 
 const GATE_SOD_ERROR = 'GATE_SOD_DENIED';
-const TECH_FLAGS_TTL_MS = 30_000;
+const TECH_FLAGS_TTL_MS = 60_000;
 const techFlagsCache = createTtlCoalesceCache({ ttlMs: TECH_FLAGS_TTL_MS });
 
 function isGateSodEnabled() {
@@ -180,18 +180,21 @@ async function notifyNextGateReviewers({
     const userIds = await userIdsWithProjectPermission(projectId, nextPermission);
     if (!userIds.length) return;
     const pid = String(packId || '').trim();
-    const basePath = String(actionPath || 'ai-hitl').replace(/^\/+/, '');
+    const basePath = String(actionPath || 'ai-hitl')
+      .replace(/^\/+/, '')
+      .replace(/\/review\/?$/, '');
+    const reviewPath = `${basePath}/review`;
     const actionUrl = pid
       ? projectHubActionUrl({
           projectId,
           organizationId,
-          // Gate 1 sequential review: open Duyệt tab directly
-          pathSuffix: `${basePath}?packId=${encodeURIComponent(pid)}&tab=review`,
+          // Gate sequential review: open Duyệt via path tab
+          pathSuffix: `${reviewPath}?packId=${encodeURIComponent(pid)}`,
         })
       : projectHubActionUrl({
           projectId,
           organizationId,
-          module: actionPath,
+          pathSuffix: reviewPath,
         });
     await notifySystemKind({
       userIds,

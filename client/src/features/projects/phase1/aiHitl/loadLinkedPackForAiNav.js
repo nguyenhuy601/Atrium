@@ -1,5 +1,6 @@
 /**
  * Resolve requirement pack linked to a project (for AI HITL entry guards).
+ * Uses list filter by projectId — no org-wide list, no view=full.
  */
 
 import { requirementAPI } from '../../../../services/api/requirementAPI';
@@ -14,31 +15,25 @@ function packProjectId(pack) {
   return String(raw || '').trim();
 }
 
+/** Shared React Query key — Sidebar / Phase1Shell / AiHitlWorkspacePage. */
+export function aiHitlNavLinkedPackQueryKey(organizationId, projectId) {
+  return ['aiHitlNavLinkedPack', String(organizationId || ''), String(projectId || '')];
+}
+
+export function linkedPackIdFromRow(pack) {
+  return String(pack?._id || pack?.id || '').trim();
+}
+
 /**
- * @returns {Promise<object|null>} pack summary (list row or full) or null
+ * @returns {Promise<object|null>} pack list row (includes overview.analysisMode) or null
  */
 export async function loadLinkedPackForAiNav(organizationId, projectId) {
   const orgId = String(organizationId || '').trim();
   const pid = String(projectId || '').trim();
   if (!orgId || !pid) return null;
 
-  const listed = unwrap(await requirementAPI.listPacks(orgId, {}));
+  const listed = unwrap(await requirementAPI.listPacks(orgId, { projectId: pid }));
   const list = Array.isArray(listed) ? listed : listed?.items || listed?.packs || [];
-  const hit = list.find((pack) => packProjectId(pack) === pid) || null;
-  if (!hit) return null;
-
-  const listedMode = String(hit?.overview?.analysisMode || hit?.analysisMode || '')
-    .trim()
-    .toLowerCase();
-  if (listedMode === 'ai' || listedMode === 'manual') return hit;
-
-  // List may omit analysisMode — fetch full only when still deciding AI vs manual
-  const packId = String(hit?._id || hit?.id || '').trim();
-  if (!packId) return hit;
-  try {
-    const full = unwrap(await requirementAPI.getPack(orgId, packId, { view: 'full' }));
-    return full || hit;
-  } catch {
-    return hit;
-  }
+  const hit = list.find((pack) => packProjectId(pack) === pid) || list[0] || null;
+  return hit || null;
 }

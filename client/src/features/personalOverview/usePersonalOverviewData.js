@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { useOrganizationsMy } from '../../hooks/queries/useOrganizationsMy';
-import { useOrgShell } from '../../hooks/queries/useOrgShell';
+import { useOrgMyProfile } from '../../hooks/queries/useOrgMyProfile';
 import { useAppStrings } from '../../locales/appStrings';
 import { projectAPI } from '../../services/api/projectAPI';
 import userService from '../../services/userService';
@@ -11,7 +11,7 @@ import { getResolvedBearerToken } from '../../utils/tokenStorage';
 import {
   filterMyProjects,
   mergePersonalOrgRoles,
-  resolvePlacementFromShell,
+  resolvePlacementFromProfile,
 } from './personalOverviewUtils';
 
 function unwrapList(payload) {
@@ -30,7 +30,7 @@ function resolveOrgId(company, orgs) {
 }
 
 /**
- * Loads personal overview: profile, placement, org roles (from shell), my projects.
+ * Loads personal overview: profile, placement, org roles (from my-profile), my projects.
  * Không gọi /org-role-assignments (admin-only → 403 với member).
  */
 export function usePersonalOverviewData({ enabled = true } = {}) {
@@ -44,7 +44,10 @@ export function usePersonalOverviewData({ enabled = true } = {}) {
   const userId = String(user?.userId || user?._id || user?.id || '').trim();
   const ready = enabled && !authLoading && isAuthenticated && authReady;
 
-  const shellQuery = useOrgShell(orgId, { enabled: ready && Boolean(orgId) });
+  const orgProfileQuery = useOrgMyProfile(orgId, {
+    enabled: ready && Boolean(orgId),
+    include: 'organization',
+  });
 
   const profileQuery = useQuery({
     queryKey: ['personalOverview', 'profile', userId],
@@ -68,32 +71,32 @@ export function usePersonalOverviewData({ enabled = true } = {}) {
     retry: 1,
   });
 
-  const shell = shellQuery.data || null;
+  const orgProfile = orgProfileQuery.data || null;
   const profile = profileQuery.data || null;
 
   const placement = useMemo(
-    () => resolvePlacementFromShell(shell, userId),
-    [shell, userId]
+    () => resolvePlacementFromProfile(orgProfile),
+    [orgProfile]
   );
 
-  const shellOrgRoles = useMemo(() => {
-    const rows = shell?.organization?.myOrganizationRoles;
+  const catalogOrgRoles = useMemo(() => {
+    const rows = orgProfile?.myOrganizationRoles;
     if (!Array.isArray(rows)) return [];
     return rows.map((r) => ({
       roleKey: String(r?.roleKey || r?.key || '').trim(),
       roleLabel: String(r?.roleLabel || r?.label || '').trim(),
       label: String(r?.roleLabel || r?.label || '').trim(),
     })).filter((r) => r.roleKey);
-  }, [shell]);
+  }, [orgProfile]);
 
   const orgRoles = useMemo(
     () =>
       mergePersonalOrgRoles({
-        assignments: shellOrgRoles,
+        assignments: catalogOrgRoles,
         structureRoles: placement.structureRoles || [],
         t,
       }),
-    [shellOrgRoles, placement.structureRoles, t]
+    [catalogOrgRoles, placement.structureRoles, t]
   );
 
   const myProjects = useMemo(
@@ -102,19 +105,19 @@ export function usePersonalOverviewData({ enabled = true } = {}) {
   );
 
   const orgMeta = useMemo(() => {
-    const fromShell = shell?.organization || {};
+    const fromProfile = orgProfile?.organization || {};
     const matched = (Array.isArray(orgs) ? orgs : []).find(
       (o) => String(o._id || o.id) === orgId
     );
     return {
       orgId,
       orgName:
-        String(fromShell.name || matched?.name || company?.name || '').trim() || '—',
+        String(fromProfile.name || matched?.name || company?.name || '').trim() || '—',
       membershipRole:
-        String(fromShell.myRole || matched?.myRole || matched?.role || '').trim() || '',
+        String(orgProfile?.myRole || matched?.myRole || matched?.role || '').trim() || '',
       myStructureRole: String(matched?.myStructureRole || '').trim() || '',
     };
-  }, [shell, orgs, orgId, company]);
+  }, [orgProfile, orgs, orgId, company]);
 
   const displayProfile = useMemo(() => {
     const displayName =
@@ -133,7 +136,7 @@ export function usePersonalOverviewData({ enabled = true } = {}) {
   const loading =
     ready &&
     (orgsQuery.isLoading ||
-      (Boolean(orgId) && shellQuery.isLoading) ||
+      (Boolean(orgId) && orgProfileQuery.isLoading) ||
       profileQuery.isLoading ||
       (Boolean(orgId) && projectsQuery.isLoading));
 
@@ -146,7 +149,7 @@ export function usePersonalOverviewData({ enabled = true } = {}) {
     orgRoles,
     myProjects,
     errors: {
-      shell: shellQuery.isError,
+      shell: orgProfileQuery.isError,
       assignments: false,
       projects: projectsQuery.isError,
       profile: profileQuery.isError,

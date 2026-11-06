@@ -35,7 +35,7 @@ function NoAccessState() {
   return (
     <div role="status" className="space-y-3 rounded-xl border border-border bg-card px-4 py-4">
       <p className="text-sm text-muted-foreground">{t('adminDomains.noPermission')}</p>
-      <Link to="/app/admin" className={adminSecondaryBtnClass('focus-visible:ring-offset-2')}>
+      <Link to="/admin" className={adminSecondaryBtnClass('focus-visible:ring-offset-2')}>
         <ArrowLeft size={16} aria-hidden />
         {t('adminDomains.backToHub')}
       </Link>

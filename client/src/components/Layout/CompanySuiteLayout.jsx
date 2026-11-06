@@ -4,16 +4,17 @@ import SuiteShellLayout from './SuiteShellLayout';
 import CompanySidebar from './CompanySidebar';
 import { SpaceProvider, SPACE_KIND } from '../../context/SpaceContext';
 import { useWorkspace } from '../../context/WorkspaceContext';
-import { useOrgShell } from '../../hooks/queries/useOrgShell';
+import { useOrgMyProfile } from '../../hooks/queries/useOrgMyProfile';
+import { useOrgStructureNav } from '../../hooks/queries/useOrgStructure';
 import { readStoredLastOrganizationId } from '../../utils/suitePathUtils';
 import {
   COMPANY_SPACE_LEVEL,
   isCompanyStructureReadyForTeamCheck,
-  isValidCompanyTeamId,
   readStoredCompanyTeamId,
   resolveCompanySpaceLevel,
   resolveMyDepartmentId,
 } from '../../utils/companySpaceLevel';
+import { toShellCompat } from '../../utils/orgShellCompat';
 
 /** Company suite shell + SpaceContext (org + dept + optional team). */
 export default function CompanySuiteLayout() {
@@ -36,8 +37,25 @@ export default function CompanySuiteLayout() {
     [searchParams, activeWorkspace, company]
   );
 
-  const shellQuery = useOrgShell(organizationId, { enabled: Boolean(organizationId) });
-  const shell = shellQuery.data || null;
+  const profileQuery = useOrgMyProfile(organizationId, {
+    enabled: Boolean(organizationId),
+  });
+  const structureNavQuery = useOrgStructureNav(organizationId, {
+    enabled: Boolean(organizationId),
+  });
+  const shell = useMemo(
+    () =>
+      toShellCompat({
+        profile: profileQuery.data || null,
+        structureNav: Array.isArray(structureNavQuery.data)
+          ? structureNavQuery.data
+          : null,
+      }),
+    [profileQuery.data, structureNavQuery.data]
+  );
+  const shellQuery = {
+    isLoading: profileQuery.isLoading || structureNavQuery.isLoading,
+  };
 
   const departmentId = useMemo(() => {
     const fromUrl = String(searchParams.get('departmentId') || '').trim();
@@ -47,17 +65,28 @@ export default function CompanySuiteLayout() {
 
   const teamIdFromUrl = String(searchParams.get('teamId') || '').trim();
 
-  const resolved = useMemo(
-    () =>
-      resolveCompanySpaceLevel({
-        shell,
+  const forceDepartmentSpaceLevel = useMemo(() => {
+    const path = String(location.pathname || '').replace(/\/+$/, '');
+    if (!departmentId) return false;
+    return path === '/company/documents' || path === '/company/calendar';
+  }, [location.pathname, departmentId]);
+
+  const resolved = useMemo(() => {
+    if (forceDepartmentSpaceLevel) {
+      return {
+        level: COMPANY_SPACE_LEVEL.DEPARTMENT,
         departmentId,
-        teamIdFromUrl,
-        teamIdFromStorage: readStoredCompanyTeamId(),
-        preferTeam: false,
-      }),
-    [shell, departmentId, teamIdFromUrl]
-  );
+        teamId: '',
+      };
+    }
+    return resolveCompanySpaceLevel({
+      shell,
+      departmentId,
+      teamIdFromUrl,
+      teamIdFromStorage: readStoredCompanyTeamId(),
+      preferTeam: false,
+    });
+  }, [shell, departmentId, teamIdFromUrl, forceDepartmentSpaceLevel]);
 
   const spaceDeptId = resolved.departmentId || departmentId;
   const structureReady = isCompanyStructureReadyForTeamCheck(shell, spaceDeptId);
@@ -78,7 +107,19 @@ export default function CompanySuiteLayout() {
     const wantTeam =
       spaceLevel === COMPANY_SPACE_LEVEL.TEAM ? String(spaceTeamId || '').trim() : '';
     const teamOk =
-      spaceLevel !== COMPANY_SPACE_LEVEL.TEAM ? !currentTeam : currentTeam === wantTeam;
+      spaceLevel !== COMPANY_SPACE_LEVEL.TEAM
+        ? !currentTeam
+        : currentTeam === wantTeam;
+    if (forceDepartmentSpaceLevel && currentTeam) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('organizationId');
+      next.delete('orgId');
+      next.set('departmentId', spaceDeptId);
+      next.delete('teamId');
+      const qs = next.toString();
+      navigate({ pathname: location.pathname, search: qs ? `?${qs}` : '' }, { replace: true });
+      return;
+    }
     if (currentDept === spaceDeptId && teamOk && !hasOrgQuery) return;
 
     const next = new URLSearchParams(searchParams);
@@ -104,6 +145,7 @@ export default function CompanySuiteLayout() {
     shellQuery.isLoading,
     structureReady,
     teamIdFromUrl,
+    forceDepartmentSpaceLevel,
   ]);
 
   return (

@@ -40,6 +40,7 @@ function buildAssignFrEpicsPrompt({ frRows = [], localeInstruction = '' } = {}) 
     HIERARCHY_PROMPT_RULES,
     'Rules: every frId from FR_LIST exactly once; parentEpicId = epics[].id or null for root;',
     'epic id stable when possible (EPIC-THEME); epic name = business outcome / multi-capability goal — never "hard tech work";',
+    'multiple independent business goals → multiple Epics (do not collapse the whole FR_LIST into one Epic);',
     'optional Feature when several FRs share one capability; do not drop FR; do not change FR name.',
     `FR_LIST=${JSON.stringify(frRows)}`,
   ].join('\n');

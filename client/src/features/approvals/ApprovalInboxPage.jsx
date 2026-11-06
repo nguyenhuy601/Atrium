@@ -8,7 +8,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { projectAPI } from '../../services/api/projectAPI';
 import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
-import { buildProjectsPickerPath } from '../../utils/suitePathUtils';
+import { buildCompanyWorkspacePath, buildProjectsPickerPath } from '../../utils/suitePathUtils';
 import Modal from '../../components/Shared/Modal';
 import {
   adminDangerBtnClass,
@@ -104,7 +104,7 @@ export default function ApprovalInboxPage() {
         className={`flex h-[100dvh] flex-col items-center justify-center gap-3 p-6 text-center ${FIGMA_PAGE_SHELL}`}
       >
         <p className="text-muted-foreground">{t('approvals.noAccess')}</p>
-        <Link to="/app/collaborate/workspaces" className="text-sm text-primary hover:underline">
+        <Link to={buildCompanyWorkspacePath()} className="text-sm text-primary hover:underline">
           {t('companyAdmin.backToWork')}
         </Link>
       </div>
@@ -129,9 +129,8 @@ export default function ApprovalInboxPage() {
                 disabled={loading}
                 aria-busy={loading}
               >
-                {loading ? '…' : t('common.refresh')}
                 <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} />
-                {t('common.refresh')}
+                {loading ? t('common.loading') : t('common.refresh')}
               </button>
             </div>
             {loading && !items.length ? (

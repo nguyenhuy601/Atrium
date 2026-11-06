@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useAppStrings } from '../../../locales/appStrings';
 import { useShellLayout } from '../../../context/ShellLayoutContext';
+import { useWorkspace } from '../../../context/WorkspaceContext';
 import ProjectsLandingGrid from '../landing/ProjectsLandingGrid';
 import { isProjectListableForUi } from '../landing/projectLandingActive';
 import {
@@ -11,6 +12,7 @@ import {
   orgQueryFromSearch,
   readStoredLastOrganizationId,
 } from '../../../utils/suitePathUtils';
+import { readSingleOrgModeFlag } from '../../../utils/singleCompanyMode';
 import {
   readStoredLastProjectId,
   writeStoredLastProjectId,
@@ -24,14 +26,26 @@ import { resolveLandingCreateActions } from '../landing/projectsLandingCreateAct
 import { resolveAiProjectEntryPath } from '../phase1/aiHitl/aiHitlNavState';
 import { useRouteDeniedNotice } from '../../../config/routeDeniedNotice';
 import { queryKeys } from '../../../lib/queryKeys';
-import { fetchProjectHubProject } from '../hub/useProjectHubQueries';
+import { fetchProjectHubProject, STALE_PROJECT_HUB_MS } from '../hub/useProjectHubQueries';
+import { resolveApiErrorMessage } from '../../../utils/resolveApiErrorMessage';
 
 function isMyProject(project) {
   const mb = project?.myMembership;
-  if (!mb) return true;
+  if (!mb) return false;
   if (typeof mb.isMember === 'boolean') return mb.isMember;
   if (Array.isArray(mb.projectRoleKeys)) return mb.projectRoleKeys.length > 0;
   return true;
+}
+
+function resolvePickerOrganizationId({ searchParams, company, activeWorkspace, lastOrganizationId }) {
+  const fromQuery = orgQueryFromSearch(searchParams);
+  if (fromQuery) return fromQuery;
+  const fromCompany = String(company?.id || company?._id || '').trim();
+  if (fromCompany) return fromCompany;
+  const fromWorkspace = String(activeWorkspace?._id || activeWorkspace?.id || '').trim();
+  if (fromWorkspace) return fromWorkspace;
+  const fromLast = String(lastOrganizationId || readStoredLastOrganizationId() || '').trim();
+  return fromLast;
 }
 
 /** Project Picker gate — chọn dự án trước khi vào module. */
@@ -44,19 +58,34 @@ export default function ProjectPickerPage() {
   const [enteringId, setEnteringId] = useState(null);
   const enteringLockRef = useRef(false);
   const { showHeaderLoading, hideHeaderLoading } = useShellLayout();
-  const orgId = orgQueryFromSearch(searchParams) || readStoredLastOrganizationId();
+  const { company, activeWorkspace, lastOrganizationId, singleOrgMode } = useWorkspace();
+  const isSingleOrg = Boolean(singleOrgMode || readSingleOrgModeFlag());
+
+  const orgId = useMemo(
+    () =>
+      resolvePickerOrganizationId({
+        searchParams,
+        company,
+        activeWorkspace,
+        lastOrganizationId,
+      }),
+    [searchParams, company, activeWorkspace, lastOrganizationId]
+  );
 
   const { organization } = useOrganizationDetail(orgId);
   const {
     projects: rawProjects,
     loading: projectsLoading,
     isError: projectsError,
+    error: projectsErrorObj,
     reload: reloadProjects,
   } = useOrgProjectsList(orgId, { excludeClosed: false });
   const {
     canCreateProjectCapability,
     createProjectDeniedKey,
     loading: scopeLoading,
+    isError: scopeError,
+    error: scopeErrorObj,
   } = useTaskWorkspaceScope(orgId);
   const { access: requirementAccess, loading: requirementAccessLoading } =
     useRequirementAccess(orgId);
@@ -85,6 +114,22 @@ export default function ProjectPickerPage() {
     return projects.find((p) => String(p?._id || p?.projectId || '') === rememberedId) || null;
   }, [rememberedId, projects]);
 
+  const accessDeniedBanner = useMemo(() => {
+    if (deniedMessage) return deniedMessage;
+    const err = projectsErrorObj || scopeErrorObj;
+    if (!err) return '';
+    const status = err?.response?.status ?? err?.status;
+    if (status !== 403 && status !== 401) return '';
+    return resolveApiErrorMessage(err, {
+      t,
+      fallback: t('nav.projectRoleRequired'),
+    });
+  }, [deniedMessage, projectsErrorObj, scopeErrorObj, t]);
+
+  const missingOrgMessage = isSingleOrg
+    ? t('nav.projectsNoOrgAccess')
+    : t('organizations.selectOrgFirst');
+
   const enterProject = useCallback(
     async (project) => {
       const projectId = String(project?._id || project?.projectId || '').trim();
@@ -94,14 +139,12 @@ export default function ProjectPickerPage() {
       showHeaderLoading(t('nav.projectsEntering'));
       writeStoredLastProjectId(projectId);
       try {
-        // Warm hub project (capabilities) trước/song song navigate — sidebar postItems.
         void queryClient.prefetchQuery({
           queryKey: queryKeys.projectHub.project(projectId),
           queryFn: () => fetchProjectHubProject(projectId),
-          staleTime: 30_000,
+          staleTime: STALE_PROJECT_HUB_MS,
         });
         const boardId = String(project?.defaultBoardId || project?.boards?.[0]?._id || '').trim();
-        // Không await pack — ModuleRoute guard pack khi RA; tránh block navigate.
         navigate(
           resolveAiProjectEntryPath({
             projectId,
@@ -122,7 +165,7 @@ export default function ProjectPickerPage() {
 
   const handleCreate = useCallback(() => {
     if (!orgId) {
-      toast.error(t('organizations.selectOrgFirst'));
+      toast.error(missingOrgMessage);
       return;
     }
     if (!canCreate) {
@@ -130,39 +173,44 @@ export default function ProjectPickerPage() {
       return;
     }
     navigate(buildProjectsNewPath());
-  }, [canCreate, createProjectDeniedKey, navigate, orgId, t]);
+  }, [canCreate, createProjectDeniedKey, missingOrgMessage, navigate, orgId, t]);
 
   const handleCreateWithAi = useCallback(() => {
     if (!orgId) {
-      toast.error(t('organizations.selectOrgFirst'));
+      toast.error(missingOrgMessage);
       return;
     }
     navigate(buildProjectsNewPath(orgId, { analysisMode: 'ai' }));
-  }, [navigate, orgId, t]);
+  }, [missingOrgMessage, navigate, orgId]);
 
   if (!orgId) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-sm text-muted-foreground">
-        {deniedMessage ? <p role="status">{deniedMessage}</p> : null}
-        {t('organizations.selectOrgFirst')}
+        {accessDeniedBanner ? <p role="status">{accessDeniedBanner}</p> : null}
+        <p role="status">{missingOrgMessage}</p>
       </div>
     );
   }
 
-  if (listLoading) {
+  if (listLoading || scopeLoading) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-        {deniedMessage ? <p role="status">{deniedMessage}</p> : null}
+        {accessDeniedBanner ? <p role="status">{accessDeniedBanner}</p> : null}
         {t('common.loading')}
       </div>
     );
   }
 
-  if (projectsError) {
+  if (projectsError || scopeError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-        {deniedMessage ? <p role="status" className="text-sm text-muted-foreground">{deniedMessage}</p> : null}
-        <p className="text-sm text-muted-foreground">{t('nav.projectsLoadFail')}</p>
+        {accessDeniedBanner ? (
+          <p role="alert" className="text-sm text-destructive">
+            {accessDeniedBanner}
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t('nav.projectsLoadFail')}</p>
+        )}
         <button
           type="button"
           className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"
@@ -176,9 +224,12 @@ export default function ProjectPickerPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      {deniedMessage ? (
-        <p className="shrink-0 border-b border-border bg-card px-4 py-3 text-sm text-muted-foreground" role="status">
-          {deniedMessage}
+      {accessDeniedBanner ? (
+        <p
+          className="shrink-0 border-b border-border bg-card px-4 py-3 text-sm text-muted-foreground"
+          role="status"
+        >
+          {accessDeniedBanner}
         </p>
       ) : null}
       {continueProject ? (

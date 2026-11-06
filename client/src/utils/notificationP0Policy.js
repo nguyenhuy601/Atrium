@@ -63,7 +63,7 @@ const DEADLINE_KINDS = new Set(['task_due_soon', 'task_overdue']);
 export function mapNotificationUiType(rawType, kind) {
   const raw = String(rawType || 'system');
   const k = String(kind || '').trim().toLowerCase();
-  if (raw === 'friend_request' || raw === 'friend_accepted') return 'friend';
+  if (raw === 'friend_request' || raw === 'friend_accepted') return 'system';
   if (raw === 'task_assigned' || raw === 'task_completed') return 'task';
   if (DEADLINE_KINDS.has(k)) return 'deadline';
   if (raw === 'document') return 'file';

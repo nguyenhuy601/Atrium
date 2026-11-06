@@ -8,7 +8,6 @@ export default function DashboardBottomRow({
   meetings,
   meetingsEmptyLabel,
   workspaces,
-  addFriendLabel,
   hideWorkspacesPanel = false,
   onMessagesViewAll,
   onMessageClick,
@@ -18,7 +17,6 @@ export default function DashboardBottomRow({
   onWorkspacesViewAll,
   onWorkspaceClick,
   onCreateWorkspace,
-  onAddFriend,
 }) {
   return (
     <div className={hideWorkspacesPanel ? FIGMA_DASH_TWO_COL : FIGMA_DASH_THREE_COL}>
@@ -37,11 +35,9 @@ export default function DashboardBottomRow({
       {!hideWorkspacesPanel && (
         <DashboardWorkspacesPanel
           workspaces={workspaces}
-          addFriendLabel={addFriendLabel}
           onViewAll={onWorkspacesViewAll}
           onWorkspaceClick={onWorkspaceClick}
           onCreateWorkspace={onCreateWorkspace}
-          onAddFriend={onAddFriend}
         />
       )}
     </div>

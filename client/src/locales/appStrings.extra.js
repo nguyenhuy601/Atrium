@@ -63,6 +63,8 @@ export const extraStrings = {
         AUTH_INVALID_TOKEN: 'Liên kết không hợp lệ hoặc đã hết hạn.',
         AUTH_PASSWORD_TOO_LONG: 'Mật khẩu quá dài (tối đa 72 byte).',
         AUTH_RATE_LIMITED: 'Bạn thao tác quá nhanh. Vui lòng thử lại sau ít phút.',
+        CORS_FORBIDDEN:
+          'Nguồn yêu cầu không được phép (CORS). Hãy mở https://atrium.dev thay vì IP trực tiếp.',
         AUTH_TARGET_NOT_FOUND: 'Không tìm thấy tài khoản trong tổ chức.',
         AUTH_SCOPE_UNAVAILABLE: 'Không kiểm tra được phạm vi tổ chức. Vui lòng thử lại.',
         ORG_PROVISION_FAILED: 'Không tạo được tài khoản nhân viên. Vui lòng thử lại.',
@@ -621,6 +623,8 @@ export const extraStrings = {
         AUTH_INVALID_TOKEN: 'The link is invalid or has expired.',
         AUTH_PASSWORD_TOO_LONG: 'Password is too long (max 72 bytes).',
         AUTH_RATE_LIMITED: 'Too many attempts. Please try again in a few minutes.',
+        CORS_FORBIDDEN:
+          'This origin is not allowed (CORS). Use https://atrium.dev instead of a raw IP.',
         AUTH_TARGET_NOT_FOUND: 'Account not found in this organization.',
         AUTH_SCOPE_UNAVAILABLE: 'Could not verify organization scope. Please try again.',
         ORG_PROVISION_FAILED: 'Could not provision employee account. Please try again.',

@@ -87,7 +87,7 @@ export default function RbacOrgRoleDirectoryPanel({ orgId }) {
         scopeName: unitName(dept),
         unitId: unitId(dept),
         userId: headId,
-        editPath: `/app/admin/org-structure/departments/head?unitId=${encodeURIComponent(unitId(dept))}`,
+        editPath: `/admin/org-structure/departments/head?unitId=${encodeURIComponent(unitId(dept))}`,
       });
     }
     for (const team of teams) {
@@ -100,7 +100,7 @@ export default function RbacOrgRoleDirectoryPanel({ orgId }) {
         scopeName: unitName(team),
         unitId: unitId(team),
         userId: leaderId,
-        editPath: `/app/admin/org-structure/teams/leader?unitId=${encodeURIComponent(unitId(team))}`,
+        editPath: `/admin/org-structure/teams/leader?unitId=${encodeURIComponent(unitId(team))}`,
       });
     }
 
@@ -116,7 +116,7 @@ export default function RbacOrgRoleDirectoryPanel({ orgId }) {
         scopeType: 'org',
         scopeName: t('adminRbac.orgRoleScopeCompany'),
         userId,
-        editPath: `/app/admin/rbac/org-roles/assign?userId=${encodeURIComponent(userId)}&roleKey=${encodeURIComponent(roleKey)}`,
+        editPath: `/admin/rbac/org-roles/assign?userId=${encodeURIComponent(userId)}&roleKey=${encodeURIComponent(roleKey)}`,
       });
     }
     return list.sort((a, b) => a.scopeName.localeCompare(b.scopeName));

@@ -66,15 +66,21 @@ export function resolveAiProjectEntryPath({
   assumeAi = false,
 } = {}) {
   const pid = String(projectId || project?._id || project?.projectId || '').trim();
-  if (!pid) return '/app/projects';
+  if (!pid) return '/projects';
 
   const bid = String(boardId || project?.defaultBoardId || '').trim();
   const incomplete = isAiHitlIncomplete({ project, pack, assumeAi });
 
+  const defaultBoardId = String(project?.defaultBoardId || '').trim();
+  const packLinked = linkedPackId(pack);
+
   if (incomplete) {
     return buildProjectsAiHitlPath(pid, {
       boardId: bid,
-      packId: linkedPackId(pack),
+      packId: packLinked,
+      defaultBoardId: defaultBoardId || bid,
+      linkedPackId: packLinked,
+      packCount: packLinked ? 1 : 0,
     });
   }
 
@@ -82,6 +88,7 @@ export function resolveAiProjectEntryPath({
   return buildProjectsModulePath(pid, home, {
     organizationId,
     boardId: bid,
+    defaultBoardId: defaultBoardId || bid,
   });
 }
 
@@ -90,12 +97,16 @@ export function resolveAiProjectEntryPath({
  */
 export function resolvePostHitlProjectPath({ projectId, project = null, boardId = '' } = {}) {
   const pid = String(projectId || project?._id || project?.projectId || '').trim();
-  if (!pid) return '/app/projects';
+  if (!pid) return '/projects';
   const bid = String(boardId || project?.defaultBoardId || '').trim();
+  const defaultBoardId = String(project?.defaultBoardId || '').trim();
   // RULE-04: after promote → Phase 2 home
   const phase = norm(project?.deliveryPhase) || 'development';
   const home = phaseHomeModule(PROMOTED_PHASES.has(phase) ? phase : 'development');
-  return buildProjectsModulePath(pid, home, { boardId: bid });
+  return buildProjectsModulePath(pid, home, {
+    boardId: bid,
+    defaultBoardId: defaultBoardId || bid,
+  });
 }
 
 export function resolveHitlBackPath({
@@ -107,7 +118,7 @@ export function resolveHitlBackPath({
 } = {}) {
   const incomplete = isAiHitlIncomplete({ project, pack, assumeAi });
   if (incomplete) {
-    return '/app/projects';
+    return '/projects';
   }
   return resolvePostHitlProjectPath({ projectId, project, boardId });
 }

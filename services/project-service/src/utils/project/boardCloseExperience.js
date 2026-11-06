@@ -1,6 +1,9 @@
 /** Gom số thật khi đóng board — không bịa %. Watcher không việc → bỏ. */
 
 const WATCHER_KEYS = new Set(['watcher', 'viewer']);
+const WORK_LINE_MAX = 300;
+const SPECIALTY_TITLES_MAX = 3;
+const DOMAIN_MAX = 80;
 
 function sid(v) {
   return String(v || '').trim();
@@ -36,6 +39,7 @@ function assignedUserIds(task) {
   return ids;
 }
 
+/** Legacy progress fact line — kept for callers; PE.work uses specialty line instead. */
 function buildFactLine({ boardTitle, roleLabel, done, total, dueLabel }) {
   const parts = [String(boardTitle || '').trim(), String(roleLabel || '').trim()].filter(Boolean);
   if (Number.isFinite(total) && total > 0) {
@@ -44,7 +48,35 @@ function buildFactLine({ boardTitle, roleLabel, done, total, dueLabel }) {
     parts.push(`${done}/0 việc xong`);
   }
   if (dueLabel) parts.push(`hạn ${dueLabel}`);
-  return parts.join(' · ').slice(0, 300);
+  return parts.join(' · ').slice(0, WORK_LINE_MAX);
+}
+
+/**
+ * Specialty work line from done task titles (not progress KPI).
+ * RULE-PE-01: no done/total / deadline as primary work content.
+ */
+function buildSpecialtyWorkLine({ tasks, userId, roleLabel } = {}) {
+  const uid = sid(userId);
+  const seen = new Set();
+  const titles = [];
+  for (const task of tasks || []) {
+    if (!uid || !assignedUserIds(task).has(uid)) continue;
+    if (!isTaskDone(task)) continue;
+    const title = String(task?.title || task?.name || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80);
+    if (!title) continue;
+    const key = title.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    titles.push(title);
+    if (titles.length >= SPECIALTY_TITLES_MAX) break;
+  }
+  if (titles.length) return titles.join('; ').slice(0, WORK_LINE_MAX);
+  const role = String(roleLabel || '').trim();
+  if (role) return `Contributed as ${role}`.slice(0, WORK_LINE_MAX);
+  return '';
 }
 
 /**
@@ -92,7 +124,38 @@ function techListFromProjectStack(projectOrTech) {
 }
 
 /**
- * @param {{ board: object, memberships: object[], roles: object[], tasks: object[], technologies?: string[], byUserSummary?: object }} input
+ * RULE-PE-02: domain only from real fields — never NLP from project title,
+ * never invent from category internal/customer alone.
+ * @param {object|null|undefined} project
+ * @param {string} [domainOverride]
+ */
+function resolveProjectDomain(project, domainOverride) {
+  const override = String(domainOverride || '').trim();
+  if (override) return override.slice(0, DOMAIN_MAX);
+  if (!project || typeof project !== 'object') return undefined;
+  const direct = String(
+    project.domain || project.businessDomain || project.industry || ''
+  ).trim();
+  if (direct) return direct.slice(0, DOMAIN_MAX);
+  const domainTags = Array.isArray(project.domainTags) ? project.domainTags : null;
+  if (domainTags?.length) {
+    const tag = String(domainTags[0] || '').trim();
+    if (tag) return tag.slice(0, DOMAIN_MAX);
+  }
+  return undefined;
+}
+
+/**
+ * @param {{
+ *   board: object,
+ *   memberships: object[],
+ *   roles: object[],
+ *   tasks: object[],
+ *   technologies?: string[],
+ *   byUserSummary?: object,
+ *   domain?: string,
+ *   sourceProjectId?: string,
+ * }} input
  * @returns {Array<object>}
  */
 function buildClosedBoardExperiences({
@@ -102,16 +165,21 @@ function buildClosedBoardExperiences({
   tasks,
   technologies,
   byUserSummary,
+  domain: domainInput,
+  sourceProjectId,
 } = {}) {
   const boardId = sid(board?._id || board?.id);
   const boardTitle = String(board?.title || '').trim() || 'Dự án';
-  const dueLabel = formatDueDate(board?.dueDate);
   const yearRaw = board?.dueDate || board?.updatedAt || board?.createdAt;
   const yearDate = yearRaw ? new Date(yearRaw) : new Date();
   const year = Number.isFinite(yearDate.getTime()) ? yearDate.getFullYear() : undefined;
   const startRaw = board?.startDate || board?.createdAt || null;
   const endRaw = board?.dueDate || board?.endDate || board?.closedAt || null;
   const months = monthsBetweenDates(startRaw, endRaw);
+  const domain = resolveProjectDomain(
+    { domain: domainInput, businessDomain: board?.businessDomain, industry: board?.industry, domainTags: board?.domainTags },
+    domainInput
+  );
 
   const roleById = new Map();
   for (const r of roles || []) {
@@ -146,6 +214,7 @@ function buildClosedBoardExperiences({
   }
 
   const projectTechs = normalizeTechnologies(technologies);
+  const projectId = sid(sourceProjectId);
   const out = [];
   for (const [userId, rec] of byUser.entries()) {
     const c = counts.get(userId) || { done: 0, total: 0 };
@@ -161,12 +230,10 @@ function buildClosedBoardExperiences({
       '';
     if (!roleLabel && c.total === 0) continue;
 
-    const work = buildFactLine({
-      boardTitle,
+    const work = buildSpecialtyWorkLine({
+      tasks,
+      userId,
       roleLabel,
-      done: c.done,
-      total: c.total,
-      dueLabel,
     });
     if (!work) continue;
 
@@ -187,6 +254,8 @@ function buildClosedBoardExperiences({
       evidenceBoardId: boardId,
       isProjectManager: [...keys].includes('project_manager'),
     };
+    if (domain) item.domain = domain;
+    if (projectId) item.sourceProjectId = projectId;
     if (year >= 1970 && year <= 2100) item.year = year;
     if (months != null) item.months = months;
     if (userTechs.length) {
@@ -213,6 +282,8 @@ function buildClosedBoardExperiences({
 module.exports = {
   buildClosedBoardExperiences,
   buildFactLine,
+  buildSpecialtyWorkLine,
+  resolveProjectDomain,
   formatDueDate,
   monthsBetweenDates,
   isTaskDone,

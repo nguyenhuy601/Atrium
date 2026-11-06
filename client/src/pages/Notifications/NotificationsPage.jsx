@@ -11,11 +11,13 @@ import NotificationsFigmaView from '../../components/Notifications/Notifications
 import { useNotificationInboxShortcuts } from '../../hooks/useNotificationInboxShortcuts';
 import {
   NOTIFICATIONS_REFRESH_EVENT,
-  markFriendNotificationsResolved,
   markVoiceRoomJoinRequestNotificationsResolved,
 } from '../../services/notificationSync';
-import { useFriendPending, useNotificationsInfinite, useOrganizationsMy } from '../../hooks/queries';
-import { useOrgShell } from '../../hooks/queries/useOrgShell';
+import {
+  useNotificationBadge,
+  useNotificationsInfinite,
+  useOrganizationsMy,
+} from '../../hooks/queries';
 import { queryKeys } from '../../lib/queryKeys';
 import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
 import { findOrgBySlug, orgRecordId } from '../../utils/orgListUtils';
@@ -66,7 +68,7 @@ function rawNotificationHasOrgScope(item) {
 }
 
 const ORG_NOTIFICATIONS_PATH = '/notifications/organization';
-const COLLABORATE_NOTIFICATIONS_PATH = '/app/collaborate/notifications';
+const COLLABORATE_NOTIFICATIONS_PATH = '/collaborate/notifications';
 
 function unwrapApiBody(res) {
   const body = res?.data;
@@ -100,7 +102,6 @@ function getNotifActionKind(notif) {
   if (!notif || notif.read || notif.data?.resolved) return 'none';
   if (notif.data?.kind === 'voice_room_join_request') return 'voice_join';
   if (isVoiceRoomInviteNotification(notif)) return 'voice_invite';
-  if (notif.rawType === 'friend_request') return 'friend_request';
   return 'navigate';
 }
 
@@ -130,7 +131,7 @@ function NotificationsPage({
     embedded ||
     location.pathname.startsWith(COLLABORATE_NOTIFICATIONS_PATH) ||
     location.pathname.startsWith(ORG_NOTIFICATIONS_PATH) ||
-    location.pathname.startsWith('/app/company/notifications');
+    location.pathname.startsWith('/company/notifications');
   const notificationScope = isOrgNotificationsPage ? 'organization' : 'personal';
   const organizationIdFilter = useMemo(() => {
     const fromProp = String(organizationIdOverride || '').trim();
@@ -188,24 +189,21 @@ function NotificationsPage({
     enabled: fetchEnabled && (!isOrgNotificationsPage || Boolean(organizationIdFilter)),
   });
 
-  useFriendPending({
-    enabled: !isOrgNotificationsPage,
-  });
-
-  const { data: orgShellForBadge } = useOrgShell(organizationIdFilter, {
+  const { unreadCount: orgBadgeUnread } = useNotificationBadge({
+    scope: 'organization',
+    organizationId: organizationIdFilter,
     enabled: isOrgNotificationsPage && Boolean(organizationIdFilter) && fetchEnabled,
   });
 
   useEffect(() => {
-    if (!isOrgNotificationsPage || !organizationIdFilter || !orgShellForBadge) return;
-    const unread = Number(orgShellForBadge?.badges?.notificationsUnreadOrg);
-    if (!Number.isFinite(unread)) return;
+    if (!isOrgNotificationsPage || !organizationIdFilter) return;
+    if (!Number.isFinite(orgBadgeUnread)) return;
     queryClient.setQueryData(
       queryKeys.notifications.badge('organization', organizationIdFilter),
-      { unreadCount: Math.max(0, unread) },
+      { unreadCount: Math.max(0, orgBadgeUnread) },
       { updatedAt: Date.now() }
     );
-  }, [isOrgNotificationsPage, organizationIdFilter, orgShellForBadge, queryClient]);
+  }, [isOrgNotificationsPage, organizationIdFilter, orgBadgeUnread, queryClient]);
 
   const notificationsLoading = notifInfiniteQuery.isLoading;
 
@@ -306,8 +304,7 @@ function NotificationsPage({
       organizationId: orgId,
       createdAt: item?.createdAt || null,
       timeGroup: getNotificationTimeGroup(item?.createdAt),
-      /** Chuông + badge đỏ giống sidebar (chủ yếu lời mời kết bạn) */
-      useBellCard: rawType === 'friend_request' || type === 'friend',
+      useBellCard: false,
     };
   };
 
@@ -318,12 +315,12 @@ function NotificationsPage({
   }, [notifInfiniteQuery.data]);
 
   useEffect(() => {
-    if (notifInfiniteQuery.isError) {
-      const err = notifInfiniteQuery.error;
-      const msg = resolveApiErrorMessage(err, { t, fallback: t('notifications.loadFail') });
-      toast.error(msg);
-    }
-  }, [notifInfiniteQuery.isError, notifInfiniteQuery.error, t]);
+    if (!notifInfiniteQuery.isError) return;
+    if (notifications.length === 0) return;
+    const err = notifInfiniteQuery.error;
+    const msg = resolveApiErrorMessage(err, { t, fallback: t('notifications.loadFail') });
+    toast.error(msg);
+  }, [notifInfiniteQuery.isError, notifInfiniteQuery.error, notifications.length, t]);
 
   const reloadNotifications = useCallback(() => {
     queryClient.invalidateQueries({
@@ -331,7 +328,6 @@ function NotificationsPage({
     });
   }, [queryClient, notificationScope, organizationIdFilter]);
 
-  /** Đồng bộ sau accept/reject kết bạn (cùng tab hoặc sau markFriendNotificationsResolved) */
   useEffect(() => {
     const onRefresh = () => reloadNotifications();
     window.addEventListener(NOTIFICATIONS_REFRESH_EVENT, onRefresh);
@@ -513,18 +509,6 @@ function NotificationsPage({
     }
   };
 
-  const handleAcceptFriendRequest = async (notif) => {
-    if (!notif?.id) return;
-    markNotifResolvedLocal(notif.id);
-    toast(t('notifications.toastFriendActionFail'));
-  };
-
-  const handleRejectFriendRequest = async (notif) => {
-    if (!notif?.id) return;
-    markNotifResolvedLocal(notif.id);
-    toast(t('notifications.toastFriendActionFail'));
-  };
-
   const handleMarkAsRead = async (id, { silent = false } = {}) => {
     if (!id) return;
     if (!silent && markingReadId) return;
@@ -659,17 +643,11 @@ function NotificationsPage({
       })();
       const peerId = senderId || fromAction;
       if (peerId) {
-        navigate(`/app/communicate/chat/friends?openDmUserId=${encodeURIComponent(peerId)}`);
+        navigate(`/communicate/chat/friends?openDmUserId=${encodeURIComponent(peerId)}`);
       } else {
-        navigate('/app/communicate/chat/friends');
+        navigate('/communicate/chat/friends');
       }
       toast(t('notifications.toastOpenFriendChat'), { icon: '💬' });
-      return;
-    }
-
-    if (notif.type === 'friend') {
-      navigate('/app/communicate/chat/friends?tab=requests');
-      toast(t('notifications.toastOpenFriendReq'), { icon: '👥' });
       return;
     }
 
@@ -679,19 +657,19 @@ function NotificationsPage({
     ) {
       if (isVoiceRoomInviteNotification(notif)) {
         const invitePath = resolveVoiceRoomInvitePath(notif);
-        navigate(invitePath || '/app/communicate/voice');
+        navigate(invitePath || '/communicate/voice');
         toast(t('notifications.toastOpenVoiceRoom'), { icon: '🎙️' });
         return;
       }
       const voiceUrl = String(notif.actionUrl || '').trim();
-      if (voiceUrl.startsWith('/app/communicate/voice')) {
+      if (voiceUrl.startsWith('/communicate/voice')) {
         navigate(voiceUrl);
       } else if (voiceUrl.startsWith('/voice')) {
-        navigate(voiceUrl.replace(/^\/voice/, '/app/communicate/voice'));
+        navigate(voiceUrl.replace(/^\/voice/, '/communicate/voice'));
       } else if (notif.data?.roomId) {
-        navigate(`/app/communicate/voice/${encodeURIComponent(notif.data.roomId)}`);
+        navigate(`/communicate/voice/${encodeURIComponent(notif.data.roomId)}`);
       } else {
-        navigate('/app/communicate/voice');
+        navigate('/communicate/voice');
       }
       toast(t('notifications.toastOpenVoiceRoom'), { icon: '🎙️' });
       return;
@@ -714,21 +692,21 @@ function NotificationsPage({
 
     switch (notif.type) {
       case 'mention':
-        navigate(targetWorkspacePath || '/app/communicate/channels');
+        navigate(targetWorkspacePath || '/communicate/channels');
         toast(t('notifications.toastOpenOrgChat'), { icon: '💬' });
         break;
       case 'meeting':
-        navigate('/app/me/calendar');
+        navigate('/me/calendar');
         toast(t('notifications.toastOpenCalendar'), { icon: '📅' });
         break;
       case 'system':
-        navigate(targetWorkspacePath || '/app/me/settings');
+        navigate(targetWorkspacePath || '/me/settings');
         toast(t('notifications.toastOpenSettings'), { icon: '⚙️' });
         break;
       case 'task':
       case 'deadline': {
         const dueUrl = String(notif.actionUrl || notif.data?.actionUrl || '').trim();
-        if (dueUrl.startsWith('/app/')) {
+        if (dueUrl.startsWith('/')) {
           navigate(dueUrl);
         } else {
           navigate(
@@ -740,12 +718,12 @@ function NotificationsPage({
       }
       case 'file':
         navigate(
-          orgId ? buildCollaborateDocumentsPath(orgId) : '/app/collaborate/documents'
+          orgId ? buildCollaborateDocumentsPath(orgId) : '/collaborate/documents'
         );
         toast(t('notifications.toastOpenDocs'), { icon: '📁' });
         break;
       default:
-        navigate(targetWorkspacePath || '/app/me/dashboard');
+        navigate(targetWorkspacePath || '/me/dashboard');
         toast(t('notifications.toastOpenDetail'), { icon: 'ℹ️' });
     }
   };
@@ -757,9 +735,7 @@ function NotificationsPage({
     } else if (primaryFilter === 'needsAction') {
       list = list.filter((n) => isP0Notification(n));
     }
-    if (typeFilter === 'friend') {
-      list = list.filter((n) => n.type === 'friend');
-    } else if (typeFilter !== 'all') {
+    if (typeFilter !== 'all') {
       list = list.filter((n) => n.type === typeFilter);
     }
     if (notificationScope === 'organization' && organizationIdFilter) {
@@ -798,7 +774,6 @@ function NotificationsPage({
   const typeFilterOptions = useMemo(
     () => [
       { id: 'all', label: t('notifications.filterTypeAll') },
-      { id: 'friend', label: t('notifications.filterFriend') },
       { id: 'mention', label: t('notifications.filterMentions') },
       { id: 'meeting', label: t('notifications.filterMeetings') },
       { id: 'task', label: t('notifications.filterTasks') },
@@ -968,6 +943,12 @@ function NotificationsPage({
   const inboxEmptyMessage = isOrgNotificationsPage
     ? t('notifications.emptyOrg')
     : t('notifications.emptyNew');
+  const inboxLoadError =
+    fetchEnabled && notifInfiniteQuery.isError && notifications.length === 0;
+  const inboxLoadErrorMessage = resolveApiErrorMessage(notifInfiniteQuery.error, {
+    t,
+    fallback: t('notifications.loadFail'),
+  });
 
   return (
     <>
@@ -996,6 +977,10 @@ function NotificationsPage({
         checkedCount={checkedIds.size}
         shortcutHelpOpen={shortcutHelpOpen}
         loading={!fetchEnabled || notificationsLoading}
+        loadError={inboxLoadError}
+        loadErrorMessage={inboxLoadErrorMessage}
+        onRetryLoad={() => void notifInfiniteQuery.refetch()}
+        retryLoadDisabled={notifInfiniteQuery.isFetching}
         emptyMessage={inboxEmptyMessage}
         emptyHint={emptyHint}
         getActionKind={getNotifActionKind}
@@ -1008,8 +993,6 @@ function NotificationsPage({
         onMarkReadNotification={handleMarkAsRead}
         onClearSelection={() => setSelectedId(null)}
         onDeleteNotification={(notif) => setPendingDeleteIds([notif.id])}
-        onAcceptFriend={handleAcceptFriendRequest}
-        onRejectFriend={handleRejectFriendRequest}
         onJoinVoice={handleOpenNotification}
         onMarkAllRead={handleMarkAllRead}
         onToggleBulkMode={() => {

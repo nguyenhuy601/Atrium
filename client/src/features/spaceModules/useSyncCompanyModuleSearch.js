@@ -3,8 +3,9 @@ import { useSearchParams } from 'react-router-dom';
 import { useSpace, SPACE_KIND } from '../../context/SpaceContext';
 import { buildCompanyModuleSearch } from '../../utils/companySpaceLevel';
 
-/** Org id stays in WorkspaceContext — only dept/team/tab sync to URL. */
-const SYNC_KEYS = ['departmentId', 'teamId', 'tab'];
+/** Org id stays in WorkspaceContext — only dept/team/(chat)tab sync to URL. */
+const SYNC_KEYS_CHAT = ['departmentId', 'teamId', 'tab'];
+const SYNC_KEYS_PATH_MODULE = ['departmentId', 'teamId'];
 
 /**
  * Keep URL query aligned with SpaceContext for OrganizationsPage hydrate.
@@ -21,16 +22,23 @@ export function useSyncCompanyModuleSearch(module) {
     const deptId = String(space?.departmentId || '').trim();
     if (!deptId) return;
 
+    const mod = String(module || '').trim().toLowerCase();
+    const syncKeys = mod === 'chat' ? SYNC_KEYS_CHAT : SYNC_KEYS_PATH_MODULE;
+
     const desired = buildCompanyModuleSearch(space, module);
     desired.delete('organizationId');
     desired.delete('orgId');
+    if (mod !== 'chat') desired.delete('tab');
     const desiredKey = desired.toString();
     const syncKey = `${module}|${desiredKey}`;
     const hasOrgQuery = Boolean(searchParams.get('organizationId') || searchParams.get('orgId'));
+    const hasRedundantTab =
+      mod !== 'chat' &&
+      ['documents', 'calendar'].includes(String(searchParams.get('tab') || '').trim());
 
-    if (lastSyncedRef.current === syncKey && !hasOrgQuery) {
+    if (lastSyncedRef.current === syncKey && !hasOrgQuery && !hasRedundantTab) {
       let drifted = false;
-      for (const key of SYNC_KEYS) {
+      for (const key of syncKeys) {
         const want = desired.get(key) || '';
         const have = String(searchParams.get(key) || '').trim();
         if (want !== have) {
@@ -41,11 +49,12 @@ export function useSyncCompanyModuleSearch(module) {
       if (!drifted) return;
     }
 
-    let changed = hasOrgQuery;
+    let changed = hasOrgQuery || hasRedundantTab;
     const next = new URLSearchParams(searchParams);
     next.delete('organizationId');
     next.delete('orgId');
-    for (const key of SYNC_KEYS) {
+    if (mod !== 'chat') next.delete('tab');
+    for (const key of syncKeys) {
       const want = desired.get(key) || '';
       const have = String(next.get(key) || '').trim();
       if (want !== have) {

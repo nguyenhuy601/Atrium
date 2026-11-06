@@ -10,25 +10,25 @@ const LAYER_CARDS = [
   {
     titleKey: 'taxonomyCardPermissionTitle',
     bodyKey: 'taxonomyCardPermissionBody',
-    to: '/app/admin/rbac/permissions-by-domain',
+    to: '/admin/rbac/permissions-by-domain',
     ctaKey: 'taxonomyLinkPermissions',
   },
   {
     titleKey: 'taxonomyCardOrgRoleTitle',
     bodyKey: 'taxonomyCardOrgRoleBody',
-    to: '/app/admin/rbac/org-roles/permissions',
+    to: '/admin/rbac/org-roles/permissions',
     ctaKey: 'taxonomyLinkOrgRoleMatrix',
   },
   {
     titleKey: 'taxonomyCardPositionTitle',
     bodyKey: 'taxonomyCardPositionBody',
-    to: '/app/admin/rbac/positions/roles',
+    to: '/admin/rbac/positions/roles',
     ctaKey: 'taxonomyLinkPositionRoles',
   },
   {
     titleKey: 'taxonomyCardProjectRoleTitle',
     bodyKey: 'taxonomyCardProjectRoleBody',
-    to: '/app/admin/rbac/project-roles',
+    to: '/admin/rbac/project-roles',
     ctaKey: 'taxonomyLinkProjectRoles',
   },
 ];
@@ -52,13 +52,13 @@ export default function RbacTaxonomyHubPanel() {
       </div>
       <AdminUserFormCard title={t('adminDomains.rbac.posAssignQuickLinksTitle')}>
         <div className="flex flex-wrap gap-2">
-          <Link to="/app/admin/rbac/org-roles" className={adminSecondaryBtnClass()}>
+          <Link to="/admin/rbac/org-roles" className={adminSecondaryBtnClass()}>
             {t('adminRbac.taxonomyLinkOrgRoles')}
           </Link>
-          <Link to="/app/admin/rbac/positions" className={adminSecondaryBtnClass()}>
+          <Link to="/admin/rbac/positions" className={adminSecondaryBtnClass()}>
             {t('adminRbac.listLinkPosition')}
           </Link>
-          <Link to="/app/admin/rbac/positions/assign" className={adminSecondaryBtnClass()}>
+          <Link to="/admin/rbac/positions/assign" className={adminSecondaryBtnClass()}>
             {t('adminDomains.rbac.posAssign')}
           </Link>
         </div>

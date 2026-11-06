@@ -6,6 +6,8 @@
 const { Annotation, StateGraph, START, END } = require('@langchain/langgraph');
 const { buildWhatPhaseGraph } = require('./whatPhaseGraph');
 const { buildHowPhaseGraph } = require('./howPhaseGraph');
+const { routeDomain, verifyDomainResult } = require('../agents/core/masterSupervisor');
+const { runDelivery } = require('../agents/delivery/deliverySupervisor');
 const {
   buildSharedPhaseAnnotations,
   spreadInputToShared,
@@ -25,7 +27,7 @@ const PhaseOrchestratorState = Annotation.Root({
 });
 
 function routePhase(state) {
-  return state?.phase === 'how' ? 'how' : 'what';
+  return routeDomain(state?.phase);
 }
 
 /**
@@ -37,19 +39,43 @@ function buildPhaseOrchestratorGraph(hooks = {}) {
 
   // Pattern B — phase graphs as subgraphs; parent owns checkpointer (RULE-LG-CP-01)
   const childHooks = { ...hooks, asSubgraph: true, checkpointer: null };
+  graph.addNode('master', async (state) => ({
+    phase: routeDomain(state?.phase),
+    history: ['master'],
+  }));
   graph.addNode('what', buildWhatPhaseGraph(childHooks));
   graph.addNode('how', buildHowPhaseGraph(childHooks));
+  graph.addNode('delivery', async (state) => {
+    const out = runDelivery(state);
+    return {
+      agentResults: out.agentResults,
+      approvalRequired: false,
+      history: ['delivery'],
+    };
+  });
+  graph.addNode('verifyDomainResult', async (state) => {
+    const verify = verifyDomainResult(state.agentResults || []);
+    return {
+      approvalRequired: verify.approvalRequired,
+      executionStatus: verify.executionStatus,
+      history: ['verifyDomainResult'],
+    };
+  });
 
   graph.addNode('projectOutput', async (state) => ({
     output: projectSharedFromState(state),
   }));
 
-  graph.addConditionalEdges(START, routePhase, {
+  graph.addEdge(START, 'master');
+  graph.addConditionalEdges('master', routePhase, {
     what: 'what',
     how: 'how',
+    delivery: 'delivery',
   });
-  graph.addEdge('what', 'projectOutput');
-  graph.addEdge('how', 'projectOutput');
+  graph.addEdge('what', 'verifyDomainResult');
+  graph.addEdge('how', 'verifyDomainResult');
+  graph.addEdge('delivery', 'verifyDomainResult');
+  graph.addEdge('verifyDomainResult', 'projectOutput');
   graph.addEdge('projectOutput', END);
 
   return checkpointer ? graph.compile({ checkpointer }) : graph.compile();

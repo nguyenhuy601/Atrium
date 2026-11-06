@@ -14,13 +14,15 @@ function bandFromScore(score) {
   return 'low';
 }
 
-function applyRiskToContainer(container, riskResult) {
+function applyRiskToContainer(container, riskResult, riskScope = null) {
   const next = {
     ...container,
     analyses: { ...(container?.analyses || {}) },
   };
-  const items = riskResult.items || riskResult.risks || [];
-  next.analyses.risk = {
+  const items = (riskResult.items || riskResult.risks || []).map((item) =>
+    riskScope ? { ...item, sourceScope: riskScope } : item
+  );
+  const record = {
     status: riskResult.status || 'ready',
     model: riskResult.model || null,
     generatedAt: riskResult.generatedAt || new Date().toISOString(),
@@ -35,6 +37,14 @@ function applyRiskToContainer(container, riskResult) {
     chains: [],
     meta: riskResult.meta || {},
   };
+  if (riskScope === 'source' || riskScope === 'dependency') {
+    next.analyses.riskByScope = {
+      ...(container?.analyses?.riskByScope || {}),
+      [riskScope]: record,
+    };
+    return next;
+  }
+  next.analyses.risk = record;
   return next;
 }
 

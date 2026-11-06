@@ -13,9 +13,9 @@ export const ADMIN_SUITE_PERSONA = Object.freeze({
   ORG: 'org',
 });
 
-const ADMIN_HUB_PATH = '/app/admin';
-const ADMIN_USERS_PATH = '/app/admin/users';
-const ADMIN_AUDIT_PATH = '/app/admin/audit';
+const ADMIN_HUB_PATH = '/admin';
+const ADMIN_USERS_PATH = '/admin/users';
+const ADMIN_AUDIT_PATH = '/admin/audit';
 
 function grantOpensAdminPage(hasGrant, scopeOf, key) {
   if (typeof hasGrant !== 'function' || !hasGrant(key)) return false;

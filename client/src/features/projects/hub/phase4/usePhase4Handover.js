@@ -9,7 +9,7 @@ import {
 } from '../../../../utils/resolveApiErrorMessage';
 import { queryKeys } from '../../../../lib/queryKeys';
 import { RELEASE_HANDOVER_CHECKLIST_IDS } from '../../../../utils/projectPhaseNav';
-import { fetchProjectHubProject } from '../useProjectHubQueries';
+import { fetchProjectHubProject, STALE_PROJECT_HUB_MS } from '../useProjectHubQueries';
 import { resolveHubCapabilities } from '../hubCaps';
 
 const TOAST_ID_CHECKLIST = 'phase4-handover-checklist';
@@ -52,7 +52,8 @@ export default function usePhase4Handover(projectId) {
     queryKey: queryKeys.projectHub.project(pid),
     queryFn: () => fetchProjectHubProject(pid),
     enabled: Boolean(pid),
-    staleTime: 15_000,
+    staleTime: STALE_PROJECT_HUB_MS,
+    refetchOnMount: false,
   });
 
   const hubCaps = useMemo(() => resolveHubCapabilities(projectRow), [projectRow]);

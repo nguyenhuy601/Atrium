@@ -46,7 +46,7 @@ function NotFoundPage() {
             <ArrowLeft size={18} aria-hidden />
             {t('notFound.back')}
           </button>
-          <Link to="/app/me/dashboard" className={FIGMA_404_BTN_PRIMARY} aria-label={t('notFound.cta')}>
+          <Link to="/me/dashboard" className={FIGMA_404_BTN_PRIMARY} aria-label={t('notFound.cta')}>
             <Home size={18} aria-hidden />
             {t('notFound.cta')}
           </Link>

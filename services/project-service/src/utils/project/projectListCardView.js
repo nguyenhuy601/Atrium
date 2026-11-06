@@ -4,6 +4,9 @@
 
 const CARD_VIEW_ALIASES = new Set(['card', 'list_card']);
 
+/** Card UI only shows ~2 lines; keep payload small vs full project description (≤2000). */
+const CARD_DESCRIPTION_MAX = 180;
+
 /** Mongo select for Project.find when view=card (access + card whitelist + heal). */
 const CARD_LIST_PROJECT_SELECT = [
   '_id',
@@ -21,7 +24,6 @@ const CARD_LIST_PROJECT_SELECT = [
   'analysisMode',
   'releaseReadyStatus',
   'uatStatus',
-  'startDate',
   'expectedEndDate',
   'dueDate',
   'relatedDepartmentIds',
@@ -35,6 +37,20 @@ function isCardListView(view) {
 }
 
 /**
+ * Truncate description for list cards (UTF-16 safe enough for UI preview).
+ * @param {unknown} raw
+ * @param {number} [max]
+ * @returns {string}
+ */
+function truncateCardDescription(raw, max = CARD_DESCRIPTION_MAX) {
+  const text = raw != null ? String(raw) : '';
+  if (!text) return '';
+  const limit = Number.isFinite(Number(max)) && Number(max) > 0 ? Math.floor(Number(max)) : CARD_DESCRIPTION_MAX;
+  if (text.length <= limit) return text;
+  return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+}
+
+/**
  * Whitelist fields for project list cards (Tier 1–2 + enter path).
  * @param {object} payload — full list item after access + summary attach
  * @returns {object}
@@ -43,6 +59,10 @@ function toProjectListCardItem(payload) {
   const p = payload && typeof payload === 'object' ? payload : {};
   const id = String(p._id || p.projectId || '').trim();
   const related = Array.isArray(p.relatedDepartmentIds) ? p.relatedDepartmentIds : [];
+  const relatedDepartmentCount =
+    p.relatedDepartmentCount != null && Number.isFinite(Number(p.relatedDepartmentCount))
+      ? Math.max(0, Math.floor(Number(p.relatedDepartmentCount)))
+      : related.length;
   const accessIn = p.access && typeof p.access === 'object' ? p.access : {};
   const membershipIn = p.myMembership && typeof p.myMembership === 'object' ? p.myMembership : {};
   const pmIn = p.pm && typeof p.pm === 'object' ? p.pm : null;
@@ -62,14 +82,13 @@ function toProjectListCardItem(payload) {
     organizationId: p.organizationId != null ? String(p.organizationId) : undefined,
     title: p.title != null ? String(p.title) : '',
     projectCode: p.projectCode != null ? String(p.projectCode) : '',
-    description: p.description != null ? String(p.description) : '',
+    description: truncateCardDescription(p.description),
     status: p.status != null ? String(p.status) : '',
     priority: p.priority != null ? String(p.priority) : '',
     visibility: p.visibility != null ? String(p.visibility) : 'private',
-    startDate: p.startDate ?? null,
     expectedEndDate: p.expectedEndDate ?? null,
     dueDate: p.dueDate ?? null,
-    relatedDepartmentIds: related,
+    relatedDepartmentCount,
     isActive: p.isActive !== false,
     defaultBoardId: p.defaultBoardId != null ? String(p.defaultBoardId) : null,
     memberCount,
@@ -100,6 +119,8 @@ function toProjectListCardItem(payload) {
 module.exports = {
   isCardListView,
   toProjectListCardItem,
+  truncateCardDescription,
   CARD_VIEW_ALIASES,
   CARD_LIST_PROJECT_SELECT,
+  CARD_DESCRIPTION_MAX,
 };

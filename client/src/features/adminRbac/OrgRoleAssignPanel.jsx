@@ -242,7 +242,7 @@ export default function OrgRoleAssignPanel({ orgId, embedded = false, selectedUs
               type="button"
               className={adminSecondaryBtnClass()}
               disabled={assignBusy}
-              onClick={() => navigate('/app/admin/rbac/org-roles/directory')}
+              onClick={() => navigate('/admin/rbac/org-roles/directory')}
             >
               {t('adminDomains.rbac.orgRoleDirectory')}
             </button>

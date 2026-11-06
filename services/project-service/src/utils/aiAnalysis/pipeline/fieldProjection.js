@@ -135,6 +135,12 @@ function projectEmployee(item) {
                   : {}),
               }
             : undefined;
+        const statusRaw = String(e.status || '').trim().toLowerCase();
+        const status = ['verified', 'suggested', 'rejected'].includes(statusRaw)
+          ? statusRaw
+          : undefined;
+        const sourceProjectId =
+          String(e.sourceProjectId || e.evidenceBoardId || e.projectId || '').trim() || undefined;
         return {
           role: String(e.role || e.projectRole || '').trim() || undefined,
           domain: domain || undefined,
@@ -145,6 +151,8 @@ function projectEmployee(item) {
           ...(technologies.length ? { technologies } : {}),
           ...(summary && Object.keys(summary).length ? { summary } : {}),
           ...(source ? { source } : {}),
+          ...(status ? { status } : {}),
+          ...(sourceProjectId ? { sourceProjectId } : {}),
         };
       })
     : [];

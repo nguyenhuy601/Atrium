@@ -3,7 +3,10 @@ import { FIGMA_PAGE_SHELL } from '../../components/Layout/figmaPageClasses';
 import OrganizationSettingsPanel from '../../components/Organization/OrganizationSettingsPanel';
 import useOrganizationDetail from '../../hooks/useOrganizationDetail';
 import { useAppStrings } from '../../locales/appStrings';
-import { mapLegacyAdminTabToPath, buildCommunicateChannelsPath } from '../../utils/suitePathUtils';
+import {
+  mapLegacyAdminTabToPath,
+  buildCompanyWorkspacePath,
+} from '../../utils/suitePathUtils';
 import { readSingleOrgModeFlag } from '../../utils/singleCompanyMode';
 
 const SETTINGS_TAB_TO_ADMIN = {
@@ -34,9 +37,7 @@ export default function OrganizationSettingsPage() {
     reload: refreshOrganization,
   } = useOrganizationDetail(orgId, { enabled: !singleOrg && Boolean(orgId) });
 
-  const organizationHomePath = orgId
-    ? buildCommunicateChannelsPath()
-    : '/app/collaborate/workspaces';
+  const organizationHomePath = buildCompanyWorkspacePath();
 
   if (singleOrg) {
     const mapped = SETTINGS_TAB_TO_ADMIN[initialTab] || initialTab || 'overview';
@@ -74,7 +75,7 @@ export default function OrganizationSettingsPage() {
           <p>{t('organizationSettings.notFound')}</p>
           <button
             type="button"
-            onClick={() => navigate('/app/collaborate/workspaces')}
+            onClick={() => navigate(buildCompanyWorkspacePath())}
             className="text-primary hover:underline"
           >
             {t('organizationSettings.backOrgs')}
@@ -92,7 +93,7 @@ export default function OrganizationSettingsPage() {
         suiteLayout
         onBack={() => navigate(organizationHomePath)}
         onOrganizationUpdated={handleOrganizationUpdated}
-        onOrganizationDeleted={() => navigate('/app/collaborate/workspaces')}
+        onOrganizationDeleted={() => navigate(buildCompanyWorkspacePath())}
       />
     </div>
   );

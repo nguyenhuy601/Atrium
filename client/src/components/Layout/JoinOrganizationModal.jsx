@@ -51,14 +51,14 @@ export default function JoinOrganizationModal() {
     const params = new URLSearchParams({ inviteOrgId: orgId, inviteToken: token });
     closeJoinModal();
     setJoinCode('');
-    navigate(`/app/collaborate/workspaces?${params.toString()}`);
+    navigate(`/collaborate/workspaces?${params.toString()}`);
   };
 
   const handleBrowseJoin = (org) => {
     const id = orgRecordId(org);
     if (!id) return;
     closeJoinModal();
-    navigate(`/app/collaborate/join/${encodeURIComponent(id)}`);
+    navigate(`/collaborate/join/${encodeURIComponent(id)}`);
   };
 
   const browseOrgs = myOrgs.filter((o) => String(o?.visibility || o?.type || '').toLowerCase() === 'public');

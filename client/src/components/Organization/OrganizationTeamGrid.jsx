@@ -20,6 +20,7 @@ import { uniqueTeamsForHub } from '../../utils/orgDepartmentHubUtils';
 import { channelsForTeam } from '../../utils/orgChannelScope';
 import { collectTeamMemberIds } from '../../utils/filterTeamMembers';
 import { FIGMA_WS_TEAM_CARD, FIGMA_WS_TEAM_GRID } from './figmaOrganizationClasses';
+import HoverTooltip from '../Shared/HoverTooltip';
 
 const GRAD_PAIRS = [
   ['#1D4ED8', '#3B82F6'],
@@ -107,9 +108,12 @@ function buildProjectCards(projects = [], locale = 'vi') {
     const memberCount = Number(
       p?.memberCount ?? p?.membersCount ?? p?.totalMembers ?? 0
     );
-    const relatedDeptCount = Array.isArray(p?.relatedDepartmentIds)
-      ? p.relatedDepartmentIds.length
-      : 0;
+    const relatedDeptCount =
+      p?.relatedDepartmentCount != null && Number.isFinite(Number(p.relatedDepartmentCount))
+        ? Math.max(0, Math.floor(Number(p.relatedDepartmentCount)))
+        : Array.isArray(p?.relatedDepartmentIds)
+          ? p.relatedDepartmentIds.length
+          : 0;
     return {
       id,
       name,
@@ -565,27 +569,41 @@ export default function OrganizationTeamGrid({
                     { module: 'voice', icon: Mic, label: t('workspace.moduleVoice'), badge: 0, color: 'text-success' },
                     { module: 'tasks', icon: ClipboardList, label: t('workspace.moduleTask'), badge: card.unreadTask, color: 'text-warning' },
                     { module: 'documents', icon: FileText, label: t('workspace.moduleDocs'), badge: 0, color: 'text-violet-500 dark:text-violet-400' },
-                  ].map((btn) => (
-                    <button
-                      key={btn.module}
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onModuleClick(card.id, btn.module, card.raw, {
-                          isProject: Boolean(card.isProject),
-                        });
-                      }}
-                      className="relative flex flex-col items-center justify-center gap-1 rounded-[10px] bg-muted px-1.5 py-2.5 text-[0.6875rem] font-medium text-muted-foreground transition hover:-translate-y-0.5 hover:bg-primary/10 hover:text-primary hover:shadow-sm motion-reduce:transition-none motion-reduce:hover:translate-y-0"
-                    >
-                      {btn.badge > 0 ? (
-                        <span className="absolute right-1.5 top-1 min-w-[15px] rounded-full bg-primary px-1 text-[0.5rem] font-bold text-primary-foreground">
-                          {btn.badge}
-                        </span>
-                      ) : null}
-                      <btn.icon size={15} className={btn.color} />
-                      {btn.label}
-                    </button>
-                  ))}
+                  ].map((btn) => {
+                    const modulesLocked =
+                      !card.isProject &&
+                      typeof canSelectTeam === 'function' &&
+                      !canSelectTeam(card.id);
+                    return (
+                      <HoverTooltip
+                        key={btn.module}
+                        label={t('workspace.teamModulesLockedHint')}
+                        placement="top"
+                        disabled={!modulesLocked}
+                      >
+                        <button
+                          type="button"
+                          disabled={modulesLocked}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (modulesLocked) return;
+                            onModuleClick(card.id, btn.module, card.raw, {
+                              isProject: Boolean(card.isProject),
+                            });
+                          }}
+                          className="relative flex w-full flex-col items-center justify-center gap-1 rounded-[10px] bg-muted px-1.5 py-2.5 text-[0.6875rem] font-medium text-muted-foreground transition hover:-translate-y-0.5 hover:bg-primary/10 hover:text-primary hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:bg-muted disabled:hover:text-muted-foreground disabled:hover:shadow-none motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+                        >
+                          {btn.badge > 0 ? (
+                            <span className="absolute right-1.5 top-1 min-w-[15px] rounded-full bg-primary px-1 text-[0.5rem] font-bold text-primary-foreground">
+                              {btn.badge}
+                            </span>
+                          ) : null}
+                          <btn.icon size={15} className={btn.color} />
+                          {btn.label}
+                        </button>
+                      </HoverTooltip>
+                    );
+                  })}
                 </div>
               ) : null}
             </div>

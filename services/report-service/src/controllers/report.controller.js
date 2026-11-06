@@ -2,7 +2,12 @@ const {
   getDashboardSummary,
   saveSnapshot,
 } = require('../services/dashboardReadModel.redis');
-const { isUsableDashboardSummary } = require('@enterprise/shared/utils/dashboardReadModelShape');
+const {
+  isUsableDashboardSummary,
+  isDashboardSummaryStale,
+} = require('../services/dashboardReadModel.store');
+const { refreshDashboardSnapshot } = require('../services/dashboardSnapshotRefresh.service');
+const { coalesce } = require('../services/coalesce');
 const {
   getUserPerformance,
   listUserPerformance,
@@ -19,13 +24,59 @@ function requireGatewayUser(req, res, next) {
   return next();
 }
 
+function kickBackgroundFullRefresh(uid) {
+  void coalesce(`dashboard-rm-refresh:${uid}`, () =>
+    refreshDashboardSnapshot(uid, undefined, { mode: 'full' })
+  ).catch((err) => {
+    console.warn('[dashboard/me] background full refresh failed', err?.message || err);
+  });
+}
+
+/**
+ * Warm HIT → Redis.
+ * Stale → trả ngay + full refresh nền.
+ * Cold → lite sync (org+unread) trả nhanh + full refresh nền (lần đầu cũng TTFB thấp).
+ */
+async function loadDashboardWithRefresh(userId) {
+  const uid = String(userId || '').trim();
+  const existing = await getDashboardSummary(uid);
+  if (isUsableDashboardSummary(existing) && existing.refreshPending) {
+    kickBackgroundFullRefresh(uid);
+    return { data: existing, rm: 'LITE' };
+  }
+
+  if (isUsableDashboardSummary(existing) && !isDashboardSummaryStale(existing.asOf)) {
+    return { data: existing, rm: 'HIT' };
+  }
+
+  if (isUsableDashboardSummary(existing)) {
+    kickBackgroundFullRefresh(uid);
+    return { data: existing, rm: 'STALE' };
+  }
+
+  // Cold miss: lite sync (org+unread) → trả nhanh; full tasks/meetings chạy nền.
+  await coalesce(`dashboard-rm-refresh:${uid}`, () =>
+    refreshDashboardSnapshot(uid, undefined, { mode: 'lite' })
+  );
+  kickBackgroundFullRefresh(uid);
+  const refreshed = await getDashboardSummary(uid);
+  if (isUsableDashboardSummary(refreshed)) {
+    return { data: refreshed, rm: 'LITE' };
+  }
+  return { data: null, rm: 'MISS' };
+}
+
 async function getMyDashboard(req, res) {
   try {
     const userId = String(req.user.id || req.user.userId || req.headers['x-user-id']);
-    const data = await getDashboardSummary(userId);
-    if (!isUsableDashboardSummary(data)) {
-      return res.status(404).json({ success: false, message: 'Dashboard read model miss' });
+    const { data, rm } = await loadDashboardWithRefresh(userId);
+    if (!data) {
+      return res.status(503).json({
+        success: false,
+        message: 'Dashboard summary unavailable',
+      });
     }
+    res.setHeader('X-Dashboard-Rm', rm);
     return res.json({ success: true, data });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -34,10 +85,11 @@ async function getMyDashboard(req, res) {
 
 async function getInternalDashboard(req, res) {
   try {
-    const data = await getDashboardSummary(req.params.userId);
-    if (!isUsableDashboardSummary(data)) {
+    const { data, rm } = await loadDashboardWithRefresh(req.params.userId);
+    if (!data) {
       return res.status(404).json({ success: false, message: 'Dashboard read model miss' });
     }
+    res.setHeader('X-Dashboard-Rm', rm);
     return res.json({ success: true, data });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -150,4 +202,5 @@ module.exports = {
   getUserPerformanceReport,
   getEstimateHintsReport,
   putInternalPerformance,
+  loadDashboardWithRefresh,
 };

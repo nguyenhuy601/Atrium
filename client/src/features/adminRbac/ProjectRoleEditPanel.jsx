@@ -257,7 +257,7 @@ export default function ProjectRoleEditPanel({ orgId, embedded = false }) {
                 type="button"
                 disabled={busy}
                 className={adminSecondaryBtnClass()}
-                onClick={() => navigate('/app/admin/rbac/project-roles')}
+                onClick={() => navigate('/admin/rbac/project-roles')}
               >
                 {t('common.cancel')}
               </button>

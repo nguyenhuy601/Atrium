@@ -4,7 +4,8 @@ import FigmaNavigationSidebar from './FigmaNavigationSidebar';
 import CompanyContextSwitch from './CompanyContextSwitch';
 import CompanyTeamPickerModal from './CompanyTeamPickerModal';
 import { useSpace } from '../../context/SpaceContext';
-import { useOrgShell } from '../../hooks/queries/useOrgShell';
+import { useOrgMyProfile } from '../../hooks/queries/useOrgMyProfile';
+import { useOrgStructureNav } from '../../hooks/queries/useOrgStructure';
 import {
   COMPANY_SPACE_LEVEL,
   listMyTeamsFromShell,
@@ -12,6 +13,7 @@ import {
   resolveTeamLabel,
   writeStoredCompanyTeamId,
 } from '../../utils/companySpaceLevel';
+import { toShellCompat } from '../../utils/orgShellCompat';
 import { buildCompanyHomePath } from '../../utils/suitePathUtils';
 
 /** Company Space suite sidebar + L2 dept/team switch. */
@@ -27,8 +29,22 @@ export default function CompanySidebar({ landingDemo = false } = {}) {
   const teamId = space?.teamId || '';
   const level = space?.level || COMPANY_SPACE_LEVEL.DEPARTMENT;
 
-  const shellQuery = useOrgShell(organizationId, { enabled: Boolean(organizationId) });
-  const shell = shellQuery.data || null;
+  const profileQuery = useOrgMyProfile(organizationId, {
+    enabled: Boolean(organizationId),
+  });
+  const structureNavQuery = useOrgStructureNav(organizationId, {
+    enabled: Boolean(organizationId),
+  });
+  const shell = useMemo(
+    () =>
+      toShellCompat({
+        profile: profileQuery.data || null,
+        structureNav: Array.isArray(structureNavQuery.data)
+          ? structureNavQuery.data
+          : null,
+      }),
+    [profileQuery.data, structureNavQuery.data]
+  );
 
   const teams = useMemo(
     () => listMyTeamsFromShell(shell, departmentId),
@@ -41,7 +57,9 @@ export default function CompanySidebar({ landingDemo = false } = {}) {
   const patchSearch = useCallback(
     ({ nextTeamId = null, clearTeam = false } = {}) => {
       const next = new URLSearchParams(searchParams);
-      if (organizationId) next.set('organizationId', organizationId);
+      // organizationId stays in WorkspaceContext — do not write to URL (avoids set/delete cycle).
+      next.delete('organizationId');
+      next.delete('orgId');
       if (departmentId) next.set('departmentId', departmentId);
       if (clearTeam) {
         next.delete('teamId');
@@ -53,7 +71,7 @@ export default function CompanySidebar({ landingDemo = false } = {}) {
         writeStoredCompanyTeamId(nextTeamId);
       }
       const pathname =
-        location.pathname.startsWith('/app/company')
+        location.pathname.startsWith('/company')
           ? location.pathname
           : buildCompanyHomePath({ organizationId, departmentId }).split('?')[0];
       navigate({ pathname, search: `?${next.toString()}` });

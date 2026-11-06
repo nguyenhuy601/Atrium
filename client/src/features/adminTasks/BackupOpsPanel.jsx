@@ -71,10 +71,21 @@ export function SecurityWaveCStubPanel({ embedded = false, focus, orgId }) {
     ['webauthn', t('adminTasks.securityFlagWebauthn'), flags?.webauthn],
   ].filter(([key]) => !FLAG_KEYS_BY_FOCUS[focus] || FLAG_KEYS_BY_FOCUS[focus].includes(key));
 
+  const showIpDetail = !focus || focus === 'ip';
+  const ipStatus = String(flags?.ipAllowlistStatus || '').trim();
+  const ipStatusLabel =
+    ipStatus === 'ACTIVE'
+      ? t('adminSecurity.ipAllowlistStatusActive')
+      : ipStatus === 'EMPTY'
+        ? t('adminSecurity.ipAllowlistStatusEmpty')
+        : t('adminSecurity.ipAllowlistStatusDisabled');
+
   const body = (
       <AdminUserFormCard title={focus ? t('adminTasks.securityWaveCTitle') : t('adminTasks.securityFlagsTitle')}>
         <p className="mb-3 text-sm text-muted-foreground" role="note">
-          {t('adminSecurity.notImplementedNote')}
+          {focus === 'ip'
+            ? t('adminSecurity.ipAllowlistEnvNote')
+            : t('adminSecurity.notImplementedNote')}
         </p>
         {loadError ? (
           <p role="alert" className="mb-3 rounded-lg border border-destructive px-3 py-2 text-sm text-destructive">
@@ -93,6 +104,26 @@ export function SecurityWaveCStubPanel({ embedded = false, focus, orgId }) {
                 </span>
               </li>
             ))}
+            {showIpDetail && flags ? (
+              <>
+                <li className="flex justify-between rounded-lg border border-border px-3 py-2">
+                  <span>{t('adminSecurity.ipAllowlistStatusLabel')}</span>
+                  <span className="text-xs font-medium text-foreground">{ipStatusLabel}</span>
+                </li>
+                <li className="flex justify-between rounded-lg border border-border px-3 py-2">
+                  <span>{t('adminSecurity.ipAllowlistEntryCount')}</span>
+                  <span className="text-xs font-medium text-foreground">
+                    {Number(flags.ipAllowlistEntryCount || 0)}
+                  </span>
+                </li>
+                <li className="flex justify-between rounded-lg border border-border px-3 py-2">
+                  <span>{t('adminSecurity.ipAllowlistSource')}</span>
+                  <span className="text-xs font-medium text-foreground">
+                    {flags.ipAllowlistSource || 'ENVIRONMENT'}
+                  </span>
+                </li>
+              </>
+            ) : null}
           </ul>
         )}
         <button

@@ -2,28 +2,44 @@ import {
   buildProjectsModulePath,
   buildProjectsPickerPath,
   mapCollaboratePathToDualSuite,
+  stripLegacyAppPrefix,
 } from './suitePathUtils.js';
+import { normalizeAiHitlActionPath } from './aiHitlPath.js';
 
 /** @typedef {{ actionUrl?: string, data?: Record<string, unknown>, organizationId?: string, projectId?: string }} NotificationLike */
 
+const SUITE_ROOTS = [
+  '/communicate',
+  '/company',
+  '/projects',
+  '/admin',
+  '/me',
+  '/collaborate',
+];
+
+function isInAppSuitePath(pathname) {
+  const path = stripLegacyAppPrefix(String(pathname || '').replace(/\/+/g, '/'));
+  return SUITE_ROOTS.some((root) => path === root || path.startsWith(`${root}/`));
+}
+
 /**
- * Normalize legacy in-app paths (collaborate → dual suite, /voice → communicate).
+ * Normalize legacy in-app paths (collaborate → dual suite, /voice → communicate, strip /app).
  * @param {string} pathname
  * @param {string} [search]
  * @returns {string | null}
  */
 export function normalizeLegacyAppPath(pathname, search = '') {
-  let path = String(pathname || '').replace(/\/+/g, '/').trim();
+  let path = stripLegacyAppPrefix(String(pathname || '').replace(/\/+/g, '/').trim());
   const qsRaw = typeof search === 'string' ? search.replace(/^\?/, '') : '';
   const qs = qsRaw ? `?${qsRaw}` : '';
 
-  if (path.startsWith('/app/collaborate')) {
+  if (path.startsWith('/collaborate')) {
     return mapCollaboratePathToDualSuite(path, qs);
   }
 
   const voiceMatch = path.match(/^\/voice\/([^/]+)\/?$/);
   if (voiceMatch) {
-    return `/app/communicate/voice/${encodeURIComponent(voiceMatch[1])}${qs}`;
+    return `/communicate/voice/${encodeURIComponent(voiceMatch[1])}${qs}`;
   }
 
   return `${path}${qs}`;
@@ -60,7 +76,7 @@ export function resolveVoiceRoomInvitePath(notif) {
         ? new URL(actionUrl)
         : new URL(actionUrl, typeof window !== 'undefined' ? window.location.origin : 'https://atrium.dev');
       const normalized = normalizeLegacyAppPath(parsed.pathname, parsed.search || '');
-      if (normalized && normalized.startsWith('/app/communicate/voice')) {
+      if (normalized && stripLegacyAppPrefix(normalized.split('?')[0]).startsWith('/communicate/voice')) {
         const [pathOnly, qsRaw] = normalized.split('?');
         const params = new URLSearchParams(qsRaw || '');
         if (!params.has('join')) params.set('join', '1');
@@ -74,14 +90,14 @@ export function resolveVoiceRoomInvitePath(notif) {
 
   const roomId = String(data.roomId || '').trim();
   if (roomId) {
-    return `/app/communicate/voice/${encodeURIComponent(roomId)}?join=1`;
+    return `/communicate/voice/${encodeURIComponent(roomId)}?join=1`;
   }
 
   return null;
 }
 
 /**
- * Chỉ nhận path in-app `/app/...` (kèm query). Bỏ URL ngoài / legacy `/tasks/:id`.
+ * Chỉ nhận path in-app suite (canonical hoặc legacy `/...`). Bỏ URL ngoài / legacy `/tasks/:id`.
  * @param {string} [actionUrl]
  * @returns {string | null}
  */
@@ -92,19 +108,23 @@ export function parseSafeAppPath(actionUrl) {
   try {
     const parsed = new URL(raw, 'https://atrium.dev');
     const path = String(parsed.pathname || '').trim();
-    if (!path.startsWith('/app/')) return null;
+    if (!isInAppSuitePath(path)) return null;
+    const canonicalPath = stripLegacyAppPrefix(path);
     const qs = parsed.search || '';
-    return `${path}${qs}`;
+    return `${canonicalPath}${qs}`;
   } catch {
-    if (raw.startsWith('/app/') && !raw.includes('://')) {
-      return raw.split('#')[0];
-    }
-    return null;
+    const noHash = raw.split('#')[0];
+    if (!noHash.startsWith('/')) return null;
+    const qIdx = noHash.indexOf('?');
+    const pathOnly = qIdx >= 0 ? noHash.slice(0, qIdx) : noHash;
+    const qs = qIdx >= 0 ? noHash.slice(qIdx) : '';
+    if (!isInAppSuitePath(pathOnly)) return null;
+    return `${stripLegacyAppPrefix(pathOnly)}${qs}`;
   }
 }
 
 /**
- * Ưu tiên actionUrl `/app/...`, không thì Hub Project theo projectId.
+ * Ưu tiên actionUrl suite path, không thì Hub Project theo projectId.
  * @param {NotificationLike | null | undefined} notif
  * @returns {string | null}
  */
@@ -112,11 +132,14 @@ export function resolveNotificationAppPath(notif) {
   if (!notif) return null;
   const fromAction = parseSafeAppPath(notif.actionUrl || notif.data?.actionUrl);
   if (fromAction) {
-    if (fromAction.startsWith('/app/collaborate')) {
-      const qIdx = fromAction.indexOf('?');
-      const pathOnly = qIdx >= 0 ? fromAction.slice(0, qIdx) : fromAction;
-      const search = qIdx >= 0 ? fromAction.slice(qIdx) : '';
+    const qIdx = fromAction.indexOf('?');
+    const pathOnly = qIdx >= 0 ? fromAction.slice(0, qIdx) : fromAction;
+    const search = qIdx >= 0 ? fromAction.slice(qIdx) : '';
+    if (pathOnly.startsWith('/collaborate')) {
       return mapCollaboratePathToDualSuite(pathOnly, search);
+    }
+    if (/\/ai-hitl/i.test(pathOnly)) {
+      return normalizeAiHitlActionPath(fromAction);
     }
     return fromAction;
   }
