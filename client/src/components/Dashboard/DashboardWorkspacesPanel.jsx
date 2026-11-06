@@ -1,4 +1,4 @@
-import { Building2, ChevronRight, Plus } from 'lucide-react';
+import { Building2, ChevronRight, Plus, Users } from 'lucide-react';
 import { useAppStrings } from '../../locales/appStrings';
 import {
   FIGMA_DASH_ACTION_BTN,
