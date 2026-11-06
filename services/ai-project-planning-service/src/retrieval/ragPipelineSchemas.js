@@ -17,6 +17,9 @@ const QUERY_INTENTS = Object.freeze([
   'skill_def',
   'metric_def',
   'history_snippet',
+  'role_experience',
+  'technology_experience',
+  'domain_experience',
   'how_planning',
   'general',
 ]);
@@ -76,6 +79,14 @@ function classifyQueryIntent(query = '') {
     return 'how_planning';
   }
   if (/\b(metric|capacity|hours|effort|allocation)\b/.test(q)) return 'metric_def';
+  // History logical intents before generic skill_def (tech words overlap)
+  try {
+    const { classifyHistoryIntent } = require('./employeeHistoryIntent');
+    const histIntent = classifyHistoryIntent(q);
+    if (histIntent && histIntent !== 'history_snippet') return histIntent;
+  } catch {
+    /* optional */
+  }
   if (/\b(skill|competenc|ngôn ngữ|framework|stack|technology|tech stack)\b/.test(q)) {
     return 'skill_def';
   }

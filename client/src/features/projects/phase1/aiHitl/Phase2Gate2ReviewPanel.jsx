@@ -139,7 +139,8 @@ export default function Phase2Gate2ReviewPanel({
 }) {
   const copyRoles = useMemo(() => resolveGate2CopyRoles(reviewPlan, t), [reviewPlan, t]);
   const projectId = resolvePackProjectId(pack);
-  const nameByUserId = useProjectMemberNames(projectId, resolvePackOrgId(pack));
+  // Project roster only — HITL panels stay dual-mounted; org directory doubled /members.
+  const nameByUserId = useProjectMemberNames(projectId);
   const bundle = useMemo(
     () => buildGate2ProposalItems({ pack, nameByUserId, t }),
     [pack, nameByUserId, t]

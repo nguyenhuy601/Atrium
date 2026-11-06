@@ -1,4 +1,8 @@
 const axios = require('axios');
+const { createTtlCoalesceCache } = require('../utils/ttlCoalesceCache');
+
+const SYSTEM_ADMIN_CACHE_TTL_MS = 60_000;
+const systemAdminCache = createTtlCoalesceCache({ ttlMs: SYSTEM_ADMIN_CACHE_TTL_MS });
 
 function evaluateStoredSystemAdmin(row) {
   if (!row) return false;
@@ -10,7 +14,7 @@ function evaluateStoredSystemAdmin(row) {
  * Đọc systemRole từ auth-service. Thiếu cấu hình hoặc lỗi mạng → unavailable.
  * @returns {Promise<{ state: 'admin' | 'denied' | 'unavailable' }>}
  */
-async function readStoredSystemAdminState(userId) {
+async function readStoredSystemAdminStateUncached(userId) {
   const uid = String(userId || '').trim();
   const authUrl = String(process.env.AUTH_SERVICE_URL || '').trim().replace(/\/+$/, '');
   const token = String(process.env.GATEWAY_INTERNAL_TOKEN || '').trim();
@@ -36,6 +40,21 @@ async function readStoredSystemAdminState(userId) {
   }
 }
 
+/**
+ * Process-local TTL + coalesce — tránh S2S auth lặp trên mỗi getProject hub cold miss.
+ * @returns {Promise<{ state: 'admin' | 'denied' | 'unavailable' }>}
+ */
+async function readStoredSystemAdminState(userId) {
+  const uid = String(userId || '').trim();
+  if (!uid) return { state: 'unavailable' };
+  return systemAdminCache.getOrLoad(uid, () => readStoredSystemAdminStateUncached(uid));
+}
+
+function _clearStoredSystemAdminCacheForTests() {
+  systemAdminCache.clear();
+}
+
 module.exports = {
   readStoredSystemAdminState,
+  _clearStoredSystemAdminCacheForTests,
 };

@@ -11,11 +11,16 @@ const HOW_TOOL_DEPENDENCIES = Object.freeze({
   // Wbs đọc Gate1 approvedBacklogStructure (Story = FR); không BacklogMap phase.
   WbsTool: Object.freeze([]),
   DependencyTool: Object.freeze(['WbsTool']),
-  // Architecture, Effort, Deploy, Sequencing, Matching / BacklogMap are not phase catalog nodes.
-  // Lịch và sprint sống trong ScheduleTool (CPM gọi nội bộ khi đóng gói lịch).
-  RiskTool: Object.freeze(['DependencyTool']),
-  QualityPlanTool: Object.freeze(['RiskTool']),
+  // Quality context không đọc analyses.dependency — cùng lớp WBS.
+  QualityPlanTool: Object.freeze(['WbsTool']),
+  // Risk source không đọc cạnh dependency. Risk dependency chờ artifact dependency.
+  RiskToolSource: Object.freeze(['WbsTool']),
+  RiskToolDependency: Object.freeze(['DependencyTool']),
+  ArchitectureTool: Object.freeze(['WbsTool']),
+  // Lịch và sprint sống trong ScheduleTool (CPM và matching gọi nội bộ).
   ScheduleTool: Object.freeze(['DependencyTool']),
+  // Tên catalog cũ: không dispatch nguyên khối trước dependency.
+  RiskTool: Object.freeze(['DependencyTool']),
   // ProjectPlanTool removed from ReAct — finalizePlan graph node after required sections.
 });
 

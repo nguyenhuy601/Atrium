@@ -8,6 +8,7 @@ import {
   filterNavItemsByCapabilities,
   filterNavItemsByDeliveryPhase,
   PHASE_MODULE_LABEL_KEYS,
+  isClosedProjectStatus,
   isPhase1DeliveryPhase,
 } from './projectPhaseNav.js';
 import {
@@ -43,6 +44,7 @@ export const PROJECT_MODULE_KEYS = [
   'documents',
   'members',
   'activity',
+  'reports',
   'settings',
   'customer-documents',
   'analysis-bg',
@@ -91,6 +93,7 @@ export const HUB_TAB_TO_MODULE = {
   members: 'members',
   files: 'files',
   activity: 'activity',
+  reports: 'reports',
   settings: 'settings',
 };
 
@@ -107,6 +110,7 @@ export const MODULE_TO_HUB_TAB = {
   members: 'members',
   files: 'files',
   activity: 'activity',
+  reports: 'reports',
   settings: 'settings',
   calendar: 'calendar',
   documents: 'documents',
@@ -123,6 +127,7 @@ export function normalizeProjectModule(raw) {
   if (lower === 'testcases' || lower === 'test-cases') return 'test-cases';
   if (lower === 'deployevidence' || lower === 'deploy-evidence') return 'deploy-evidence';
   if (lower === 'releasenotes' || lower === 'release-notes') return 'release-notes';
+  if (lower === 'closure-report' || lower === 'closurereport') return 'reports';
   if (PROJECT_MODULE_KEYS.includes(lower)) return lower;
   if (lower.startsWith('planning-')) return lower;
   return 'overview';
@@ -135,16 +140,16 @@ export function normalizeProjectModule(raw) {
 export function getCompanyNavItems(opts = {}) {
   void opts?.level;
   return [
-    { key: 'home', labelKey: 'nav.companyHome', path: '/app/company/home', group: null },
-    { key: 'chat', labelKey: 'nav.messages', path: '/app/company/chat', group: null },
-    { key: 'documents', labelKey: 'nav.documents', path: '/app/company/documents', group: null },
+    { key: 'home', labelKey: 'nav.companyHome', path: '/company/home', group: null },
+    { key: 'chat', labelKey: 'nav.messages', path: '/company/chat', group: null },
+    { key: 'documents', labelKey: 'nav.documents', path: '/company/documents', group: null },
   ];
 }
 
 export function getProjectsPreSelectNavItems() {
   return [
-    { key: 'picker', labelKey: 'nav.projectsPick', path: '/app/projects', group: null },
-    { key: 'new', labelKey: 'nav.projectsNew', path: '/app/projects/new', group: null },
+    { key: 'picker', labelKey: 'nav.projectsPick', path: '/projects', group: null },
+    { key: 'new', labelKey: 'nav.projectsNew', path: '/projects/new', group: null },
   ];
 }
 
@@ -152,13 +157,14 @@ export function getProjectsPreSelectNavItems() {
  * Full post-select catalog (all phases). Filter with deliveryPhase + capabilities.
  * Phase 1 uses nested RA + Planning groups.
  * @param {string} projectId
- * @param {{ deliveryPhase?: string, capabilities?: object|null, skipPhaseFilter?: boolean }} [opts]
+ * @param {{ deliveryPhase?: string, capabilities?: object|null, skipPhaseFilter?: boolean, projectStatus?: string }} [opts]
  */
 export function getProjectsPostSelectNavItems(projectId, opts = {}) {
   const pid = String(projectId || '').trim();
-  const base = pid ? `/app/projects/${encodeURIComponent(pid)}` : '/app/projects';
+  const base = pid ? `/projects/${encodeURIComponent(pid)}` : '/projects';
   const deliveryPhase = opts.deliveryPhase;
   const capabilities = opts.capabilities;
+  const projectStatus = opts.projectStatus;
 
   const item = (key, labelKey, module, group, pathSeg) => ({
     key,
@@ -171,6 +177,12 @@ export function getProjectsPostSelectNavItems(projectId, opts = {}) {
 
   const applyCapabilityFilter = (items) =>
     filterNavItemsByCapabilities(items, capabilities);
+
+  const reportsNavItem = () =>
+    item('reports', 'workspace.projectHubTabClosureReport', 'reports', PROJECT_MENU_GROUPS.OPS);
+
+  const appendReportsIfClosed = (items) =>
+    isClosedProjectStatus(projectStatus) ? [...items, reportsNavItem()] : items;
 
   const aiHitlIncomplete = Boolean(opts.aiHitlIncomplete);
   if (isPhase1DeliveryPhase(deliveryPhase) || aiHitlIncomplete) {
@@ -228,7 +240,7 @@ export function getProjectsPostSelectNavItems(projectId, opts = {}) {
         )
       );
     }
-    return applyCapabilityFilter(phase1Items);
+    return applyCapabilityFilter(appendReportsIfClosed(phase1Items));
   }
 
   const all = [
@@ -320,9 +332,13 @@ export function getProjectsPostSelectNavItems(projectId, opts = {}) {
   ];
 
   if (opts.deliveryPhase === undefined && opts.skipPhaseFilter) {
-    return applyCapabilityFilter(all);
+    return applyCapabilityFilter(appendReportsIfClosed(all));
   }
-  return applyCapabilityFilter(filterNavItemsByDeliveryPhase(all, opts.deliveryPhase));
+  return applyCapabilityFilter(
+    filterNavItemsByDeliveryPhase(appendReportsIfClosed(all), deliveryPhase, {
+      projectStatus,
+    })
+  );
 }
 
 export function getProjectMenuGroupLabelKey(group) {

@@ -1,6 +1,9 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { fetchProjectHubProject } from '../../hub/useProjectHubQueries';
+import {
+  fetchProjectHubProject,
+  STALE_PROJECT_HUB_MS,
+} from '../../hub/useProjectHubQueries';
 import { queryKeys } from '../../../../lib/queryKeys';
 
 /**
@@ -12,7 +15,8 @@ export default function useProjectCapabilities(projectId) {
     queryKey: queryKeys.projectHub.project(pid),
     queryFn: () => fetchProjectHubProject(pid),
     enabled: Boolean(pid),
-    staleTime: 30_000,
+    staleTime: STALE_PROJECT_HUB_MS,
+    refetchOnMount: false,
   });
 
   const caps = useMemo(() => {

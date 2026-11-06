@@ -2,7 +2,7 @@
 
 Nền tảng **cộng tác nội bộ** (chat, voice/meeting, task, tài liệu, thông báo) theo mô hình **microservices** — **API Gateway** là điểm vào REST duy nhất; **React (Vite)** gọi `/api`; realtime qua **Socket.IO**; họp thoại qua **mediasoup / WebRTC**.
 
-**Dev chuẩn (LAN):** [`https://atrium.dev`](https://atrium.dev) — Nginx TLS, không mở thẳng `localhost:3000` / `IP:port` trên máy client. Chi tiết: [`docs/lan-https-atrium.dev.md`](docs/lan-https-atrium.dev.md).
+**Dev chuẩn (LAN):** [`https://atrium.dev`](https://atrium.dev) — Nginx TLS, không mở thẳng `localhost:3000` hay host:port thô trên máy client. Chi tiết: [`docs/lan-https-atrium.dev.md`](docs/lan-https-atrium.dev.md).
 
 Đặc tả / luồng nghiệp vụ: [`docs/spec-pack/`](docs/spec-pack/), [`docs/luong nghiep vu/00-overview.md`](docs/luong%20nghiep%20vu/00-overview.md) (theo nhóm suite).
 

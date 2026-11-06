@@ -35,6 +35,9 @@ const INTENT_DOC_TYPES = Object.freeze({
     'skill_def',
   ]),
   history_snippet: Object.freeze(['employee_history']),
+  role_experience: Object.freeze(['employee_history']),
+  technology_experience: Object.freeze(['employee_history', 'skill_def', 'srs_technology']),
+  domain_experience: Object.freeze(['employee_history']),
   general: Object.freeze([]),
 });
 
@@ -75,6 +78,7 @@ function retrieveKeyword({ query = '', corpus = [], intent = 'general', scope = 
   const queryTokens = tokenize(query);
   const preferred = new Set(preferredDocTypes(intent));
 
+  const { historyMetadataBoost } = require('./employeeHistoryIntent');
   const scored = list.map((doc, i) => {
     const text = docText(doc);
     const sourceId = docSourceId(doc, i);
@@ -83,6 +87,7 @@ function retrieveKeyword({ query = '', corpus = [], intent = 'general', scope = 
     if (preferred.size && preferred.has(docType) && score > 0) {
       score += INTENT_BOOST;
     }
+    score += historyMetadataBoost(doc, intent, query);
     return {
       ...doc,
       sourceId,
@@ -90,6 +95,7 @@ function retrieveKeyword({ query = '', corpus = [], intent = 'general', scope = 
       text,
       snippet: text.slice(0, SNIPPET_MAX),
       score,
+      relevanceScore: score,
       _corpusIndex: i,
     };
   });

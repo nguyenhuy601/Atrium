@@ -1,9 +1,8 @@
-import { Building2, ChevronRight, Plus, Users } from 'lucide-react';
+import { Building2, ChevronRight, Plus } from 'lucide-react';
 import { useAppStrings } from '../../locales/appStrings';
 import {
   FIGMA_DASH_ACTION_BTN,
   FIGMA_DASH_ACTION_BTN_DASHED,
-  FIGMA_DASH_ACTION_BTN_PRIMARY,
   FIGMA_DASH_LINK_BTN,
   FIGMA_DASH_PANEL,
   FIGMA_DASH_PANEL_HEADER,
@@ -14,13 +13,10 @@ import {
 
 export default function DashboardWorkspacesPanel({
   workspaces,
-  addFriendLabel,
   showCreateWorkspace = true,
-  showAddFriend = true,
   onViewAll,
   onWorkspaceClick,
   onCreateWorkspace,
-  onAddFriend,
 }) {
   const { t } = useAppStrings();
 
@@ -84,16 +80,6 @@ export default function DashboardWorkspacesPanel({
         >
           <Plus size={13} aria-hidden />
           {t('dashboard.createWorkspaceBtn')}
-        </button>
-      ) : null}
-      {showAddFriend ? (
-        <button
-          type="button"
-          onClick={onAddFriend}
-          className={`${FIGMA_DASH_ACTION_BTN} ${FIGMA_DASH_ACTION_BTN_PRIMARY}`}
-        >
-          <Users size={13} />
-          {addFriendLabel}
         </button>
       ) : null}
     </div>

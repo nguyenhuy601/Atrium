@@ -661,6 +661,7 @@ function toDependencyEngineResult(
     llmCalls = 0,
     providerAttempts = 0,
     analyzedTaskIds = null,
+    analyzedTaskCount = null,
     inputHash = null,
     wbsVersion = null,
     promptVersion = null,
@@ -672,6 +673,10 @@ function toDependencyEngineResult(
   const analyzed = Array.isArray(analyzedTaskIds)
     ? analyzedTaskIds.map(String).filter(Boolean)
     : [];
+  const analyzedCount =
+    analyzedTaskCount != null && Number.isFinite(Number(analyzedTaskCount))
+      ? Math.max(analyzed.length, Math.round(Number(analyzedTaskCount)))
+      : analyzed.length;
   const analysisStatus = accepted.analysisStatus || ANALYSIS_STATUS.INCOMPLETE;
   const scheduleReady = Boolean(accepted.scheduleReady);
   const analysisComplete = Boolean(accepted.analysisComplete);
@@ -696,6 +701,7 @@ function toDependencyEngineResult(
       unresolvedCount: (accepted.openQuestions || []).length,
       conclusion: analysisStatus,
       analyzedTaskIds: analyzed,
+      analyzedTaskCount: analyzedCount,
     },
     inputHash,
     wbsVersion,
@@ -709,6 +715,7 @@ function toDependencyEngineResult(
       rejectedInvent: accepted.rejectedInvent || [],
       coverageVerified: analysisStatus === ANALYSIS_STATUS.COMPLETE_NO_EDGES,
       analyzedTaskIds: analyzed,
+      analyzedTaskCount: analyzedCount,
       analysisStatus,
       executionTerminal,
       analysisComplete,

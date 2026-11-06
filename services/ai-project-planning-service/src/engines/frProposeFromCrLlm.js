@@ -184,6 +184,7 @@ function buildFrFromCrPrompt({ crRows = [], localeInstruction = '' } = {}) {
     'split independent behaviors (do NOT copy 1 Requirement ID = 1 FR when one row states several behaviors); never copy a Requirement ID as FR id; no NFR-only items;',
     'name = short title; description = fuller behavior (do not set description identical to name); each node must be Story-granular (verifiable AC).',
     'Epic: use stable epicId when possible (e.g. EPIC-IOT), not only EPIC-1 sequential; parentEpicId must reference epics[].id or null for intentional root Story.',
+    'Emit multiple epics when there are multiple independent business goals — never force a single pack-wide Epic.',
     'Optional features[] when several Story-FRs share one capability; parentFeatureId references features[].id.',
     'Every epic must cover ≥1 FR via parentEpicId. Do not invent Story text — Story title/AC are copied from accepted FR (RULE-E1).',
     `CR_INTAKE=${JSON.stringify(payload)}`,

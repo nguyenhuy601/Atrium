@@ -66,7 +66,7 @@ import {
 
 function firstVisibleNavPath(domain) {
   const item = flattenAdminNavItems(domain || {}).find((entry) => entry?.nav !== 'hidden' && entry?.path);
-  return item?.path || domain?.path || '/app/admin';
+  return item?.path || domain?.path || '/admin';
 }
 
 const COLLAPSE_KEY = 'vh_admin_sidebar_collapsed';
@@ -447,7 +447,7 @@ export default function AdminNavigationSidebar() {
   const { markNavigating } = useAdminNavLoading();
   const { isSystemAdmin, orgId, adminSuiteNav } = useCompanyAdminAccess();
   const adminSuiteLabel = t(adminSuiteNav.labelKey);
-  const adminSuitePath = adminSuiteNav.path || '/app/admin';
+  const adminSuitePath = adminSuiteNav.path || '/admin';
   const { hasGrant, scopeOf } = useEffectiveMasterGrants(orgId);
 
   const [collapsed, setCollapsed] = useState(() => {
@@ -700,7 +700,7 @@ export default function AdminNavigationSidebar() {
 
           {!collapsed && !isSystemAdmin ? (
             <Link
-              to="/app/collaborate/workspaces"
+              to="/collaborate/workspaces"
               onClick={() => markNavigating()}
               className="mt-2 block rounded-lg border border-dashed border-white/10 px-2.5 py-2 text-[0.75rem] text-white/45 transition hover:border-white/20 hover:text-white/70"
             >

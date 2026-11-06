@@ -69,7 +69,7 @@ export function isWideContentTab(tab) {
   return id === 'documents' || id === 'calendar' || id === 'meetings';
 }
 
-/** Rail kênh hội thoại company (`/app/company/chat`) — tách prefs để RHS mặc định đóng. */
+/** Rail kênh hội thoại company (`/company/chat`) — tách prefs để RHS mặc định đóng. */
 const CHAT_RAIL_STORAGE_KEY = 'vh.orgWorkspace.chatRail.v1';
 
 export const CHAT_RAIL_BASE_W = 252;

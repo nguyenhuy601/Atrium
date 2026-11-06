@@ -28,6 +28,7 @@ import { useCalendarFeed } from '../../hooks/useCalendarFeed';
 import { useTaskDueAlerts } from '../../hooks/useTaskDueAlerts';
 import friendService from '../../services/friendService';
 import { organizationAPI } from '../../services/api/organizationAPI';
+import { projectAPI } from '../../services/api/projectAPI';
 import UserAvatar from '../../components/Shared/UserAvatar';
 import { getMeetingJoinState, toDateKey } from '../../utils/calendarUtils';
 import { useAppStrings } from '../../locales/appStrings';
@@ -108,6 +109,7 @@ function parseTimeInputToDisplay(hhmm, loc) {
 function CalendarPage({
   spaceOrganizationId = '',
   spaceProjectId = '',
+  spaceDepartmentId = '',
 } = {}) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -120,9 +122,9 @@ function CalendarPage({
     if (fromQuery) return fromQuery;
     const path = String(location.pathname || '');
     const onOrgSuite =
-      path.startsWith('/app/collaborate') ||
-      path.startsWith('/app/company') ||
-      path.startsWith('/app/projects');
+      path.startsWith('/collaborate') ||
+      path.startsWith('/company') ||
+      path.startsWith('/projects');
     if (!onOrgSuite) return '';
     return String(
       activeWorkspace?._id ||
@@ -135,6 +137,9 @@ function CalendarPage({
     ).trim();
   }, [searchParams, location.pathname, activeWorkspace, company, spaceOrganizationId]);
   const projectIdFilter = String(spaceProjectId || searchParams.get('projectId') || '').trim();
+  const departmentIdFilter = String(
+    spaceDepartmentId || searchParams.get('departmentId') || ''
+  ).trim();
   const { t } = useAppStrings();
   const formIdPrefix = useId();
   const fieldId = (name) => `${formIdPrefix}-${name}`;
@@ -171,7 +176,7 @@ function CalendarPage({
     refetch,
     loading: feedLoading,
     error: feedError,
-  } = useCalendarFeed(selectedDate, organizationId, projectIdFilter);
+  } = useCalendarFeed(selectedDate, organizationId, projectIdFilter, departmentIdFilter);
 
   useTaskDueAlerts(tasksForAlerts, {
     enabled: true,
@@ -349,9 +354,16 @@ function CalendarPage({
 
   const loadAttendeeSuggestions = useCallback(async () => {
     try {
+      const membersPromise = projectIdFilter
+        ? projectAPI
+            .listMembers(projectIdFilter, { skipPermissionDeniedToast: true })
+            .catch(() => null)
+        : organizationId
+          ? organizationAPI.getMembers(organizationId).catch(() => null)
+          : Promise.resolve(null);
       const [friendsRes, membersRes] = await Promise.all([
         friendService.getFriends().catch(() => null),
-        organizationId ? organizationAPI.getMembers(organizationId).catch(() => null) : Promise.resolve(null),
+        membersPromise,
       ]);
       const rawFriends = friendsRes?.data?.friends ?? friendsRes?.data?.data?.friends ?? friendsRes?.data ?? [];
       const friendRows = (Array.isArray(rawFriends) ? rawFriends : [])
@@ -364,9 +376,14 @@ function CalendarPage({
         }))
         .filter((row) => row.id && row.label);
 
-      const rawMembers = membersRes?.data?.data ?? membersRes?.data ?? [];
-      const memberRows = (Array.isArray(rawMembers) ? rawMembers : [])
-        .map((item) => item?.user || item)
+      const rawPayload = membersRes?.data?.data ?? membersRes?.data ?? membersRes;
+      const rawMembers = Array.isArray(rawPayload?.members)
+        ? rawPayload.members
+        : Array.isArray(rawPayload)
+          ? rawPayload
+          : [];
+      const memberRows = rawMembers
+        .map((item) => item?.user || item?.profile || item)
         .filter(Boolean)
         .map((u) => ({
           id: String(u?._id || u?.id || u?.userId || ''),
@@ -383,7 +400,7 @@ function CalendarPage({
     } catch {
       setAttendeeSuggestions([]);
     }
-  }, [organizationId]);
+  }, [organizationId, projectIdFilter]);
 
   useEffect(() => {
     if (showCreateEventModal) loadAttendeeSuggestions();

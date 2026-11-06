@@ -39,7 +39,7 @@ function resolveOrgRolesForUser(userId, departments, teams) {
       roleKey: ORGANIZATION_ROLE_KEYS.DEPARTMENT_MANAGER,
       scopeType: 'department',
       scopeName: unitName(dept),
-      editPath: `/app/admin/org-structure/departments/head?unitId=${encodeURIComponent(unitId(dept))}&userId=${encodeURIComponent(uid)}`,
+      editPath: `/admin/org-structure/departments/head?unitId=${encodeURIComponent(unitId(dept))}&userId=${encodeURIComponent(uid)}`,
     });
   }
   for (const team of teams) {
@@ -49,7 +49,7 @@ function resolveOrgRolesForUser(userId, departments, teams) {
       roleKey: ORGANIZATION_ROLE_KEYS.TEAM_MANAGER,
       scopeType: 'team',
       scopeName: unitName(team),
-      editPath: `/app/admin/org-structure/teams/leader?unitId=${encodeURIComponent(unitId(team))}&userId=${encodeURIComponent(uid)}`,
+      editPath: `/admin/org-structure/teams/leader?unitId=${encodeURIComponent(unitId(team))}&userId=${encodeURIComponent(uid)}`,
     });
   }
   return roles;
@@ -106,7 +106,7 @@ export default function RbacOrgRoleLookupPanel({ orgId }) {
         roleLabel: a.roleLabel,
         scopeType: 'org',
         scopeName: t('adminRbac.lookupScopeCompany'),
-        editPath: `/app/admin/rbac/org-roles/assign?userId=${encodeURIComponent(
+        editPath: `/admin/rbac/org-roles/assign?userId=${encodeURIComponent(
           String(a.userId || '').trim()
         )}&roleKey=${encodeURIComponent(String(a.roleKey || '').trim())}`,
       }));

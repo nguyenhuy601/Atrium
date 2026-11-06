@@ -24,6 +24,7 @@ export default function NewColleagueDmModal({
   onClose,
   orgId,
   currentUserId,
+  departmentId = '',
   onSelectColleague,
 }) {
   const { t } = useAppStrings();
@@ -32,6 +33,7 @@ export default function NewColleagueDmModal({
   const [emptyReason, setEmptyReason] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const deptId = String(departmentId || '').trim();
 
   const load = useCallback(async () => {
     const oid = String(orgId || '').trim();
@@ -46,6 +48,7 @@ export default function NewColleagueDmModal({
     try {
       const result = await loadCompanyColleagues(oid, currentUserId, {
         fallback: t('friendChat.friendDefault'),
+        ...(deptId ? { departmentId: deptId } : {}),
       });
       setRows(result.colleagues || []);
       setEmptyReason(result.emptyReason);
@@ -56,7 +59,7 @@ export default function NewColleagueDmModal({
     } finally {
       setLoading(false);
     }
-  }, [orgId, currentUserId, t]);
+  }, [orgId, currentUserId, deptId, t]);
 
   useEffect(() => {
     if (!isOpen) return undefined;

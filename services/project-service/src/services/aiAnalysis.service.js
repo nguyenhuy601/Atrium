@@ -714,10 +714,11 @@ async function notifyGate2LineRejected({
     const sectionKey = String(item?.data?.sectionKey || '').trim();
     const qs = new URLSearchParams();
     if (packId) qs.set('packId', String(packId));
-    qs.set('tab', 'review');
     if (logicalId) qs.set('logicalId', logicalId);
     if (sectionKey) qs.set('section', sectionKey);
-    const pathSuffix = `${AI_HITL_ACTION_PATH}?${qs.toString()}`;
+    // Path-tab Review: /ai-hitl/review (no ?tab=)
+    const hitlBase = String(AI_HITL_ACTION_PATH || 'ai-hitl').replace(/\/review\/?$/, '') + '/review';
+    const pathSuffix = qs.toString() ? `${hitlBase}?${qs.toString()}` : hitlBase;
     const actionUrl = projectId
       ? projectHubActionUrl({
           projectId,
@@ -803,7 +804,9 @@ async function notifyProjectRole({
     const actionUrl = projectHubActionUrl({
       projectId,
       organizationId,
-      pathSuffix: `ai-hitl?packId=${encodeURIComponent(String(packId || ''))}&tab=review`,
+      pathSuffix: packId
+        ? `ai-hitl/review?packId=${encodeURIComponent(String(packId || ''))}`
+        : 'ai-hitl/review',
     });
     await notifySystemKind({
       userIds,

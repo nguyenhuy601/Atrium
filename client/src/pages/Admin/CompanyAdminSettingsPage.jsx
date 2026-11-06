@@ -30,11 +30,11 @@ export default function CompanyAdminSettingsPage() {
     if (decision.action === 'redirect-first-allowed' && decision.path) {
       return <Navigate to={decision.path} replace />;
     }
-    return <Navigate to="/app/company/home" replace state={{ routeDenied: 'admin' }} />;
+    return <Navigate to="/company/home" replace state={{ routeDenied: 'admin' }} />;
   }
 
   if (!settingsTab || !organization) {
-    return <Navigate to="/app/admin" replace />;
+    return <Navigate to="/admin" replace />;
   }
 
   return (

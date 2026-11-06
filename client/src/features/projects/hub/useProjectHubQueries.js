@@ -28,8 +28,10 @@ export {
   unwrapProjectPayload,
 } from './projectHubQueryHelpers';
 
-const STALE_PROJECT_MS = 30_000;
-const STALE_BOARDS_MS = 30_000;
+/** Hub project + capabilities — ít đổi trong phiên; invalidate khi role/settings đổi. */
+export const STALE_PROJECT_HUB_MS = 5 * 60_000;
+const STALE_PROJECT_MS = STALE_PROJECT_HUB_MS;
+const STALE_BOARDS_MS = 60_000;
 const STALE_ROLE_CATALOG_MS = 120_000;
 
 function listsDetailFromFull(full) {

@@ -290,7 +290,8 @@ export default function HowMonitorResultsPanel({
   const projectId = resolvePackProjectId(pack);
   const orgId = organizationId || resolvePackOrgId(pack);
   const resolvedPackId = packId || resolvePackRefId(pack?._id || pack?.id);
-  const nameByUserId = useProjectMemberNames(projectId, orgId);
+  // Project roster only — avoid parallel org /members (same Network label as project members).
+  const nameByUserId = useProjectMemberNames(projectId);
   const bundle = useMemo(
     () => buildGate2ProposalItems({ pack, nameByUserId, t }),
     [pack, nameByUserId, t]

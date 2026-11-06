@@ -1,4 +1,4 @@
-import { Check, Mic, Trash2, X } from 'lucide-react';
+import { Mic, Trash2 } from 'lucide-react';
 import {
   FIGMA_NOTIF_ITEM,
   FIGMA_NOTIF_ITEM_ICON,
@@ -18,21 +18,18 @@ export default function NotificationFeedItem({
   acting = false,
   onOpen,
   onDelete,
-  onAcceptFriend,
-  onRejectFriend,
   onJoinVoice,
   labels = {},
 }) {
   const { t } = useAppStrings();
   const meta = resolveNotificationVisual(notif);
   const Icon = meta.Icon;
-  const showFriendActions = !bulkMode && actionKind === 'friend_request';
   const showVoiceAction =
     !bulkMode &&
     (actionKind === 'voice_join' ||
       actionKind === 'voice_invite' ||
       isVoiceRoomInviteNotification(notif));
-  const hasInlineActions = showFriendActions || showVoiceAction;
+  const hasInlineActions = showVoiceAction;
   const unreadTint = !notif.read && !selected ? meta.unreadTint : '';
 
   return (
@@ -112,28 +109,6 @@ export default function NotificationFeedItem({
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
           >
-            {showFriendActions ? (
-              <>
-                <button
-                  type="button"
-                  disabled={acting}
-                  onClick={() => onAcceptFriend?.(notif)}
-                  className="inline-flex h-8 min-h-8 items-center gap-1 rounded-md border-none bg-success px-2.5 text-xs font-semibold text-white disabled:opacity-60"
-                >
-                  <Check className="h-3 w-3" aria-hidden />
-                  {labels.accept || t('friendChat.invitesAccept')}
-                </button>
-                <button
-                  type="button"
-                  disabled={acting}
-                  onClick={() => onRejectFriend?.(notif)}
-                  className="inline-flex h-8 min-h-8 items-center gap-1 rounded-md border-none bg-muted px-2.5 text-xs text-muted-foreground hover:text-destructive disabled:opacity-60"
-                >
-                  <X className="h-3 w-3" aria-hidden />
-                  {labels.reject || t('friendChat.invitesReject')}
-                </button>
-              </>
-            ) : null}
             {showVoiceAction ? (
               <button
                 type="button"

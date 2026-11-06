@@ -31,7 +31,7 @@ export default function AdminModulePlaceholderPage() {
           </span>
         </div>
         <div className="mt-6">
-          <Link to="/app/admin" className={adminSecondaryBtnClass('focus-visible:ring-offset-2')}>
+          <Link to="/admin" className={adminSecondaryBtnClass('focus-visible:ring-offset-2')}>
             <ArrowLeft size={16} aria-hidden />
             {t('adminDomains.backToHub')}
           </Link>

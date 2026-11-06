@@ -18,7 +18,7 @@ import {
 } from '../../utils/adminVoiceUtils';
 import { adminMeetingHubLink } from '../../utils/adminHubLinks';
 
-const MEETING_OPS_HUB = '/app/admin/voice/meeting-ops';
+const MEETING_OPS_HUB = '/admin/voice/meeting-ops';
 
 export default function MeetingHistoryPanel({ orgId }) {
   const { t, locale } = useAppStrings();

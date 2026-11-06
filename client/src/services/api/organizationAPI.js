@@ -25,19 +25,30 @@ export const organizationAPI = {
     return response;
   },
 
-  getOrgShell: async (orgId) => {
-    const response = await apiClient.get(`/organizations/${orgId}/shell`, {
+  getOrgMyProfile: async (orgId, { include = '', ifNoneMatch = '' } = {}) => {
+    const params = {};
+    if (include) params.include = include;
+    const headers = {};
+    if (ifNoneMatch) headers['If-None-Match'] = ifNoneMatch;
+    const response = await apiClient.get(`/organizations/${orgId}/my-profile`, {
       skipPermissionDeniedToast: true,
       skipNotFoundToast: true,
       skipGlobalErrorHandling: true,
+      returnFullResponse: true,
+      validateStatus: (status) => (status >= 200 && status < 300) || status === 304,
+      headers: Object.keys(headers).length ? headers : undefined,
+      params: Object.keys(params).length ? params : undefined,
     });
     return response;
   },
 
-  getStructure: async (orgId, { includeInactive = false } = {}) => {
+  getStructure: async (orgId, { includeInactive = false, view = '' } = {}) => {
+    const params = {};
+    if (includeInactive) params.includeInactive = '1';
+    if (view) params.view = view;
     const response = await apiClient.get(`/organizations/${orgId}/structure`, {
       skipPermissionDeniedToast: true,
-      params: includeInactive ? { includeInactive: '1' } : undefined,
+      params: Object.keys(params).length ? params : undefined,
     });
     return response;
   },
@@ -307,16 +318,24 @@ export const organizationAPI = {
     return response;
   },
 
-  getDocumentsOverview: async (orgId) => {
+  getDocumentsOverview: async (orgId, params = {}) => {
     if (!getResolvedBearerToken()) {
       const err = new Error('Chưa có phiên đăng nhập (JWT). Vui lòng đăng nhập lại.');
       err.status = 401;
       err.code = 'CLIENT_NO_JWT';
       throw err;
     }
+    const departmentId = String(params.departmentId || '').trim();
+    const teamId = String(params.teamId || '').trim();
+    const view = String(params.view || '').trim().toLowerCase();
+    const query = {};
+    if (departmentId) query.departmentId = departmentId;
+    if (teamId) query.teamId = teamId;
+    if (view === 'summary' || view === 'full') query.view = view;
     const response = await apiClient.get(`/organizations/${orgId}/documents-overview`, {
       skipPermissionDeniedToast: true,
       skipGlobalErrorHandling: true,
+      params: Object.keys(query).length ? query : undefined,
     });
     return response;
   },

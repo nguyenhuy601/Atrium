@@ -38,7 +38,7 @@ export default function FirstLoginOnboardingGate() {
   const { user, isAuthenticated } = useAuth();
   const [dismissed, setDismissed] = useState(false);
 
-  const inAppShell = pathname.startsWith('/app');
+  const inAppShell = pathname.startsWith('/communicate/overview');
   const isSystemAdmin = isSystemAdminAccount(user);
   const mustChangePassword = Boolean(user?.mustChangePassword) && !isSystemAdmin;
   const needsProfile = useMemo(

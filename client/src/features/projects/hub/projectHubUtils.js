@@ -16,6 +16,7 @@ export const PROJECT_HUB_TABS = [
   { id: 'members', labelKey: 'workspace.projectHubTabMembers' },
   { id: 'files', labelKey: 'workspace.projectHubTabFiles' },
   { id: 'activity', labelKey: 'workspace.projectHubTabReport' },
+  { id: 'reports', labelKey: 'workspace.projectHubTabClosureReport' },
   { id: 'settings', labelKey: 'workspace.projectHubTabSettings' },
 ];
 

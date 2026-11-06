@@ -88,7 +88,7 @@ export default function OrgRoleCreatePanel({ orgId }) {
         afterRoleId: insertPlace.afterRoleId,
       });
       toast.success(t('common.saveSuccess', { defaultValue: 'Saved' }));
-      navigate('/app/admin/rbac/org-roles');
+      navigate('/admin/rbac/org-roles');
     } catch (error) {
       toast.error(resolveApiErrorMessage(error, { t, fallback: t('common.saveFail') }));
     } finally {
@@ -175,7 +175,7 @@ export default function OrgRoleCreatePanel({ orgId }) {
               type="button"
               disabled={busy}
               className={adminSecondaryBtnClass()}
-              onClick={() => navigate('/app/admin/rbac/org-roles')}
+              onClick={() => navigate('/admin/rbac/org-roles')}
             >
               {t('common.cancel')}
             </button>
@@ -195,7 +195,7 @@ export default function OrgRoleCreatePanel({ orgId }) {
               type="button"
               disabled={busy}
               className={adminSecondaryBtnClass('mt-3')}
-              onClick={() => navigate('/app/admin/rbac/org-roles/assign')}
+              onClick={() => navigate('/admin/rbac/org-roles/assign')}
             >
               {t('adminDomains.rbac.orgRoleAssign')}
             </button>

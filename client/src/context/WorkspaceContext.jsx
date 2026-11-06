@@ -40,9 +40,9 @@ const WorkspaceContext = createContext({
   company: null,
   applyBootstrapCompany: () => {},
   setLastWorkspaceSlug: () => {},
-  getLastWorkspacePath: () => '/app/collaborate/workspaces',
-  getLastCommunicatePath: () => '/app/communicate/channels',
-  getLastCollaboratePath: () => '/app/collaborate/workspaces',
+  getLastWorkspacePath: () => '/collaborate/workspaces',
+  getLastCommunicatePath: () => '/communicate/channels',
+  getLastCollaboratePath: () => '/collaborate/workspaces',
 });
 
 export function WorkspaceProvider({ children }) {
@@ -128,7 +128,7 @@ export function WorkspaceProvider({ children }) {
   const getLastCollaboratePath = useCallback(() => {
     const orgId =
       String(activeWorkspace?._id || activeWorkspace?.id || lastOrganizationIdState || '').trim();
-    return orgId ? buildCollaborateTasksPath(orgId) : '/app/collaborate/workspaces';
+    return orgId ? buildCollaborateTasksPath(orgId) : '/collaborate/workspaces';
   }, [activeWorkspace, lastOrganizationIdState]);
 
   const getLastWorkspacePath = useCallback(() => getLastCollaboratePath(), [getLastCollaboratePath]);

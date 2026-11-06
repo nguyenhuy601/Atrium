@@ -210,9 +210,13 @@ function computeEligibleHowTools(state, opts = {}) {
 }
 
 function isHowReadyForFinalize(state, opts = {}) {
-  const required = Array.isArray(opts.required)
-    ? opts.required
-    : ['WbsTool', 'DependencyTool', 'ScheduleTool'];
+  if (!opts.required) {
+    const { readyToFinalize } = require('../agents/how/howSupervisor');
+    if (!readyToFinalize(state)) return false;
+    if (forceRerunPendingTools(state).length) return false;
+    return true;
+  }
+  const required = opts.required;
   const done = howSucceededTools(state);
   if (!required.every((name) => done.has(name))) return false;
   // LangGraph termination: selective re-run goal unmet while forceRerun tools lack validated success.

@@ -14,6 +14,16 @@ const DEPT_VI_TO_EN = {
 const CHANNEL_SLUG_VI_TO_EN = {
   'chat-chung': 'general',
   'voice-chung': 'voice',
+  'thong-bao': 'announcements',
+};
+
+/** Seed/default EN slug → nhãn slug khi UI tiếng Việt */
+const CHANNEL_SLUG_EN_TO_VI = {
+  general: 'chung',
+  announcements: 'thong-bao',
+  voice: 'thoai',
+  'chat-chung': 'chat-chung',
+  'voice-chung': 'voice-chung',
 };
 
 export function displayDepartmentName(name, locale) {
@@ -31,8 +41,8 @@ export function channelNameToDisplaySlug(name, locale) {
     .trim()
     .replace(/\s+/g, '-')
     .toLowerCase();
-  if (locale !== 'en') return base;
-  return CHANNEL_SLUG_VI_TO_EN[base] ?? base;
+  if (locale === 'en') return CHANNEL_SLUG_VI_TO_EN[base] ?? base;
+  return CHANNEL_SLUG_EN_TO_VI[base] ?? base;
 }
 
 /** Mô tả seed EN kiểu "Departmental text chat" — dùng i18n thay vì raw. */

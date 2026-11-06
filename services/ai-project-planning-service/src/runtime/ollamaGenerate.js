@@ -12,6 +12,7 @@ const {
   chatModel: sharedChatModel,
   resolveChatMaxOutputTokens,
 } = require('@enterprise/shared/llm/openaiCompatibleClient');
+const { acquireLlmSlot } = require('./llmInflightSemaphore');
 
 const DEFAULT_MODEL = 'qwen2.5:3b-instruct';
 const DEFAULT_TIMEOUT_MS = 180000;
@@ -231,9 +232,12 @@ async function generateJson(opts = {}) {
     };
   }
 
-  if (isOpenAiCompatibleProvider(env)) {
-    return generateJsonViaOpenAi(opts, env, model, opts.axiosImpl || axios);
-  }
+  const provider = isOpenAiCompatibleProvider(env) ? 'dashscope' : 'ollama';
+  const release = await acquireLlmSlot({ provider, env });
+  try {
+    if (isOpenAiCompatibleProvider(env)) {
+      return await generateJsonViaOpenAi(opts, env, model, opts.axiosImpl || axios);
+    }
 
   const baseUrl = ollamaBaseUrl(env);
   if (!baseUrl) {
@@ -306,6 +310,9 @@ async function generateJson(opts = {}) {
       error: code,
       usage: { promptEvalCount: 0, evalCount: 0 },
     };
+  }
+  } finally {
+    release();
   }
 }
 

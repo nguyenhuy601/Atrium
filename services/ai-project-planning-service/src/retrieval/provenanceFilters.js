@@ -8,6 +8,7 @@ const ORIGIN = Object.freeze({
   USER_EDIT: 'user_edit',
   AI_SYNTHESIS: 'ai_synthesis',
   SYSTEM: 'system',
+  CLOSED_BOARD: 'closed_board',
   UNKNOWN: 'unknown',
 });
 
@@ -34,7 +35,20 @@ function originOf(doc) {
     return ORIGIN.AI_SYNTHESIS;
   }
   if (raw === 'system') return ORIGIN.SYSTEM;
+  if (raw === 'closed_board' || raw === 'closedboard') return ORIGIN.CLOSED_BOARD;
   return ORIGIN.UNKNOWN;
+}
+
+/**
+ * Planning evidence requires approved status (RULE-RAG-HOW-02).
+ * Draft/suggested history may retrieve but is not authority alone.
+ */
+function isEligiblePlanningEvidence(doc) {
+  return approvalOf(doc) === APPROVAL.APPROVED;
+}
+
+function filterDocsForPlanningEvidence(docs) {
+  return filterDocsForGenerate(docs).filter(isEligiblePlanningEvidence);
 }
 
 function approvalOf(doc) {
@@ -105,6 +119,8 @@ module.exports = {
   approvalOf,
   isExcludedFromGenerate,
   isAiDraft,
+  isEligiblePlanningEvidence,
   filterDocsForGenerate,
+  filterDocsForPlanningEvidence,
   withProvenanceDefaults,
 };

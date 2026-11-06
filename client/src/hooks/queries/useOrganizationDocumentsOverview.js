@@ -17,7 +17,7 @@ const unwrapOverview = (payload) => {
   return raw?.data ?? raw;
 };
 
-/** Chuẩn hoá kênh từ GET /channels (structure overview thường không nhúng channels). */
+/** Chuẩn hoá kênh từ GET /channels hoặc overview.channels. */
 function channelMetaFromLiveList(channels) {
   const list = [];
   for (const ch of channels || []) {
@@ -39,14 +39,15 @@ function channelMetaFromLiveList(channels) {
   return list;
 }
 
-/** Map payload BFF → danh sách file (dùng chung hook + loadWorkspaceDocuments). */
+/** Map payload documents-overview → danh sách file (hook + loadWorkspaceDocuments). */
 export function buildOrgFilesFromOverview(overview, t, locale, options = {}) {
   if (!overview) return [];
+  const fromOverviewChannels = channelMetaFromLiveList(overview.channels);
   const branches = Array.isArray(overview.branches) ? overview.branches : [];
   const fromStructure = flattenChannelsFromStructure(branches);
   const fromLive = channelMetaFromLiveList(options.channels);
   const channelByRoomId = new Map();
-  for (const ch of [...fromStructure, ...fromLive]) {
+  for (const ch of [...fromOverviewChannels, ...fromStructure, ...fromLive]) {
     if (!channelByRoomId.has(ch._id)) channelByRoomId.set(ch._id, ch);
   }
   const messages = Array.isArray(overview.attachmentMessages) ? overview.attachmentMessages : [];
@@ -60,26 +61,44 @@ export function buildOrgFilesFromOverview(overview, t, locale, options = {}) {
   });
 }
 
-/** Gọi BFF documents-overview — JWT do apiClient interceptor gắn. */
-export async function fetchOrganizationDocumentsOverview(orgId) {
+/** Gọi REST documents-overview — JWT do apiClient interceptor gắn. */
+export async function fetchOrganizationDocumentsOverview(orgId, scope = {}) {
   const id = orgId ? String(orgId) : '';
   if (!id) return null;
-  const payload = await organizationAPI.getDocumentsOverview(id);
+  const departmentId = String(scope.departmentId || '').trim();
+  const teamId = String(scope.teamId || '').trim();
+  const view = String(scope.view || '').trim().toLowerCase();
+  const payload = await organizationAPI.getDocumentsOverview(id, {
+    ...(departmentId ? { departmentId } : {}),
+    ...(teamId ? { teamId } : {}),
+    ...(view === 'summary' || view === 'full' ? { view } : {}),
+  });
   return unwrapOverview(payload);
 }
 
 export function useOrganizationDocumentsOverview(
   organizationId,
-  { enabled: enabledProp = true } = {}
+  { enabled: enabledProp = true, departmentId = '', teamId = '', view = 'full' } = {}
 ) {
   const { t, locale } = useAppStrings();
   const { isAuthenticated, loading: authLoading } = useAuth();
   const id = organizationId ? String(organizationId) : '';
+  const deptId = String(departmentId || '').trim();
+  const tid = String(teamId || '').trim();
+  const viewMode = String(view || 'full').trim().toLowerCase() === 'summary' ? 'summary' : 'full';
   const authReady = Boolean(getResolvedBearerToken());
 
   const query = useQuery({
-    queryKey: [...queryKeys.org.documentsOverview(id), authReady ? 'auth' : 'anon'],
-    queryFn: () => fetchOrganizationDocumentsOverview(id),
+    queryKey: [
+      ...queryKeys.org.documentsOverview(id, deptId, tid, viewMode),
+      authReady ? 'auth' : 'anon',
+    ],
+    queryFn: () =>
+      fetchOrganizationDocumentsOverview(id, {
+        departmentId: deptId,
+        teamId: tid,
+        view: viewMode,
+      }),
     enabled:
       enabledProp && !authLoading && isAuthenticated && authReady && Boolean(id),
     staleTime: STALE_TIME_ORGS_MS,
@@ -91,7 +110,17 @@ export function useOrganizationDocumentsOverview(
   });
 
   const overview = query.data;
-  const files = overview ? buildOrgFilesFromOverview(overview, t, locale) : [];
+  const isSummary = viewMode === 'summary' || overview?.view === 'summary';
+  const files =
+    overview && !isSummary ? buildOrgFilesFromOverview(overview, t, locale) : [];
+
+  const documentCount = (() => {
+    if (!overview) return null;
+    const n = Number(overview.documentCount);
+    if (Number.isFinite(n) && n >= 0) return n;
+    if (isSummary) return 0;
+    return files.length;
+  })();
 
   const orgName =
     String(overview?.orgName || overview?.organization?.name || '').trim();
@@ -99,6 +128,7 @@ export function useOrganizationDocumentsOverview(
   return {
     ...query,
     files,
+    documentCount,
     orgName,
     overview,
     reload: query.refetch,

@@ -7,8 +7,22 @@ export const queryKeys = {
   },
   org: {
     all: ['org'],
-    shell: (orgId) => ['org', String(orgId || ''), 'shell'],
-    documentsOverview: (orgId) => ['org', String(orgId || ''), 'documents-overview'],
+    myProfile: (orgId, include = '') => [
+      'org',
+      String(orgId || ''),
+      'my-profile',
+      include ? `include:${include}` : 'base',
+    ],
+    /** Prefix invalidate mọi biến thể my-profile */
+    myProfileAll: (orgId) => ['org', String(orgId || ''), 'my-profile'],
+    documentsOverview: (orgId, departmentId = '', teamId = '', view = 'full') => [
+      'org',
+      String(orgId || ''),
+      'documents-overview',
+      String(departmentId || ''),
+      String(teamId || ''),
+      String(view || 'full') === 'summary' ? 'summary' : 'full',
+    ],
     libraryDocuments: (orgId, projectId = '') => [
       'org',
       String(orgId || ''),
@@ -17,14 +31,20 @@ export const queryKeys = {
     ],
     detail: (orgId) => ['org', String(orgId || ''), 'detail'],
     levels: (orgId) => ['org', String(orgId || ''), 'levels'],
-    structure: (orgId, includeInactive = false) => [
+    structure: (orgId, includeInactive = false, view = 'full') => [
       'org',
       String(orgId || ''),
       'structure',
       includeInactive ? 'inactive' : 'active',
+      view === 'nav' ? 'nav' : 'full',
     ],
-    /** Prefix invalidate cả twin includeInactive */
+    /** Prefix invalidate cả twin includeInactive / view */
     structureAll: (orgId) => ['org', String(orgId || ''), 'structure'],
+    accessibleChannels: (orgId) => [
+      'org',
+      String(orgId || ''),
+      'accessible-channel-ids',
+    ],
     channelMessages: (roomId, organizationId = '') => [
       ...queryKeys.org.all,
       'channel-messages',
@@ -48,6 +68,12 @@ export const queryKeys = {
     ],
     /** Prefix invalidate mọi biến thể list của org */
     listAll: (orgId) => [...queryKeys.projects.all, 'list', String(orgId || '')],
+    briefs: (orgId, status = 'open') => [
+      ...queryKeys.projects.all,
+      'briefs',
+      String(orgId || ''),
+      String(status || 'open'),
+    ],
     roleSuggestPool: (orgId, roleKeys = '', { limit = 3, offset = 0, fitAvailable = true } = {}) => [
       ...queryKeys.projects.all,
       'resourcePool',
@@ -94,6 +120,8 @@ export const queryKeys = {
       String(orgId || ''),
       String(role || ''),
     ],
+    /** Recent DM/summary rows for overview heatmap + recent contacts */
+    messagesSummary: () => [...queryKeys.dashboard.all, 'messages-summary'],
   },
   dm: {
     all: ['dm'],
@@ -107,6 +135,14 @@ export const queryKeys = {
       'packs',
       String(orgId || ''),
       String(status || ''),
+    ],
+    /** AI HITL pack detail (view=hitl) — in-flight dedupe StrictMode / multi-caller. */
+    packHitl: (orgId, packId) => [
+      ...queryKeys.requirements.all,
+      'pack',
+      'hitl',
+      String(orgId || ''),
+      String(packId || ''),
     ],
   },
   rbac: {
@@ -146,6 +182,11 @@ export const queryKeys = {
       'project',
       String(projectId || ''),
       String(view || 'hub'),
+    ],
+    closureReport: (projectId) => [
+      ...queryKeys.projectHub.all,
+      'closure-report',
+      String(projectId || ''),
     ],
     /** GET /projects/:id/boards — share page redirect + fast path + hydrate */
     boards: (projectId, organizationId = '') => [
@@ -205,12 +246,13 @@ export const queryKeys = {
   },
   calendar: {
     all: ['calendar'],
-    feed: (yearMonth = '', organizationId = '', projectId = '') => [
+    feed: (yearMonth = '', organizationId = '', projectId = '', departmentId = '') => [
       ...queryKeys.calendar.all,
       'feed',
       String(yearMonth || ''),
       String(organizationId || ''),
       String(projectId || ''),
+      String(departmentId || ''),
     ],
   },
 };

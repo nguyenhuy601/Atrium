@@ -14,8 +14,8 @@ import {
   AdminLoadErrorState,
 } from '../../components/adminUsers/adminPanelStates';
 
-/** Domain index `/app/admin/org-structure` chuyển về item đầu (`levels`) → không dùng làm đích, tránh vòng lặp. */
-const ORG_STRUCTURE_FALLBACK_PATH = '/app/admin/org-structure/departments';
+/** Domain index `/admin/org-structure` chuyển về item đầu (`levels`) → không dùng làm đích, tránh vòng lặp. */
+const ORG_STRUCTURE_FALLBACK_PATH = '/admin/org-structure/departments';
 
 function resolveLevelLabel(level, t) {
   const key = String(level?.key || '').trim().toLowerCase();

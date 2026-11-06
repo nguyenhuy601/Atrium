@@ -189,6 +189,8 @@ class TaskController {
         assigneeId: assigneeIdRaw,
         organizationId: organizationIdRaw,
         serverId: serverIdRaw,
+        departmentId: departmentIdRaw,
+        teamId: teamIdRaw,
         status,
         priority,
         page,
@@ -199,6 +201,8 @@ class TaskController {
       const assigneeId = first(assigneeIdRaw);
       const organizationId = first(organizationIdRaw);
       const serverId = first(serverIdRaw);
+      const departmentId = first(departmentIdRaw);
+      const teamId = first(teamIdRaw);
       const userId = req.user?.id || req.userContext?.userId;
       if (!userId) {
         return taskUnauthorized(res);
@@ -212,6 +216,23 @@ class TaskController {
         }
         return { value: s };
       };
+
+      let scopeDepartmentId = null;
+      let scopeTeamId = null;
+      if (departmentId) {
+        const p = parseOid(departmentId, 'departmentId');
+        if (p.error) {
+          return taskValidation(res, p.error, 'VALIDATION_INVALID_ID');
+        }
+        scopeDepartmentId = p.value;
+      }
+      if (teamId) {
+        const p = parseOid(teamId, 'teamId');
+        if (p.error) {
+          return taskValidation(res, p.error, 'VALIDATION_INVALID_ID');
+        }
+        scopeTeamId = p.value;
+      }
 
       const view = String(first(q.view) || '')
         .toLowerCase()
@@ -283,6 +304,8 @@ class TaskController {
           from,
           to,
         });
+        if (scopeDepartmentId) filter.departmentId = scopeDepartmentId;
+        if (scopeTeamId) filter.teamId = scopeTeamId;
 
         const result = await taskService.getCalendarTasks(filter, {
           userId,
@@ -347,6 +370,8 @@ class TaskController {
           filter.$or = [{ assigneeId: p.value }, { createdBy: p.value }];
         }
       }
+      if (scopeDepartmentId) filter.departmentId = scopeDepartmentId;
+      if (scopeTeamId) filter.teamId = scopeTeamId;
       if (serverId) {
         const p = parseOid(serverId, 'serverId');
         if (p.error) {

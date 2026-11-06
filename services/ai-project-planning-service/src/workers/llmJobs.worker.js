@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Shared LlmJob worker (WHAT + HOW). Claims one job, runs handler, ACKs.
- * Prefetch defaults to 1. Scale replicas for a pool.
+ * Shared LlmJob worker (WHAT + HOW).
+ * Opens 1–3 consumers as the queue grows. Each consumer holds at most 2 tasks.
  */
 
 const path = require('path');
@@ -14,10 +14,12 @@ const { waitForAmqpClose, sleep } = require('@enterprise/shared/messaging/rabbit
 const {
   resolveLlmJobsQueueName,
   resolveLlmJobsDlqName,
-  resolveLlmJobsPrefetch,
   LLM_JOB_SCHEMA_VERSION,
 } = require('../llmJobs/llmJobContract');
 const { processLlmJob } = require('../llmJobs/processLlmJob');
+const { resolveWorkerScale, planListenerCount } = require('../runtime/workerScale');
+
+const RECONCILE_MS = 1000;
 
 const mongoUri =
   (process.env.AI_PROJECT_PLANNING_MONGODB_URI || '').trim() || process.env.MONGODB_URI;
@@ -38,6 +40,91 @@ async function connectAmqpWithRetry(url) {
   }
 }
 
+async function handleDelivery(ch, msg) {
+  if (!msg) return;
+  let jobId = null;
+  try {
+    const payload = JSON.parse(msg.content.toString('utf8'));
+    if (payload.schemaVersion && payload.schemaVersion !== LLM_JOB_SCHEMA_VERSION) {
+      throw new Error(`schema_mismatch:${payload.schemaVersion}`);
+    }
+    jobId = payload.jobId;
+    const out = await processLlmJob(jobId, { env: process.env });
+    console.info(
+      `[llm-jobs-worker] done id=${jobId} ok=${out.ok} err=${out.error || '-'}`
+    );
+    ch.ack(msg);
+  } catch (err) {
+    console.error(`[llm-jobs-worker] fail id=${jobId}`, err?.message || err);
+    const requeue = !String(err?.message || '').startsWith('schema_mismatch');
+    try {
+      ch.nack(msg, false, requeue);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function syncConsumers(conn, queue, dlq, consumers, scale) {
+  // Fresh broker / first boot: declare before checkQueue (404 closes the channel).
+  {
+    const boot = await assertQueuesResilient(conn, [queue, dlq]);
+    try {
+      await boot.close();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const probe = await conn.createChannel();
+  let ready = 0;
+  try {
+    const info = await probe.checkQueue(queue);
+    ready = info.messageCount || 0;
+  } finally {
+    try {
+      await probe.close();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const desired = planListenerCount(ready, consumers, scale);
+  while (consumers.length < desired) {
+    const ch = await assertQueuesResilient(conn, [queue, dlq]);
+    await ch.prefetch(scale.tasksPerWorker);
+    const entry = { ch, tag: null, inflight: 0 };
+    const consume = await ch.consume(queue, (msg) => {
+      entry.inflight += 1;
+      Promise.resolve(handleDelivery(ch, msg)).finally(() => {
+        entry.inflight = Math.max(0, entry.inflight - 1);
+      });
+    });
+    entry.tag = consume.consumerTag;
+    consumers.push(entry);
+    console.log(
+      `[llm-jobs-worker] consumers=${consumers.length} prefetch=${scale.tasksPerWorker} ready=${ready}`
+    );
+  }
+
+  while (consumers.length > desired) {
+    const idleAt = consumers.findIndex((entry, index) => index > 0 && entry.inflight === 0);
+    if (idleAt < 0) break;
+    const extra = consumers.splice(idleAt, 1)[0];
+    try {
+      await extra.ch.cancel(extra.tag);
+    } catch {
+      /* ignore */
+    }
+    try {
+      await extra.ch.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  return desired;
+}
+
 async function runSession() {
   const url = String(process.env.RABBITMQ_URL || '').trim();
   if (!url) throw new Error('RABBITMQ_URL is not set');
@@ -49,48 +136,39 @@ async function runSession() {
   await connectDB(mongoUri);
   const queue = resolveLlmJobsQueueName(process.env);
   const dlq = resolveLlmJobsDlqName(process.env);
+  const scale = resolveWorkerScale(process.env);
+  if (!(Number(process.env.LLM_MAX_INFLIGHT) >= 1)) {
+    process.env.LLM_MAX_INFLIGHT = String(scale.maxWorkers * scale.tasksPerWorker);
+  }
   const conn = await connectAmqpWithRetry(url);
-  const ch = await assertQueuesResilient(conn, [queue, dlq]);
-  await ch.prefetch(resolveLlmJobsPrefetch(process.env));
-  console.log(
-    `[llm-jobs-worker] listening queue=${queue} prefetch=${resolveLlmJobsPrefetch(process.env)}`
-  );
-
-  const consume = await ch.consume(queue, async (msg) => {
-    if (!msg) return;
-    let jobId = null;
-    try {
-      const payload = JSON.parse(msg.content.toString('utf8'));
-      if (payload.schemaVersion && payload.schemaVersion !== LLM_JOB_SCHEMA_VERSION) {
-        throw new Error(`schema_mismatch:${payload.schemaVersion}`);
-      }
-      jobId = payload.jobId;
-      const out = await processLlmJob(jobId, { env: process.env });
-      console.info(
-        `[llm-jobs-worker] done id=${jobId} ok=${out.ok} err=${out.error || '-'}`
-      );
-      ch.ack(msg);
-    } catch (err) {
-      console.error(`[llm-jobs-worker] fail id=${jobId}`, err?.message || err);
-      const requeue = !String(err?.message || '').startsWith('schema_mismatch');
-      try {
-        ch.nack(msg, false, requeue);
-      } catch {
-        /* ignore */
-      }
-    }
-  });
+  const consumers = [];
+  await syncConsumers(conn, queue, dlq, consumers, scale);
+  let scaling = false;
+  const timer = setInterval(() => {
+    if (scaling) return;
+    scaling = true;
+    syncConsumers(conn, queue, dlq, consumers, scale)
+      .catch((err) => {
+        console.error('[llm-jobs-worker] scale', err?.message || err);
+      })
+      .finally(() => {
+        scaling = false;
+      });
+  }, RECONCILE_MS);
 
   await waitForAmqpClose(conn);
-  try {
-    await ch.cancel(consume.consumerTag);
-  } catch {
-    /* ignore */
-  }
-  try {
-    await ch.close();
-  } catch {
-    /* ignore */
+  clearInterval(timer);
+  for (const entry of consumers.splice(0)) {
+    try {
+      await entry.ch.cancel(entry.tag);
+    } catch {
+      /* ignore */
+    }
+    try {
+      await entry.ch.close();
+    } catch {
+      /* ignore */
+    }
   }
   try {
     await conn.close();

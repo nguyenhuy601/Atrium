@@ -42,7 +42,7 @@ const TITLE_MAX = 200;
 /**
  * Calendar + Meetings cấp phòng ban (sự kiện, không voice room cố định).
  * mode=calendar → timeline theo ngày; mode=meetings → danh sách họp + Join.
- * Danh sách = meeting org mà user là host/participant (API range); không lọc departmentId.
+ * Truyền departmentId vào API (additive); BE có thể chưa lọc — UI vẫn gắn scope phòng ban.
  */
 export default function DepartmentMeetingsPanel({
   organizationId = '',
@@ -52,7 +52,6 @@ export default function DepartmentMeetingsPanel({
   canManage = false,
   onAnnounceMeetingJoin,
 }) {
-  void departmentId;
   const { t, locale } = useAppStrings();
   const formId = useId();
   const titleId = `${formId}-title`;
@@ -66,6 +65,7 @@ export default function DepartmentMeetingsPanel({
   const [startLocal, setStartLocal] = useState(defaultMeetingStartLocal);
 
   const isCalendar = mode === 'calendar';
+  const deptId = String(departmentId || '').trim();
 
   const load = useCallback(async () => {
     const orgId = String(organizationId || '').trim();
@@ -86,6 +86,7 @@ export default function DepartmentMeetingsPanel({
         organizationId: orgId,
         startFrom,
         startTo,
+        ...(deptId ? { departmentId: deptId } : {}),
       });
       const data = unwrap(res);
       const list = Array.isArray(data) ? data : data?.items || data?.meetings || [];
@@ -104,7 +105,7 @@ export default function DepartmentMeetingsPanel({
     } finally {
       setLoading(false);
     }
-  }, [organizationId, t]);
+  }, [organizationId, deptId, t]);
 
   useEffect(() => {
     load();
@@ -146,6 +147,7 @@ export default function DepartmentMeetingsPanel({
         title: name.slice(0, TITLE_MAX),
         name: name.slice(0, TITLE_MAX),
         startAt: start.toISOString(),
+        ...(deptId ? { departmentId: deptId } : {}),
       });
       const created = unwrap(res);
       const meetingId = String(created?._id || created?.id || '');
@@ -153,7 +155,7 @@ export default function DepartmentMeetingsPanel({
       setStartLocal(defaultMeetingStartLocal());
       toast.success(t('workspace.deptMeetingCreated'));
       if (meetingId && typeof onAnnounceMeetingJoin === 'function') {
-        const joinPath = `/app/communicate/voice/${encodeURIComponent(meetingId)}`;
+        const joinPath = `/communicate/voice/${encodeURIComponent(meetingId)}`;
         try {
           await onAnnounceMeetingJoin({
             meetingId,
@@ -191,7 +193,7 @@ export default function DepartmentMeetingsPanel({
           ...(isCalendar ? {} : { day: 'numeric', month: 'short' }),
         })
       : '—';
-    const joinPath = id ? `/app/communicate/voice/${encodeURIComponent(id)}` : '';
+    const joinPath = id ? `/communicate/voice/${encodeURIComponent(id)}` : '';
     return (
       <li
         key={id}
@@ -232,7 +234,9 @@ export default function DepartmentMeetingsPanel({
         <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">{hint}</p>
         {isCalendar ? (
           <p className="mt-1 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
-            {t('workspace.deptCalendarViewOnly')}
+            {canManage
+              ? t('workspace.deptCalendarViewOnly')
+              : t('workspace.deptCalendarViewOnlyNoCreate')}
           </p>
         ) : null}
       </div>

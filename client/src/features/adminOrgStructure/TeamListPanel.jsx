@@ -26,7 +26,7 @@ import { adminOrgUnitHubLink } from '../../utils/adminHubLinks';
 import { teamLeaderId, unitId, unitName } from '../../utils/adminOrgStructureUtils';
 import { memberLabelById } from '../../utils/adminUserUtils';
 
-const TEAM_MANAGE_HUB = '/app/admin/org-structure/teams/manage';
+const TEAM_MANAGE_HUB = '/admin/org-structure/teams/manage';
 
 export default function TeamListPanel({ orgId }) {
   const { t } = useAppStrings();
@@ -60,7 +60,7 @@ export default function TeamListPanel({ orgId }) {
       wide
       actions={
         canCreateTeam ? (
-          <Link to="/app/admin/org-structure/teams/create" className={adminPrimaryBtnClass()}>
+          <Link to="/admin/org-structure/teams/create" className={adminPrimaryBtnClass()}>
             <Plus className="h-4 w-4" />
             {t('adminDomains.orgStructure.teamCreate')}
           </Link>
@@ -160,7 +160,7 @@ export default function TeamListPanel({ orgId }) {
                 message={t('adminOrg.noTeams')}
                 action={
                   canCreateTeam && !query.trim() ? (
-                    <Link to="/app/admin/org-structure/teams/create" className={adminPrimaryBtnClass()}>
+                    <Link to="/admin/org-structure/teams/create" className={adminPrimaryBtnClass()}>
                       <Plus className="h-4 w-4" aria-hidden />
                       {t('adminDomains.orgStructure.teamCreate')}
                     </Link>

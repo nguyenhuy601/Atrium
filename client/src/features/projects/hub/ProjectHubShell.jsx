@@ -1,4 +1,4 @@
-import { cloneElement, isValidElement, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { cloneElement, isValidElement, lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, ChevronLeft, ChevronRight, ExternalLink, FileText, LayoutGrid, Loader2, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -24,6 +24,8 @@ import ProjectHubCompleteSprintModal from './ProjectHubCompleteSprintModal';
 import ProjectHubCompleteProjectModal from './ProjectHubCompleteProjectModal';
 import ProjectHubArchiveProjectModal from './ProjectHubArchiveProjectModal';
 import ProjectHubOverviewCharts from './ProjectHubOverviewCharts';
+
+const ProjectClosureReportPage = lazy(() => import('./reports/ProjectClosureReportPage'));
 import useSprintAutoCompletePrompt from './useSprintAutoCompletePrompt';
 import { isBoardSprintReady } from './projectHubHierarchy';
 import { buildProjectsPickerPath, isProjectChatTabEnabled } from '../../../utils/suitePathUtils';
@@ -52,7 +54,11 @@ import {
   resolveViewerActiveSprint,
   sumOpenCardEstimateHours,
 } from './projectHubUtils';
-import { coerceDeliveryPhase, deliveryPhaseLabelKey } from '../../../utils/projectPhaseNav';
+import {
+  coerceDeliveryPhase,
+  deliveryPhaseLabelKey,
+  isClosedProjectStatus,
+} from '../../../utils/projectPhaseNav';
 import Phase2GateBanner from '../phase/Phase2GateBanner';
 import {
   useInvalidateProjectHub,
@@ -1271,10 +1277,15 @@ export default function ProjectHubShell({
       if ((item.id === 'list' || item.id === 'board') && !hubCaps.canViewWorkItems) return false;
       if (item.id === 'files' && !hubCaps.canViewFiles) return false;
       if (item.id === 'activity' && !hubCaps.canViewActivityTab) return false;
+      if (item.id === 'reports') {
+        if (!isClosedProjectStatus(projectPayload?.status) || !hubCaps.canViewReport) {
+          return false;
+        }
+      }
       if (item.id === 'chat' && !isProjectChatTabEnabled()) return false;
       return true;
     });
-  }, [hubCaps, isSummaryOnly]);
+  }, [hubCaps, isSummaryOnly, projectPayload?.status]);
 
   useEffect(() => {
     // Suite sidebar owns URL when hideTabBar — do not bounce Operations deep-links
@@ -2149,6 +2160,20 @@ export default function ProjectHubShell({
         {tab === 'files' && hubCaps.canViewFiles ? <FilesPanel files={files} isDarkMode={isDarkMode} t={t} /> : null}
         {tab === 'activity' && hubCaps.canViewActivityTab ? (
           <ActivityPanel activity={activity} locale={locale} isDarkMode={isDarkMode} t={t} />
+        ) : null}
+        {tab === 'reports' &&
+        isClosedProjectStatus(projectPayload?.status) &&
+        hubCaps.canViewReport ? (
+          <Suspense
+            fallback={
+              <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+                <span>{t('common.loading')}</span>
+              </div>
+            }
+          >
+            <ProjectClosureReportPage projectId={projectId} />
+          </Suspense>
         ) : null}
         {tab === 'activity' && hideTabBar && capsReady && !hubCaps.canViewActivityTab ? (
           <div className="flex min-h-[8rem] items-center justify-center p-4 text-sm text-muted-foreground">

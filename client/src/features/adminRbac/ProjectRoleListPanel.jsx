@@ -30,7 +30,7 @@ import { adminRoleHubLink } from '../../utils/adminHubLinks';
 import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
 import { useAdminActionGate } from '../../hooks/useAdminActionGate';
 
-const PROJECT_ROLE_MANAGE_HUB = '/app/admin/rbac/project-roles/manage';
+const PROJECT_ROLE_MANAGE_HUB = '/admin/rbac/project-roles/manage';
 
 const PROJECT_ROLE_LIST_GRID =
   'grid-cols-[2rem_minmax(5.5rem,1fr)_minmax(5.5rem,1.1fr)_minmax(3.5rem,4.5rem)_minmax(4rem,5.5rem)_minmax(8rem,11rem)]';
@@ -174,7 +174,7 @@ export default function ProjectRoleListPanel({ orgId }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">{t('adminRbac.roleListDragHint')}</p>
         <div className="flex flex-wrap gap-2">
-          <Link to="/app/admin/rbac/master-data" className={adminSecondaryBtnClass()}>
+          <Link to="/admin/rbac/master-data" className={adminSecondaryBtnClass()}>
             {t('adminRbac.masterDataTitle')}
           </Link>
         </div>
@@ -280,7 +280,7 @@ export default function ProjectRoleListPanel({ orgId }) {
       </AdminUserFormCard>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <Link to="/app/admin/rbac/project-roles/board" className={adminSecondaryBtnClass()}>
+        <Link to="/admin/rbac/project-roles/board" className={adminSecondaryBtnClass()}>
           {t('adminDomains.rbac.projectRoleBoard')}
         </Link>
       </div>

@@ -22,7 +22,7 @@ import {
 import { useAdminActionGate } from '../../hooks/useAdminActionGate';
 import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
 
-const PERM_PACK_MANAGE_HUB = '/app/admin/rbac/roles/manage';
+const PERM_PACK_MANAGE_HUB = '/admin/rbac/roles/manage';
 
 function roleKeyOf(role) {
   return String(role?.key || role?.code || normalizeRoleId(role) || '').trim() || '—';
@@ -71,19 +71,19 @@ export default function RolesListPanel({ orgId }) {
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
-            to="/app/admin/rbac/create"
+            to="/admin/rbac/create"
             className="rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
           >
             {t('adminDomains.rbac.create')}
           </Link>
           <Link
-            to="/app/admin/rbac/hierarchy"
+            to="/admin/rbac/hierarchy"
             className="rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
           >
             {t('adminDomains.rbac.hierarchy')}
           </Link>
           <Link
-            to="/app/admin/rbac/matrix"
+            to="/admin/rbac/matrix"
             className="rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-muted"
           >
             {t('adminDomains.rbac.matrix')}
@@ -97,19 +97,19 @@ export default function RolesListPanel({ orgId }) {
         <p className="text-muted-foreground">{t('adminRbac.listScopeNote')}</p>
         <div className="flex flex-wrap gap-2 pt-1">
           <Link
-            to="/app/admin/rbac/positions"
+            to="/admin/rbac/positions"
             className="rounded border border-border bg-card px-2 py-1 text-xs hover:bg-muted"
           >
             {t('adminRbac.listLinkPosition')}
           </Link>
           <Link
-            to="/app/admin/rbac/org-roles"
+            to="/admin/rbac/org-roles"
             className="rounded border border-border bg-card px-2 py-1 text-xs hover:bg-muted"
           >
             {t('adminRbac.listLinkOrgRole')}
           </Link>
           <Link
-            to="/app/admin/rbac/project-roles"
+            to="/admin/rbac/project-roles"
             className="rounded border border-border bg-card px-2 py-1 text-xs hover:bg-muted"
           >
             {t('adminRbac.listLinkProjectRole')}
@@ -164,7 +164,7 @@ export default function RolesListPanel({ orgId }) {
                     ) : null}
                     {canOpenPermissions ? (
                       <Link
-                        to={`/app/admin/rbac/permissions?roleId=${encodeURIComponent(id)}`}
+                        to={`/admin/rbac/permissions?roleId=${encodeURIComponent(id)}`}
                         className={adminManageLinkClass()}
                       >
                         {t('adminDomains.rbac.permissions')}
@@ -246,7 +246,7 @@ export default function RolesListPanel({ orgId }) {
                             <div className="absolute right-0 top-full z-20 mt-1 min-w-[10rem] rounded-lg border border-border bg-card py-1 shadow-md">
                               {canOpenPermissions ? (
                                 <Link
-                                  to={`/app/admin/rbac/permissions?roleId=${encodeURIComponent(id)}`}
+                                  to={`/admin/rbac/permissions?roleId=${encodeURIComponent(id)}`}
                                   className="block px-3 py-1.5 text-xs hover:bg-muted"
                                   onClick={() => setMenuOpenId('')}
                                 >

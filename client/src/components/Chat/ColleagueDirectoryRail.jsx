@@ -20,6 +20,7 @@ import {
 export default function ColleagueDirectoryRail({
   orgId,
   currentUserId,
+  departmentId = '',
   selectedUserId,
   onlineUsers,
   onSelectColleague,
@@ -30,6 +31,7 @@ export default function ColleagueDirectoryRail({
   const [emptyReason, setEmptyReason] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const deptId = String(departmentId || '').trim();
 
   const load = useCallback(async () => {
     const oid = String(orgId || '').trim();
@@ -45,6 +47,7 @@ export default function ColleagueDirectoryRail({
     try {
       const result = await loadCompanyColleagues(oid, currentUserId, {
         fallback: t('friendChat.friendDefault'),
+        ...(deptId ? { departmentId: deptId } : {}),
       });
       setRows(result.colleagues || []);
       setEmptyReason(result.emptyReason);
@@ -55,7 +58,7 @@ export default function ColleagueDirectoryRail({
     } finally {
       setLoading(false);
     }
-  }, [orgId, currentUserId, t]);
+  }, [orgId, currentUserId, deptId, t]);
 
   useEffect(() => {
     load();

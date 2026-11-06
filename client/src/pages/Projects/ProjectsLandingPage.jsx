@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAppStrings } from '../../locales/appStrings';
 import { useShellLayout } from '../../context/ShellLayoutContext';
+import { useWorkspace } from '../../context/WorkspaceContext';
 import ProjectsLandingGrid from '../../features/projects/landing/ProjectsLandingGrid';
 import { isProjectListableForUi } from '../../features/projects/landing/projectLandingActive';
 import {
@@ -12,6 +13,7 @@ import {
   orgQueryFromSearch,
   readStoredLastOrganizationId,
 } from '../../utils/suitePathUtils';
+import { readSingleOrgModeFlag } from '../../utils/singleCompanyMode';
 import { resolveAiProjectEntryPath } from '../../features/projects/phase1/aiHitl/aiHitlNavState';
 import { loadLinkedPackForAiNav } from '../../features/projects/phase1/aiHitl/loadLinkedPackForAiNav';
 import {
@@ -24,6 +26,7 @@ import useOrganizationDetail from '../../hooks/useOrganizationDetail';
 import useOrgProjectsList from '../../hooks/useOrgProjectsList';
 import useTaskWorkspaceScope from '../../hooks/useTaskWorkspaceScope';
 import { resolveLandingCreateActions } from '../../features/projects/landing/projectsLandingCreateActions';
+import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
 
 /**
  * Projects Landing — A/B/C/D:
@@ -35,7 +38,7 @@ import { resolveLandingCreateActions } from '../../features/projects/landing/pro
 
 function isMyProject(project) {
   const mb = project?.myMembership;
-  if (!mb) return true; // fallback for legacy payloads
+  if (!mb) return false;
   if (typeof mb.isMember === 'boolean') return mb.isMember;
   if (Array.isArray(mb.projectRoleKeys)) return mb.projectRoleKeys.length > 0;
   return true;
@@ -48,21 +51,41 @@ export default function ProjectsLandingPage() {
   const [enteringId, setEnteringId] = useState(null);
   const enteringLockRef = useRef(false);
   const { showHeaderLoading, hideHeaderLoading } = useShellLayout();
-  const orgId = orgQueryFromSearch(searchParams) || readStoredLastOrganizationId();
+  const { company, activeWorkspace, lastOrganizationId, singleOrgMode } = useWorkspace();
+  const isSingleOrg = Boolean(singleOrgMode || readSingleOrgModeFlag());
+  const orgId = useMemo(() => {
+    const fromQuery = orgQueryFromSearch(searchParams);
+    if (fromQuery) return fromQuery;
+    return String(
+      company?.id ||
+        company?._id ||
+        activeWorkspace?._id ||
+        activeWorkspace?.id ||
+        lastOrganizationId ||
+        readStoredLastOrganizationId() ||
+        ''
+    ).trim();
+  }, [searchParams, company, activeWorkspace, lastOrganizationId]);
   const boardIdFromQuery = boardQueryFromSearch(searchParams);
   const boardRedirectTriedRef = useRef('');
+  const missingOrgMessage = isSingleOrg
+    ? t('nav.projectsNoOrgAccess')
+    : t('organizations.selectOrgFirst');
 
   const { organization } = useOrganizationDetail(orgId);
   const {
     projects: rawProjects,
     loading: projectsLoading,
     isError: projectsError,
+    error: projectsErrorObj,
     reload: reloadProjects,
   } = useOrgProjectsList(orgId, { excludeClosed: false });
   const {
     canCreateProjectCapability,
     createProjectDeniedKey,
     loading: scopeLoading,
+    isError: scopeError,
+    error: scopeErrorObj,
   } = useTaskWorkspaceScope(orgId);
   const { access: requirementAccess, loading: requirementAccessLoading } =
     useRequirementAccess(orgId);
@@ -149,7 +172,7 @@ export default function ProjectsLandingPage() {
 
   const handleCreate = useCallback(() => {
     if (!orgId) {
-      toast.error(t('organizations.selectOrgFirst'));
+      toast.error(missingOrgMessage);
       return;
     }
     if (!canCreate) {
@@ -157,11 +180,11 @@ export default function ProjectsLandingPage() {
       return;
     }
     navigate(buildCollaborateProjectsNewPath(orgId));
-  }, [canCreate, createProjectDeniedKey, navigate, orgId, t]);
+  }, [canCreate, createProjectDeniedKey, missingOrgMessage, navigate, orgId, t]);
 
   const handleCreateWithAi = useCallback(() => {
     if (!orgId) {
-      toast.error(t('organizations.selectOrgFirst'));
+      toast.error(missingOrgMessage);
       return;
     }
     if (!canCreateWithAi) {
@@ -169,7 +192,7 @@ export default function ProjectsLandingPage() {
       return;
     }
     navigate(buildCollaborateProjectsNewPath(orgId, { analysisMode: 'ai' }));
-  }, [canCreateWithAi, createProjectDeniedKey, navigate, orgId, t]);
+  }, [canCreateWithAi, createProjectDeniedKey, missingOrgMessage, navigate, orgId, t]);
 
   const handleSelect = useCallback(
     async (project) => {
@@ -210,7 +233,7 @@ export default function ProjectsLandingPage() {
   if (!orgId) {
     return (
       <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
-        {t('organizations.selectOrgFirst')}
+        {missingOrgMessage}
       </div>
     );
   }
@@ -223,10 +246,17 @@ export default function ProjectsLandingPage() {
     );
   }
 
-  if (projectsError) {
+  if (projectsError || scopeError) {
+    const denied =
+      resolveApiErrorMessage(projectsErrorObj || scopeErrorObj, {
+        t,
+        fallback: t('nav.projectsLoadFail'),
+      }) || t('nav.projectsLoadFail');
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-        <p className="text-sm text-muted-foreground">{t('nav.projectsLoadFail')}</p>
+        <p className="text-sm text-muted-foreground" role="alert">
+          {denied}
+        </p>
         <button
           type="button"
           className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"

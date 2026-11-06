@@ -13,6 +13,8 @@ function buildCtxPromptFragment(contextPackage, opts = {}) {
   const formatted = formatRetrievedContext(contextPackage, {
     maxItems: opts.maxItems || 6,
     maxChars: opts.maxChars || 900,
+    // HOW: verified PE (approved) before suggested/draft history (RULE-RAG-HOW-02)
+    preferApprovedHistory: opts.preferApprovedHistory !== false,
   });
   if (!formatted.items.length) {
     return { ctxLine: '', itemCount: 0, mode: formatted.mode };

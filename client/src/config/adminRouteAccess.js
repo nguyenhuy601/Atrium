@@ -1,7 +1,7 @@
 import { navItemIsAllowed } from './rbacUiGrantMap.js';
 
 function normalizeAdminRoutePath(pathname) {
-  return String(pathname || '').split('?')[0].replace(/\/+$/, '') || '/app/admin';
+  return String(pathname || '').split('?')[0].replace(/\/+$/, '') || '/admin';
 }
 
 /** Danh sách mục để quyết định URL. Domain ẩn vẫn khớp URL gõ thẳng. */
@@ -69,14 +69,14 @@ export function decideAdminRoute({ pathname, entries, hasGrant, scopeOf, isSyste
   const nextPath = firstAllowedPath(list, ctx);
   const path = normalizeAdminRoutePath(pathname);
 
-  if (path === '/app/admin') {
+  if (path === '/admin') {
     if (ctx.isSystemAdmin || nextPath) return { action: 'enter' };
     return { action: 'redirect-work' };
   }
 
   // URL policy cũ không còn mục riêng. Người có cửa hub thì vào hub, không rơi về trang nhân viên.
-  if (path === '/app/admin/system-config/policy' || path === '/app/admin/policy') {
-    const hub = list.find((entry) => entry.path === '/app/admin/system-config');
+  if (path === '/admin/system-config/policy' || path === '/admin/policy') {
+    const hub = list.find((entry) => entry.path === '/admin/system-config');
     if (hub && entryIsAllowed(hub, ctx)) {
       return { action: 'redirect-first-allowed', path: hub.path };
     }

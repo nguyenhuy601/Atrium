@@ -156,18 +156,34 @@ async function loadPmUserIdByProject(projectIds, deps = {}) {
   const idSet = new Set(ids);
   const oids = ids.map((id) => new mongoose.Types.ObjectId(id));
   let memberships = Array.isArray(deps.memberships) ? deps.memberships : null;
+  if (memberships) {
+    memberships = memberships.filter((row) => idSet.has(String(row?.projectId || '')));
+  }
+
+  let roleDocs = await findPmRoleDocsByKey(deps.organizationId, oids, findRoles);
+
+  // Prefer PM-role-scoped membership query — avoids loading every member row for list cards.
   if (!memberships) {
+    if (roleDocs && roleDocs.length) {
+      const pmRoleOids = roleDocs
+        .map((r) => String(r?._id || '').trim())
+        .filter((id) => mongoose.isValidObjectId(id))
+        .map((id) => new mongoose.Types.ObjectId(id));
+      if (!pmRoleOids.length) return map;
+      memberships = await findMemberships(
+        { projectId: { $in: oids }, projectRoleId: { $in: pmRoleOids } },
+        'projectId userId projectRoleId createdAt'
+      );
+      return pmUserIdMapFromMemberships(memberships, roleDocs);
+    }
     memberships = await findMemberships(
       { projectId: { $in: oids } },
       'projectId userId projectRoleId createdAt'
     );
-  } else {
-    memberships = memberships.filter((row) => idSet.has(String(row?.projectId || '')));
   }
 
   if (!(memberships || []).length) return map;
 
-  let roleDocs = await findPmRoleDocsByKey(deps.organizationId, oids, findRoles);
   if (!roleDocs || !roleDocs.length) {
     const roleIds = [
       ...new Set(
@@ -198,6 +214,7 @@ async function loadPmUserIdByProject(projectIds, deps = {}) {
  * @param {object} [deps]
  * @param {object[]} [deps.memberships] — preloaded ProjectMembership rows (incl. projectRoleId)
  * @param {'card'|'full'} [deps.progressMode]
+ * @param {boolean} [deps.skipProfiles] — list card: keep pm.userId, skip S2S displayName batch
  * @param {object} [deps.timingOut] — mutated with progressMs / pmMs / profilesMs when timing on
  * @returns {Promise<object[]>}
  */
@@ -210,6 +227,7 @@ async function attachListProjectCardSummaries(projects, organizationId, deps = {
   const fetchProfiles = deps.fetchProfiles || fetchProfilesByUserIds;
   const asOf = deps.asOf instanceof Date ? deps.asOf : new Date();
   const progressMode = deps.progressMode === 'card' ? 'card' : 'full';
+  const skipProfiles = deps.skipProfiles === true;
   const wantTiming = listProjectsTimingEnabled() || Boolean(deps.timingOut);
 
   const projectIds = list
@@ -261,14 +279,17 @@ async function attachListProjectCardSummaries(projects, organizationId, deps = {
 
   const pmUserIds = [...new Set([...pmUserByProject.values()].filter(Boolean))];
   let profiles = new Map();
-  const tProfiles = Date.now();
-  try {
-    if (pmUserIds.length) profiles = await fetchProfiles(pmUserIds);
-  } catch (err) {
-    log.warn?.('[listProjectCardSummary] profile batch failed: %s', err?.message || err);
-    profiles = new Map();
+  let profilesMs = 0;
+  if (!skipProfiles) {
+    const tProfiles = Date.now();
+    try {
+      if (pmUserIds.length) profiles = await fetchProfiles(pmUserIds);
+    } catch (err) {
+      log.warn?.('[listProjectCardSummary] profile batch failed: %s', err?.message || err);
+      profiles = new Map();
+    }
+    profilesMs = Date.now() - tProfiles;
   }
-  const profilesMs = Date.now() - tProfiles;
 
   if (wantTiming && deps.timingOut && typeof deps.timingOut === 'object') {
     deps.timingOut.progressMs = progressMs;
@@ -283,10 +304,12 @@ async function attachListProjectCardSummaries(projects, organizationId, deps = {
     const pm = pmUserId
       ? {
           userId: pmUserId,
-          displayName: profileDisplayName(
-            typeof profiles.get === 'function' ? profiles.get(pmUserId) : profiles[pmUserId],
-            pmUserId
-          ),
+          displayName: skipProfiles
+            ? '—'
+            : profileDisplayName(
+                typeof profiles.get === 'function' ? profiles.get(pmUserId) : profiles[pmUserId],
+                pmUserId
+              ),
         }
       : null;
     const summary = buildCardSummaryFields(item, progress, pm, asOf);

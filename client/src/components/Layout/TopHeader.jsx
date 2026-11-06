@@ -24,7 +24,10 @@ import { FIGMA_TOP_HEADER } from './figmaShellClasses';
 import ShellCommandPalette from './ShellCommandPalette';
 import { useShellLayout } from '../../context/ShellLayoutContext';
 import useCompanyAdminAccess from '../../hooks/useCompanyAdminAccess';
-import { fetchProjectHubProject } from '../../features/projects/hub/useProjectHubQueries';
+import {
+  fetchProjectHubProject,
+  STALE_PROJECT_HUB_MS,
+} from '../../features/projects/hub/useProjectHubQueries';
 import { queryKeys } from '../../lib/queryKeys';
 import {
   projectIdFromPathname,
@@ -125,7 +128,8 @@ export default function TopHeader() {
     queryKey: queryKeys.projectHub.project(projectId),
     queryFn: () => fetchProjectHubProject(projectId),
     enabled: Boolean(projectId),
-    staleTime: 30_000,
+    staleTime: STALE_PROJECT_HUB_MS,
+    refetchOnMount: false,
   });
   const roleBadges = useMemo(
     () =>
@@ -278,7 +282,7 @@ export default function TopHeader() {
                     type="button"
                     onClick={() => {
                       setShowProfileMenu(false);
-                      navigate('/app/me/settings');
+                      navigate('/me/settings');
                     }}
                     className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-[0.8125rem] text-foreground transition hover:bg-muted"
                   >
@@ -289,7 +293,7 @@ export default function TopHeader() {
                     type="button"
                     onClick={() => {
                       setShowProfileMenu(false);
-                      navigate('/app/me/dashboard');
+                      navigate('/me/dashboard');
                     }}
                     className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-[0.8125rem] text-foreground transition hover:bg-muted"
                   >

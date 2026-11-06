@@ -26,6 +26,46 @@ import { resolveAppOrigin } from '../utils/browserOrigin';
 // Tạo SocketContext
 const SocketContext = createContext(null);
 
+/**
+ * Module singleton cho namespace /chat.
+ * React StrictMode remount: effect cleanup → remount ngay; nếu close() đồng bộ sẽ handshake 2 lần
+ * (/socket.io polling ×2 trên Network). Deferred release + reuse cùng instance → 1 handshake.
+ */
+let sharedChatSocket = null;
+let sharedChatSocketKey = '';
+let sharedChatReleaseTimer = null;
+
+function clearSharedChatReleaseTimer() {
+  if (sharedChatReleaseTimer != null) {
+    clearTimeout(sharedChatReleaseTimer);
+    sharedChatReleaseTimer = null;
+  }
+}
+
+function disposeSharedChatSocket() {
+  clearSharedChatReleaseTimer();
+  if (!sharedChatSocket) return;
+  try {
+    sharedChatSocket.removeAllListeners();
+    sharedChatSocket.close();
+  } catch {
+    /* ignore close races */
+  }
+  sharedChatSocket = null;
+  sharedChatSocketKey = '';
+}
+
+function scheduleSharedChatRelease(sock, key) {
+  clearSharedChatReleaseTimer();
+  // 80ms > StrictMode remount gap — reuse same Engine.IO session (avoid /socket.io ×2).
+  sharedChatReleaseTimer = setTimeout(() => {
+    sharedChatReleaseTimer = null;
+    if (sharedChatSocket === sock && sharedChatSocketKey === key) {
+      disposeSharedChatSocket();
+    }
+  }, 80);
+}
+
 /* ========================================
    CUSTOM HOOK: useSocket()
    Cách dùng: const { socket, emit, on } = useSocket();
@@ -202,147 +242,155 @@ function SocketProvider({ children }) {
      → Re-run khi user login/logout
   ======================================== */
   useEffect(() => {
-    // Chỉ connect khi user đã login và đã có id ổn định
     const token = getResolvedBearerToken();
-    if (isAuthenticated && socketUserKey && token) {
-      // accessToken trong deps — reconnect sau auto-refresh JWT (handshake auth không tự cập nhật)
-      
-      /* ----- TẠO SOCKET CONNECTION ----- */
-      const newSocket = io(SOCKET_NAMESPACE_URL, {
-        // auth: gửi token lên server để xác thực
-        // Server sẽ verify token và lấy user info
-        auth: { token },
-        
-        // Polling trước → ổn định qua API Gateway (HTTP proxy), rồi upgrade WebSocket (server.on('upgrade')).
-        // Thử websocket trước dễ gây cảnh báo Firefox khi reload / React StrictMode (socket cũ bị hủy giữa chừng).
-        transports: ['polling', 'websocket'],
+    if (!isAuthenticated || !socketUserKey || !token) {
+      disposeSharedChatSocket();
+      setSocket(null);
+      setConnected(false);
+      setConnectionError(null);
+      setOnlineUsers([]);
+      return undefined;
+    }
 
-        // Engine.IO path (phải là /socket.io) — giúp chạy đúng khi URL là /chat (namespace)
+    // accessToken trong deps — cập nhật auth in-place khi cùng user (tránh handshake ×2 mỗi refresh JWT).
+    const socketKey = `${socketUserKey}::${token}`;
+    const userPrefix = `${socketUserKey}::`;
+    clearSharedChatReleaseTimer();
+
+    let sock = sharedChatSocket;
+    const sameUserSocket = Boolean(sock && String(sharedChatSocketKey || '').startsWith(userPrefix));
+    const reusedExact = Boolean(sock && sharedChatSocketKey === socketKey);
+    if (sameUserSocket && !reusedExact) {
+      try {
+        sock.auth = { token };
+      } catch {
+        /* ignore */
+      }
+      sharedChatSocketKey = socketKey;
+    } else if (!reusedExact) {
+      // Reuse by key only — during first handshake `disconnected` is still true; checking it
+      // would dispose+recreate under StrictMode and keep the double /socket.io poll.
+      disposeSharedChatSocket();
+      sock = io(SOCKET_NAMESPACE_URL, {
+        auth: { token },
+        // Polling trước → ổn định qua API Gateway, rồi upgrade WebSocket.
+        transports: ['polling', 'websocket'],
         path: SOCKET_IO_PATH,
-        
-        // reconnection: true = auto reconnect nếu disconnect
         reconnection: true,
-        
-        // reconnectionDelay: 1s giữa mỗi lần thử reconnect
         reconnectionDelay: 1000,
-        
-        // reconnectionAttempts: thử 5 lần trước khi bỏ cuộc
         reconnectionAttempts: 5,
       });
-
-      /* ===== SOCKET EVENT LISTENERS ===== */
-      
-      // Event: 'connect' - khi kết nối thành công
-      newSocket.on('connect', () => {
-        console.log('✅ [Socket] Connected successfully');
-        console.log('   Socket ID:', newSocket.id);
-        console.log('   URL:', SOCKET_NAMESPACE_URL);
-        console.log('   Path:', SOCKET_IO_PATH);
-        console.log('   Transport:', newSocket.io.engine.transport.name);
-        
-        setConnected(true);
-        setConnectionError(null); // Clear error khi connect success
-      });
-
-      // Event: 'disconnect' - khi mất kết nối
-      newSocket.on('disconnect', (reason) => {
-        console.warn('⚠️ [Socket] Disconnected');
-        console.warn('   Reason:', reason);
-        
-        setConnected(false);
-        
-        // Nếu disconnect vì server error → log chi tiết
-        if (reason === 'io server disconnect') {
-          console.error('   Server forced disconnect. Check server logs.');
-          setConnectionError(new Error('Server forced disconnect'));
-        } else if (reason === 'io client disconnect') {
-          console.log('   Client initiated disconnect');
-          setConnectionError(null);
-        }
-      });
-
-      // Event: 'connect_error' - lỗi khi kết nối
-      newSocket.on('connect_error', (error) => {
-        console.error('❌ [Socket] Connection Error');
-        console.error('   Message:', error.message);
-        console.error('   Data:', error.data);
-        console.error('   Trying to connect to:', SOCKET_NAMESPACE_URL);
-        console.error('   Path:', SOCKET_IO_PATH);
-        console.error('');
-        console.error('   📋 Debugging checklist:');
-        console.error('   1. socket-service đang chạy? — curl http://localhost:3017/health');
-        console.error('   2. Dev: Vite proxy /socket.io → :3017 (client/.env VITE_SOCKET_PROXY_TARGET nếu cần đổi target)');
-        console.error('   3. Hoặc nối thẳng: VITE_SOCKET_DIRECT_URL=http://127.0.0.1:3017');
-        console.error('   4. Socket qua gateway (dev): VITE_SOCKET_USE_GATEWAY=true + VITE_SOCKET_URL + api-gateway SOCKET_SERVICE_URL');
-        console.error('   5. CORS / log socket-service (namespace /chat)');
-        
-        setConnectionError(error);
-      });
-
-      // Event: 'error' - khi có lỗi socket (auth errors, etc.)
-      newSocket.on('error', (error) => {
-        console.error('❌ [Socket] Socket Error');
-        console.error('   Error:', error);
-        
-        setConnectionError(error);
-      });
-
-      /* ===== ONLINE USERS TRACKING ===== */
-      
-      // Event: 'users:online' - server gửi list users online
-      // Chạy khi connect hoặc khi có user join/leave
-      newSocket.on('users:online', (users) => {
-        const list = Array.isArray(users) ? users.map((id) => String(id)) : [];
-        setOnlineUsers(list);
-      });
-
-      // Event: 'user:connected' - có user mới online
-      newSocket.on('user:connected', (userId) => {
-        const id = String(userId);
-        setOnlineUsers((prev) => [...new Set([...prev.map(String), id])]);
-      });
-
-      // Event: 'user:disconnected' - có user offline
-      newSocket.on('user:disconnected', (userId) => {
-        const id = String(userId);
-        setOnlineUsers((prev) => prev.map(String).filter((x) => x !== id));
-      });
-
-      // Wave 3c — snapshot presence (Redis vh:presence + in-memory sockets)
-      newSocket.on('presence:batch', (payload = {}) => {
-        const users = Array.isArray(payload.users)
-          ? payload.users
-          : payload.userId
-            ? [{ userId: payload.userId, status: payload.status }]
-            : [];
-        if (!users.length) return;
-        setOnlineUsers((prev) => {
-          const set = new Set(prev.map(String));
-          for (const row of users) {
-            const id = String(row?.userId || '').trim();
-            if (!id) continue;
-            if (row.status === 'online') set.add(id);
-            else set.delete(id);
-          }
-          return [...set];
-        });
-      });
-
-      // Lưu socket instance vào state
-      setSocket(newSocket);
-
-      /* ----- CLEANUP FUNCTION ----- */
-      // Chạy khi component unmount hoặc deps thay đổi
-      return () => {
-        // Đóng socket connection
-        newSocket.close();
-        
-        // Clear socket state
-        setSocket(null);
-        setConnected(false);
-        setConnectionError(null);
-      };
+      sharedChatSocket = sock;
+      sharedChatSocketKey = socketKey;
     }
+
+    const onConnect = () => {
+      console.log('✅ [Socket] Connected successfully');
+      console.log('   Socket ID:', sock.id);
+      console.log('   URL:', SOCKET_NAMESPACE_URL);
+      console.log('   Path:', SOCKET_IO_PATH);
+      console.log('   Transport:', sock.io?.engine?.transport?.name);
+      setConnected(true);
+      setConnectionError(null);
+    };
+
+    const onDisconnect = (reason) => {
+      console.warn('⚠️ [Socket] Disconnected');
+      console.warn('   Reason:', reason);
+      setConnected(false);
+      if (reason === 'io server disconnect') {
+        console.error('   Server forced disconnect. Check server logs.');
+        setConnectionError(new Error('Server forced disconnect'));
+      } else if (reason === 'io client disconnect') {
+        console.log('   Client initiated disconnect');
+        setConnectionError(null);
+      }
+    };
+
+    const onConnectError = (error) => {
+      console.error('❌ [Socket] Connection Error');
+      console.error('   Message:', error.message);
+      console.error('   Data:', error.data);
+      console.error('   Trying to connect to:', SOCKET_NAMESPACE_URL);
+      console.error('   Path:', SOCKET_IO_PATH);
+      console.error('');
+      console.error('   📋 Debugging checklist:');
+      console.error('   1. socket-service đang chạy? — curl http://localhost:3017/health');
+      console.error('   2. Dev: Vite proxy /socket.io → :3017 (client/.env VITE_SOCKET_PROXY_TARGET nếu cần đổi target)');
+      console.error('   3. Hoặc nối thẳng: VITE_SOCKET_DIRECT_URL=http://127.0.0.1:3017');
+      console.error('   4. Socket qua gateway (dev): VITE_SOCKET_USE_GATEWAY=true + VITE_SOCKET_URL + api-gateway SOCKET_SERVICE_URL');
+      console.error('   5. CORS / log socket-service (namespace /chat)');
+      setConnectionError(error);
+    };
+
+    const onSocketError = (error) => {
+      console.error('❌ [Socket] Socket Error');
+      console.error('   Error:', error);
+      setConnectionError(error);
+    };
+
+    const onUsersOnline = (users) => {
+      const list = Array.isArray(users) ? users.map((id) => String(id)) : [];
+      setOnlineUsers(list);
+    };
+
+    const onUserConnected = (userId) => {
+      const id = String(userId);
+      setOnlineUsers((prev) => [...new Set([...prev.map(String), id])]);
+    };
+
+    const onUserDisconnected = (userId) => {
+      const id = String(userId);
+      setOnlineUsers((prev) => prev.map(String).filter((x) => x !== id));
+    };
+
+    const onPresenceBatch = (payload = {}) => {
+      const users = Array.isArray(payload.users)
+        ? payload.users
+        : payload.userId
+          ? [{ userId: payload.userId, status: payload.status }]
+          : [];
+      if (!users.length) return;
+      setOnlineUsers((prev) => {
+        const set = new Set(prev.map(String));
+        for (const row of users) {
+          const id = String(row?.userId || '').trim();
+          if (!id) continue;
+          if (row.status === 'online') set.add(id);
+          else set.delete(id);
+        }
+        return [...set];
+      });
+    };
+
+    sock.on('connect', onConnect);
+    sock.on('disconnect', onDisconnect);
+    sock.on('connect_error', onConnectError);
+    sock.on('error', onSocketError);
+    sock.on('users:online', onUsersOnline);
+    sock.on('user:connected', onUserConnected);
+    sock.on('user:disconnected', onUserDisconnected);
+    sock.on('presence:batch', onPresenceBatch);
+
+    setSocket(sock);
+    if (sock.connected) {
+      setConnected(true);
+      setConnectionError(null);
+    }
+
+    return () => {
+      sock.off('connect', onConnect);
+      sock.off('disconnect', onDisconnect);
+      sock.off('connect_error', onConnectError);
+      sock.off('error', onSocketError);
+      sock.off('users:online', onUsersOnline);
+      sock.off('user:connected', onUserConnected);
+      sock.off('user:disconnected', onUserDisconnected);
+      sock.off('presence:batch', onPresenceBatch);
+      // StrictMode: remount cancels timer and reuses sock → no 2nd handshake.
+      // Real unmount / key change: timer fires → close.
+      scheduleSharedChatRelease(sock, socketKey);
+    };
   }, [isAuthenticated, socketUserKey, accessToken]); // Re-run khi login/logout, đổi user, hoặc refresh access token
 
   /* ========================================

@@ -69,8 +69,8 @@ export default function RoleEditPanel({ orgId }) {
   };
 
   const permissionsHref = roleId
-    ? `/app/admin/rbac/permissions?roleId=${encodeURIComponent(roleId)}`
-    : '/app/admin/rbac/permissions';
+    ? `/admin/rbac/permissions?roleId=${encodeURIComponent(roleId)}`
+    : '/admin/rbac/permissions';
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">

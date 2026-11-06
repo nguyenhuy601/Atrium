@@ -18,6 +18,7 @@ const draftRevision = require('./draftRevision');
 const { runBacklogStructurePipeline } = require('./runBacklogStructurePipeline');
 const {
   backlogProposeFromSources,
+  materializeCandidatesFromEpicCatalog,
   buildHeuristicCandidates,
 } = require('./backlogProposeFromSources');
 const {
@@ -45,6 +46,7 @@ module.exports = {
   ...draftRevision,
   runBacklogStructurePipeline,
   backlogProposeFromSources,
+  materializeCandidatesFromEpicCatalog,
   buildHeuristicCandidates,
   assertCanApproveBacklogEntity,
   approveBacklogDraft,

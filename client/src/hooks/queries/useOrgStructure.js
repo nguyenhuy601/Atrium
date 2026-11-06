@@ -5,26 +5,37 @@ import { STALE_TIME_ORGS_MS } from '../../lib/queryClient';
 import { organizationAPI } from '../../services/api/organizationAPI';
 import { getResolvedBearerToken } from '../../utils/tokenStorage';
 
-const unwrapShell = (payload) => {
+const unwrap = (payload) => {
   const raw = payload?.data ?? payload;
   return raw?.data ?? raw;
 };
 
-export async function fetchOrgShell(orgId) {
-  const payload = await organizationAPI.getOrgShell(orgId);
-  return unwrapShell(payload);
+export async function fetchOrgStructure(orgId, { view = 'full', includeInactive = false } = {}) {
+  const payload = await organizationAPI.getStructure(orgId, { view, includeInactive });
+  return unwrap(payload);
 }
 
-export function useOrgShell(orgId, { enabled: enabledProp = true } = {}) {
+/**
+ * @param {string} orgId
+ * @param {{ enabled?: boolean, view?: 'nav'|'full', includeInactive?: boolean }} [options]
+ */
+export function useOrgStructure(
+  orgId,
+  { enabled: enabledProp = true, view = 'full', includeInactive = false } = {}
+) {
   const { isAuthenticated, loading: authLoading } = useAuth();
   const id = orgId ? String(orgId) : '';
   const authReady = Boolean(getResolvedBearerToken());
+  const normalizedView = view === 'nav' ? 'nav' : 'full';
   const enabled =
     enabledProp && !authLoading && isAuthenticated && authReady && Boolean(id);
 
   return useQuery({
-    queryKey: [...queryKeys.org.shell(id), authReady ? 'auth' : 'anon'],
-    queryFn: () => fetchOrgShell(id),
+    queryKey: [
+      ...queryKeys.org.structure(id, includeInactive, normalizedView),
+      authReady ? 'auth' : 'anon',
+    ],
+    queryFn: () => fetchOrgStructure(id, { view: normalizedView, includeInactive }),
     staleTime: STALE_TIME_ORGS_MS,
     enabled,
     retry: (failureCount, error) => {
@@ -33,4 +44,8 @@ export function useOrgShell(orgId, { enabled: enabledProp = true } = {}) {
       return failureCount < 1;
     },
   });
+}
+
+export function useOrgStructureNav(orgId, options = {}) {
+  return useOrgStructure(orgId, { ...options, view: 'nav' });
 }

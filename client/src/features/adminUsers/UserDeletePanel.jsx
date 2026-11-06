@@ -61,8 +61,8 @@ export default function UserDeletePanel({ orgId, embedded = false }) {
   };
 
   const lockHref = userId
-    ? `/app/admin/accounts/access?userId=${encodeURIComponent(userId)}&tab=lock`
-    : '/app/admin/accounts/access?tab=lock';
+    ? `/admin/accounts/access?userId=${encodeURIComponent(userId)}&tab=lock`
+    : '/admin/accounts/access?tab=lock';
 
   const body = (
     <>

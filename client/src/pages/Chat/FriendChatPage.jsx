@@ -50,23 +50,24 @@ import {
 } from '../../utils/dmConversationList';
 import { copyImageToClipboard } from '../../utils/copyMediaToClipboard';
 import { formatMessagePreview } from '../../features/search/formatMessagePreview';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useFriendPending, useFriendsList } from '../../hooks/queries';
+import { useQueryClient } from '@tanstack/react-query';
+import { useFriendsList } from '../../hooks/queries';
 import { fetchFriendsList } from '../../hooks/queries/fetchers';
 import FriendChatSidebarTabs from '../../components/Chat/FriendChatSidebarTabs';
 import NewColleagueDmModal from '../../components/Chat/NewColleagueDmModal';
 import ColleagueDirectoryRail from '../../components/Chat/ColleagueDirectoryRail';
+import { loadCompanyColleagues } from '../../components/Chat/loadCompanyColleagues';
 import FriendChatFilterChips, { RAIL_FILTER } from '../../components/Chat/FriendChatFilterChips';
-import FriendChatInvitesPanel from '../../components/Chat/FriendChatInvitesPanel';
 import { queryKeys } from '../../lib/queryKeys';
 import { parseMessageListPage } from '../../lib/parseMessageListPage';
 import { STALE_TIME_FRIENDS_MS } from '../../lib/queryClient';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import { useOrgMyProfile } from '../../hooks/queries/useOrgMyProfile';
+import { resolveMyDepartmentId } from '../../utils/companySpaceLevel';
 import { readSingleOrgModeFlag } from '../../utils/singleCompanyMode';
 import ConfirmDialog from '../../components/Shared/ConfirmDialog';
 import Modal from '../../components/Shared/Modal';
 import Toast from '../../components/Shared/Toast';
-import friendService from '../../services/friendService';
 import api from '../../services/api';
 import { uploadChatFileAndCreateMessage } from '../../services/chatFileUpload';
 import ChatUploadProgressBar from '../../components/Chat/ChatUploadProgressBar';
@@ -160,7 +161,6 @@ import {
   figmaChatBubbleCol,
   figmaChatBubble,
   figmaChatStatusDotColor,
-  FIGMA_CHAT_INVITES_PLACEHOLDER,
   FIGMA_CHAT_SIDEBAR_SEARCH,
   FIGMA_CHAT_SIDEBAR_SEARCH_WRAP,
 } from '../../components/Chat/figmaChatClasses';
@@ -230,9 +230,18 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     company?.id || company?._id || activeWorkspace?._id || activeWorkspace?.id || lastOrganizationId || ''
   ).trim();
   const showColleagueDirectory = Boolean(suiteLayout && directoryOrgId);
-  /** Friend graph invites retired — derived roster ACL. */
-  const showFriendInvites = false;
   const [searchParams] = useSearchParams();
+  const departmentIdFromQuery = String(searchParams.get('departmentId') || '').trim();
+  const orgProfileQuery = useOrgMyProfile(directoryOrgId, {
+    enabled: Boolean(showColleagueDirectory && directoryOrgId),
+  });
+  const directoryDepartmentId = useMemo(
+    () =>
+      departmentIdFromQuery || resolveMyDepartmentId(orgProfileQuery.data) || '',
+    [departmentIdFromQuery, orgProfileQuery.data]
+  );
+  /** null = chưa scope / guest·ngoài org; Set = intersection friends ∩ đồng nghiệp phòng. */
+  const [deptColleagueIds, setDeptColleagueIds] = useState(null);
   const [friends, setFriends] = useState([]);
   const [selectedFriendId, setSelectedFriendId] = useState(null);
   const [messages, setMessagesState] = useState([]);
@@ -240,16 +249,18 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [messagesLoadError, setMessagesLoadError] = useState(false);
   const [deleteMsgConfirmId, setDeleteMsgConfirmId] = useState(null);
-  const [blockConfirmOpen, setBlockConfirmOpen] = useState(false);
-  const [blockingFriend, setBlockingFriend] = useState(false);
-  const [unblockConfirmOpen, setUnblockConfirmOpen] = useState(false);
-  const [unblockingFriend, setUnblockingFriend] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [emojiSearch, setEmojiSearch] = useState('');
   const [emojiPickerTab, setEmojiPickerTab] = useState('emoji');
   const [mediaPickerSending, setMediaPickerSending] = useState(false);
   const fileInputRef = useRef(null);
   const imageInputRef = useRef(null);
+  const selectedFriendIdRef = useRef(selectedFriendId);
+  const messagesLoadSeqRef = useRef(0);
+
+  useEffect(() => {
+    selectedFriendIdRef.current = selectedFriendId;
+  }, [selectedFriendId]);
   /** Snippet tin DM cuối theo bạn: { at, preview, isMine } */
   const [lastDmByFriendId, setLastDmByFriendId] = useState({});
   /** Calling API to select default conversation (avoid flashing "choose friend") */
@@ -326,14 +337,9 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
   const routedDmAvatar = String(
     location.state?.openDmAvatar || searchParams.get('openDmAvatar') || ''
   ).trim();
-  const showPendingRequestsRail = String(searchParams.get('tab') || '').toLowerCase() === 'requests';
-  const [sidebarMainTab, setSidebarMainTab] = useState(() => {
-    if (showPendingRequestsRail && !isSingleCompany) return 'invites';
-    return 'messages';
-  });
+  const [sidebarMainTab, setSidebarMainTab] = useState('messages');
   const [railFilterTab, setRailFilterTab] = useState(RAIL_FILTER.ALL);
   const [showNewDmModal, setShowNewDmModal] = useState(false);
-  const [inviteActingKey, setInviteActingKey] = useState('');
   const queryClient = useQueryClient();
   const setMessages = useCallback((updater) => {
     setMessagesState((prev) => {
@@ -342,29 +348,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
       return next;
     });
   }, [queryClient, selectedFriendId]);
-  const { pendingList, pendingCount, refetch: refetchPending } = useFriendPending({
-    enabled: !landingDemo && suiteLayout && showFriendInvites,
-  });
-  const sentInvitesQuery = useQuery({
-    queryKey: [...queryKeys.friends.pending(), 'sent'],
-    queryFn: async () => {
-      const resp = await friendService.getPendingRequests({
-        params: { type: 'sent' },
-        skipGlobalErrorHandling: true,
-      });
-      const raw = resp?.data ?? resp;
-      return Array.isArray(raw) ? raw : Array.isArray(raw?.data) ? raw.data : [];
-    },
-    enabled: !landingDemo && suiteLayout && showFriendInvites && sidebarMainTab === 'invites',
-    staleTime: 30_000,
-  });
-
-  useEffect(() => {
-    if (!showFriendInvites && sidebarMainTab === 'invites') {
-      setSidebarMainTab('messages');
-    }
-  }, [showFriendInvites, sidebarMainTab]);
-
   const openColleagueDm = useCallback((colleague) => {
     const id = String(colleague?.userId || '').trim();
     if (!id) return;
@@ -475,7 +458,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         name: org.name,
         slug: org.slug,
       });
-      navigate('/app/collaborate/workspaces', { state: { selectOrganizationId: String(org._id) } });
+      navigate('/collaborate/workspaces', { state: { selectOrganizationId: String(org._id) } });
     },
     [navigate, setActiveWorkspace]
   );
@@ -579,6 +562,35 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     blockedFriendsQuery.error,
   ]);
 
+  useEffect(() => {
+    if (!showColleagueDirectory || !directoryOrgId || !currentUserId) {
+      setDeptColleagueIds(null);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { colleagues } = await loadCompanyColleagues(directoryOrgId, currentUserId, {
+          fallback: t('friendChat.friendDefault'),
+          ...(directoryDepartmentId ? { departmentId: directoryDepartmentId } : {}),
+        });
+        if (cancelled) return;
+        setDeptColleagueIds(new Set((colleagues || []).map((c) => String(c.userId))));
+      } catch {
+        if (!cancelled) setDeptColleagueIds(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    showColleagueDirectory,
+    directoryOrgId,
+    currentUserId,
+    directoryDepartmentId,
+    t,
+  ]);
+
   // Map friends + sắp xếp theo tin nhắn gần nhất; presence realtime khớp Dashboard (onlineUsers từ socket)
   const viewFriends = useMemo(() => {
     const rows = friends.map((f, index) => {
@@ -636,7 +648,16 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         _presenceKeys: [dirId],
       });
     }
-    const sorted = sortFriendsForDmRail(rows, lastDmByFriendId, pinnedFriendIds);
+    const scopedRows =
+      showColleagueDirectory && deptColleagueIds instanceof Set
+        ? rows.filter((r) => {
+            const id = String(r.id || '');
+            if (dirId && id === dirId) return true;
+            if (r.isBlockedByMe) return true;
+            return deptColleagueIds.has(id);
+          })
+        : rows;
+    const sorted = sortFriendsForDmRail(scopedRows, lastDmByFriendId, pinnedFriendIds);
     const onlineSet = new Set((onlineUsers || []).map(String));
     return sorted.map((row) => {
       const { _presenceKeys, ...rest } = row;
@@ -660,7 +681,17 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         status: inLiveList ? 'online' : rest.status,
       };
     });
-  }, [friends, directoryOpenPeer, lastDmByFriendId, pinnedFriendIds, onlineUsers, socketConnected, t]);
+  }, [
+    friends,
+    directoryOpenPeer,
+    lastDmByFriendId,
+    pinnedFriendIds,
+    onlineUsers,
+    socketConnected,
+    showColleagueDirectory,
+    deptColleagueIds,
+    t,
+  ]);
 
   const viewFriendsEnriched = useMemo(() => {
     return viewFriends.map((f) => {
@@ -761,113 +792,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         return sum + Number(unreadByPeer[fid] || 0);
       }, 0),
     [viewFriendsEnriched, unreadByPeer]
-  );
-
-  const receivedInviteRows = useMemo(() => {
-    return (Array.isArray(pendingList) ? pendingList : [])
-      .map((row) => {
-        const profile =
-          row?.requester ||
-          row?.fromUser ||
-          (typeof row?.userId === 'object' ? row.userId : null) ||
-          {};
-        const id = String(
-          profile.userId || profile._id || profile.id || row?.userId || row?.requester || ''
-        ).trim();
-        return {
-          row,
-          id,
-          rowKey: String(row._id || row.id || id),
-          name: profile.displayName || profile.username || profile.name || t('common.user'),
-          avatar: profile.avatar,
-          subtitle: t('friendChat.pendingWantsFriend'),
-          status: profile.status || 'offline',
-        };
-      })
-      .filter((x) => x.id);
-  }, [pendingList, t]);
-
-  const sentInviteRows = useMemo(() => {
-    const list = sentInvitesQuery.data ?? [];
-    return (Array.isArray(list) ? list : [])
-      .map((row) => {
-        const profile =
-          row?.recipient ||
-          row?.friendId ||
-          (typeof row?.friendId === 'object' ? row.friendId : null) ||
-          {};
-        const id = String(
-          profile.userId || profile._id || profile.id || row?.friendId || ''
-        ).trim();
-        return {
-          row,
-          id,
-          rowKey: String(row._id || row.id || id),
-          name: profile.displayName || profile.username || profile.name || t('common.user'),
-          avatar: profile.avatar,
-          subtitle: profile.title || profile.headline || '',
-          status: profile.status || 'offline',
-        };
-      })
-      .filter((x) => x.id);
-  }, [sentInvitesQuery.data, t]);
-
-  const invalidateInviteQueries = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: queryKeys.friends.all });
-    refetchPending();
-    sentInvitesQuery.refetch();
-  }, [queryClient, refetchPending, sentInvitesQuery]);
-
-  const handleAcceptInvite = useCallback(
-    async (item) => {
-      if (!item?.id || inviteActingKey) return;
-      setInviteActingKey(item.rowKey);
-      try {
-        await friendService.acceptFriend(item.id);
-        toast.success(t('friendChat.pendingAcceptOk'));
-        invalidateInviteQueries();
-        if (item.id) setSelectedFriendId(item.id);
-      } catch (err) {
-        toast.error(resolveApiErrorMessage(err, { t, fallback: t('friendChat.pendingActionFail') }));
-      } finally {
-        setInviteActingKey('');
-      }
-    },
-    [inviteActingKey, invalidateInviteQueries, t]
-  );
-
-  const handleRejectInvite = useCallback(
-    async (item) => {
-      if (!item?.id || inviteActingKey) return;
-      setInviteActingKey(item.rowKey);
-      try {
-        await friendService.rejectFriend(item.id);
-        toast.success(t('friendChat.pendingRejectOk'));
-        invalidateInviteQueries();
-      } catch (err) {
-        toast.error(resolveApiErrorMessage(err, { t, fallback: t('friendChat.pendingActionFail') }));
-      } finally {
-        setInviteActingKey('');
-      }
-    },
-    [inviteActingKey, invalidateInviteQueries, t]
-  );
-
-  const handleWithdrawInvite = useCallback(
-    async (item) => {
-      if (!item?.id || inviteActingKey) return;
-      setInviteActingKey(item.rowKey);
-      try {
-        await friendService.rejectFriend(item.id);
-        toast.success(t('friendChat.pendingRejectOk'));
-        invalidateInviteQueries();
-      } catch (err) {
-        toast.error(resolveApiErrorMessage(err, { t, fallback: t('friendChat.pendingActionFail') }));
-      } finally {
-        setInviteActingKey('');
-      }
-    },
-    [inviteActingKey, invalidateInviteQueries, t]
   );
 
   const dmScopeOptions = useMemo(
@@ -987,13 +911,20 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
   const loadMessages = useCallback(
     async (friendId) => {
       if (!friendId) return;
+      const friendKey = String(friendId);
+      const seq = ++messagesLoadSeqRef.current;
+      const isCurrentLoad = () =>
+        seq === messagesLoadSeqRef.current && String(selectedFriendIdRef.current) === friendKey;
+
       setLoadingMessages(true);
       setMessagesLoadError(false);
       setNextOlderPageToken(null);
       try {
         const draftRaw = localStorage.getItem(`${DM_DRAFT_PREFIX}${friendId}`);
-        if (draftRaw != null) setMessage(draftRaw);
-        else setMessage('');
+        if (isCurrentLoad()) {
+          if (draftRaw != null) setMessage(draftRaw);
+          else setMessage('');
+        }
 
         const cacheKey = queryKeys.dm.messages(friendId);
         const parsed = await queryClient.fetchQuery({
@@ -1006,6 +937,8 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
           },
           staleTime: STALE_TIME_FRIENDS_MS,
         });
+
+        if (!isCurrentLoad()) return;
 
         const { arr, totalPages, currentPage, nextPageToken, hasMore } = parsed;
         setMessages(arr);
@@ -1021,11 +954,12 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
           setLastDmByFriendId((prev) => mergeDmSnippetMap(prev, last, currentUserId, t));
         }
       } catch {
+        if (!isCurrentLoad()) return;
         setMessagesLoadError(true);
         setMessages([]);
         setHasMoreOlder(false);
       } finally {
-        setLoadingMessages(false);
+        if (isCurrentLoad()) setLoadingMessages(false);
       }
     },
     [currentUserId, parseMessagesResponse, t, queryClient]
@@ -1033,19 +967,22 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
 
   const loadOlderMessages = useCallback(async () => {
     if (!selectedFriendId || loadingOlder || !hasMoreOlder || !nextOlderPageToken) return;
+    const friendKey = String(selectedFriendId);
+    const token = nextOlderPageToken;
     setLoadingOlder(true);
     try {
       const parsed = await queryClient.fetchQuery({
-        queryKey: [...queryKeys.dm.messages(selectedFriendId), 'token', nextOlderPageToken],
+        queryKey: [...queryKeys.dm.messages(selectedFriendId), 'token', token],
         queryFn: async () => {
           const resp = await dmMessageService.getConversation(selectedFriendId, {
-            pageToken: nextOlderPageToken,
+            pageToken: token,
             limit: DM_PAGE_SIZE,
           });
           return parseMessagesResponse(resp);
         },
         staleTime: STALE_TIME_FRIENDS_MS,
       });
+      if (String(selectedFriendIdRef.current) !== friendKey) return;
       const { arr, totalPages, currentPage, nextPageToken, hasMore } = parsed;
       setMessages((prev) => {
         const ids = new Set(prev.map((x) => String(x._id || x.id)));
@@ -1346,10 +1283,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
   const openCalendarForFriend = useCallback(
     (opts = {}) => {
       if (!currentFriend?.id) return;
-      if (isCurrentFriendBlocked) {
-        toast.error(t('friendChat.scheduleBlockedError'));
-        return;
-      }
       navigate('/calendar', {
         state: {
           source: 'friend-chat',
@@ -1363,7 +1296,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         },
       });
     },
-    [currentFriend, isCurrentFriendBlocked, navigate, t]
+    [currentFriend, navigate, t]
   );
 
   const composerMentionItems = useMemo(
@@ -1973,14 +1906,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     }
   };
 
-  const confirmBlockCurrentFriend = async () => {
-    toast.error(t('friendChat.blockFail'));
-  };
-
-  const confirmUnblockCurrentFriend = async () => {
-    toast.error(t('friendChat.unblockFail'));
-  };
-
   const replyLabelForDm = (msg) => {
     if (!msg) return t('friendChat.friendDefault');
     const sid = msg.senderId?._id || msg.senderId;
@@ -2013,9 +1938,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
                   activeTab={sidebarMainTab}
                   onTabChange={setSidebarMainTab}
                   messagesBadge={totalDmUnread}
-                  invitesBadge={showFriendInvites ? pendingCount : 0}
                   showColleagues={showColleagueDirectory}
-                  showInvites={showFriendInvites}
                   onNewMessage={() => {
                     if (showColleagueDirectory) setShowNewDmModal(true);
                   }}
@@ -2069,25 +1992,11 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
           {suiteLayout && sidebarMainTab === 'messages' ? (
             <FriendChatFilterChips value={railFilterTab} onChange={setRailFilterTab} />
           ) : null}
-          {suiteLayout && showFriendInvites && sidebarMainTab === 'invites' ? (
-            <FriendChatInvitesPanel
-              received={receivedInviteRows}
-              sent={sentInviteRows}
-              loading={
-                (pendingCount > 0 && receivedInviteRows.length === 0 && !pendingList?.length) ||
-                sentInvitesQuery.isLoading
-              }
-              actingKey={inviteActingKey}
-              onAccept={handleAcceptInvite}
-              onReject={handleRejectInvite}
-              onWithdraw={handleWithdrawInvite}
-              emptyReceivedTitle={t('friendChat.pendingRequestsTitle')}
-              emptyReceivedHint={t('friendChat.pendingWantsFriend')}
-            />
-          ) : suiteLayout && showColleagueDirectory && sidebarMainTab === 'colleagues' ? (
+          {suiteLayout && showColleagueDirectory && sidebarMainTab === 'colleagues' ? (
             <ColleagueDirectoryRail
               orgId={directoryOrgId}
               currentUserId={currentUserId}
+              departmentId={directoryDepartmentId}
               selectedUserId={selectedFriendId}
               onlineUsers={onlineUsers}
               onSelectColleague={openColleagueDm}
@@ -2196,19 +2105,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     <>
           <div className={`${FIGMA_CHAT_MAIN_PANEL} min-h-0`}>
           <div className={FIGMA_CHAT_MAIN_INNER}>
-          {suiteLayout && showFriendInvites && sidebarMainTab === 'invites' ? (
-            <div className={FIGMA_CHAT_INVITES_PLACEHOLDER}>
-              <div className="text-4xl" aria-hidden>
-                👥
-              </div>
-              <div className="text-[0.9375rem] font-semibold text-foreground">
-                Quản lý lời mời kết bạn
-              </div>
-              <p className="max-w-[260px] text-[0.8125rem] leading-relaxed text-muted-foreground">
-                Chấp nhận lời mời để bắt đầu trò chuyện, hoặc thu hồi lời mời đã gửi từ danh sách bên trái.
-              </p>
-            </div>
-          ) : friendsLoading ? (
+          {friendsLoading ? (
             <div className={FIGMA_CHAT_EMPTY}>
               {t('friendChat.loadingFriends')}
             </div>
@@ -2255,9 +2152,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
                       {currentFriend.name}
                     </button>
                     <div className={FIGMA_CHAT_HEADER_META} aria-live="polite">
-                      {isCurrentFriendBlocked ? (
-                        <span className={FIGMA_CHAT_HEADER_STATUS}>{t('friendChat.blockedRailLabel')}</span>
-                      ) : peerTyping ? (
+                      {peerTyping ? (
                         <span className={FIGMA_CHAT_HEADER_TYPING}>{t('friendChat.typing')}</span>
                       ) : (
                         <>
@@ -2433,7 +2328,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
                     ) : null}
                   </div>
                 </div>
-                {blockedByPeer && !isCurrentFriendBlocked && (
+                {blockedByPeer && !isCurrentFriendBlocked ? (
                   <div
                     className={`mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
                       isDarkMode
@@ -2443,30 +2338,18 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
                   >
                     <span className="min-w-0 flex-1">{t('friendChat.blockedByPeerBanner')}</span>
                   </div>
-                )}
-                {isCurrentFriendBlocked && (
+                ) : null}
+                {isCurrentFriendBlocked ? (
                   <div
-                    className={`mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm ${
+                    className={`mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
                       isDarkMode
                         ? 'border-rose-500/35 bg-rose-500/10 text-rose-100'
                         : 'border-rose-200 bg-rose-50 text-rose-900'
                     }`}
                   >
                     <span className="min-w-0 flex-1">{t('friendChat.blockedBanner')}</span>
-                    <button
-                      type="button"
-                      onClick={() => setUnblockConfirmOpen(true)}
-                      disabled={unblockingFriend}
-                      className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold ${
-                        isDarkMode
-                          ? 'bg-rose-500/20 text-rose-100 hover:bg-rose-500/30'
-                          : 'bg-white text-rose-800 hover:bg-rose-100'
-                      }`}
-                    >
-                      {t('friendChat.unblockConfirmBtn')}
-                    </button>
                   </div>
-                )}
+                ) : null}
               </header>
               <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
                 <div
@@ -3050,8 +2933,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         attachments={friendAttachments}
         currentUserId={currentUserId}
         onClose={closeDmInfoPanel}
-        onBlock={undefined}
-        isBlocked={false}
         onOpenProfile={() => setProfileModalOpen(true)}
         onOpenMediaAt={openMediaViewerAtGrid}
         onViewAllMedia={() => setMediaViewer({ open: true, index: 0 })}
@@ -3244,30 +3125,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         confirmText={t('common.delete')}
         cancelText={t('nav.cancel')}
       />
-      <ConfirmDialog
-        isOpen={blockConfirmOpen}
-        onClose={() => !blockingFriend && setBlockConfirmOpen(false)}
-        onConfirm={async () => {
-          await confirmBlockCurrentFriend();
-          setBlockConfirmOpen(false);
-        }}
-        title={t('friendChat.blockUser')}
-        message={t('friendChat.blockConfirm', { name: currentFriend?.name || '' })}
-        confirmText={t('friendChat.blockConfirmBtn')}
-        cancelText={t('nav.cancel')}
-      />
-      <ConfirmDialog
-        isOpen={unblockConfirmOpen}
-        onClose={() => !unblockingFriend && setUnblockConfirmOpen(false)}
-        onConfirm={async () => {
-          await confirmUnblockCurrentFriend();
-          setUnblockConfirmOpen(false);
-        }}
-        title={t('friendChat.unblockUser')}
-        message={t('friendChat.unblockConfirm', { name: currentFriend?.name || '' })}
-        confirmText={t('friendChat.unblockConfirmBtn')}
-        cancelText={t('nav.cancel')}
-      />
       {inlineToast && (
         <Toast
           message={inlineToast.message}
@@ -3280,6 +3137,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         onClose={() => setShowNewDmModal(false)}
         orgId={directoryOrgId}
         currentUserId={currentUserId}
+        departmentId={directoryDepartmentId}
         onSelectColleague={openColleagueDm}
       />
     </>

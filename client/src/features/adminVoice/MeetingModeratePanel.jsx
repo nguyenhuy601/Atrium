@@ -131,11 +131,11 @@ export default function MeetingModeratePanel({ orgId, embedded = false }) {
             )}
           </ul>
           <div className="flex flex-wrap gap-2">
-            <Link to={`/app/admin/voice/end-meeting?meetingId=${encodeURIComponent(meetingIdParam)}`}>
+            <Link to={`/admin/voice/end-meeting?meetingId=${encodeURIComponent(meetingIdParam)}`}>
               <GradientButton type="button">{t('adminDomains.voice.endMeeting')}</GradientButton>
             </Link>
             <Link
-              to={`/app/communicate/voice?meetingId=${encodeURIComponent(meetingIdParam)}`}
+              to={`/communicate/voice?meetingId=${encodeURIComponent(meetingIdParam)}`}
               className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted vh-motion-row vh-motion-respect"
             >
               {t('adminVoice.openVoiceRoom')}

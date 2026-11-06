@@ -13,6 +13,35 @@ export const SUITE = {
 export const SUITE_STORAGE_KEY = 'atrium:current-suite';
 export const LAST_ORG_ID_KEY = 'atrium:last-organization-id';
 
+/** Canonical shell prefix — empty (legacy `/app` stripped via redirect + normalize). */
+export const APP_SHELL_PREFIX = '';
+
+const LEGACY_APP_SHELL_PREFIX = '/app';
+
+/**
+ * Build absolute suite path from a segment path (must start with `/` or be empty).
+ * @param {string} segmentPath e.g. `/projects`, `/company/home`
+ */
+export function appPath(segmentPath = '/') {
+  const raw = String(segmentPath || '/').trim() || '/';
+  const normalized = raw.startsWith('/') ? raw : `/${raw}`;
+  if (!APP_SHELL_PREFIX) return normalized === '' ? '/' : normalized;
+  if (normalized === '/') return APP_SHELL_PREFIX || '/';
+  return `${APP_SHELL_PREFIX}${normalized}`;
+}
+
+/** Strip legacy `/app` prefix for comparisons / redirects (idempotent). */
+export function stripLegacyAppPrefix(pathname = '') {
+  const path = String(pathname || '');
+  if (path === LEGACY_APP_SHELL_PREFIX || path === `${LEGACY_APP_SHELL_PREFIX}/`) {
+    return '/';
+  }
+  if (path.startsWith(`${LEGACY_APP_SHELL_PREFIX}/`)) {
+    return path.slice(LEGACY_APP_SHELL_PREFIX.length) || '/';
+  }
+  return path;
+}
+
 const SUITE_SEGMENT = {
   [SUITE.COMMUNICATE]: 'communicate',
   [SUITE.COMPANY]: 'company',
@@ -33,12 +62,12 @@ const SEGMENT_TO_SUITE = {
 };
 
 export const SUITE_DEFAULT_PATH = {
-  [SUITE.COMMUNICATE]: '/app/communicate/overview',
-  [SUITE.COMPANY]: '/app/company/home',
-  [SUITE.PROJECTS]: '/app/projects',
-  [SUITE.ME]: '/app/me/dashboard',
-  [SUITE.ADMIN]: '/app/admin',
-  [SUITE.COLLABORATE]: '/app/company/home',
+  [SUITE.COMMUNICATE]: appPath('/communicate/overview'),
+  [SUITE.COMPANY]: appPath('/company/home'),
+  [SUITE.PROJECTS]: appPath('/projects'),
+  [SUITE.ME]: appPath('/me/dashboard'),
+  [SUITE.ADMIN]: appPath('/admin'),
+  [SUITE.COLLABORATE]: appPath('/company/home'),
 };
 
 export function normalizeSuite(value) {
@@ -80,7 +109,7 @@ export function writeStoredLastOrganizationId(orgId) {
 }
 
 export function suiteBasePath(suite) {
-  return `/app/${suiteToSegment(suite)}`;
+  return appPath(`/${suiteToSegment(suite)}`);
 }
 
 export function getDefaultPathForSuite(suite) {
@@ -89,32 +118,33 @@ export function getDefaultPathForSuite(suite) {
 }
 
 export function detectSuiteFromPath(pathname) {
-  const path = String(pathname || '');
-  if (path.startsWith('/app/admin')) return SUITE.ADMIN;
-  if (path.startsWith('/app/communicate')) return SUITE.COMMUNICATE;
-  if (path.startsWith('/app/company')) return SUITE.COMPANY;
-  if (path.startsWith('/app/projects')) return SUITE.PROJECTS;
-  if (path.startsWith('/app/collaborate')) return SUITE.COMPANY;
-  if (path.startsWith('/app/me')) return SUITE.COMMUNICATE;
+  const path = stripLegacyAppPrefix(String(pathname || ''));
+  if (path.startsWith('/admin')) return SUITE.ADMIN;
+  if (path.startsWith('/communicate')) return SUITE.COMMUNICATE;
+  if (path.startsWith('/company')) return SUITE.COMPANY;
+  if (path.startsWith('/projects')) return SUITE.PROJECTS;
+  if (path.startsWith('/collaborate')) return SUITE.COMPANY;
+  if (path.startsWith('/me')) return SUITE.COMMUNICATE;
   return null;
 }
 
 /** Inline map — avoid importing adminDomainsConfig (heavy / no .js extension for node --test). */
 const LEGACY_ADMIN_TAB_TO_PATH = {
-  overview: '/app/admin',
-  people: '/app/admin/users',
-  approvals: '/app/admin/users',
-  general: '/app/admin/system-config',
-  structure: '/app/admin/system-config?tab=structure',
-  roles: '/app/admin/rbac/roles',
-  policy: '/app/admin/system-config/policy',
-  join: '/app/admin/users',
-  security: '/app/admin/security',
+  overview: appPath('/admin'),
+  people: appPath('/admin/users'),
+  approvals: appPath('/admin/users'),
+  general: appPath('/admin/system-config'),
+  structure: `${appPath('/admin/system-config')}?tab=structure`,
+  roles: appPath('/admin/rbac/roles'),
+  policy: appPath('/admin/system-config/policy'),
+  join: appPath('/admin/users'),
+  security: appPath('/admin/security'),
 };
 
 import { normalizeProjectModule } from './suiteNavConfig.js';
+import { buildAiHitlPath } from './aiHitlPath.js';
 
-/** Map legacy ?tab= trên /app/collaborate/admin sang route admin mới. */
+/** Map legacy ?tab= trên /collaborate/admin (hoặc /app/collaborate/admin) sang route admin mới. */
 export function mapLegacyAdminTabToPath(tab) {
   const raw = String(tab || 'overview').trim().toLowerCase();
   return LEGACY_ADMIN_TAB_TO_PATH[raw] || LEGACY_ADMIN_TAB_TO_PATH.overview;
@@ -123,7 +153,7 @@ export function mapLegacyAdminTabToPath(tab) {
 /** Suite paths — org resolved client-side (single-company); do not write organizationId to URL. */
 export function buildCommunicateChannelsPath(orgId = '', query = {}) {
   void orgId;
-  const base = '/app/communicate/channels';
+  const base = appPath('/communicate/channels');
   const params = new URLSearchParams();
   const deptId = String(query?.departmentId || '').trim();
   const channelId = String(query?.channelId || '').trim();
@@ -154,7 +184,7 @@ function appendOrgQuery(base, orgId = '', extra = {}) {
 /* ——— Company suite ——— */
 
 export function buildCompanyOverviewPath(orgId = '') {
-  return appendOrgQuery('/app/company/overview', orgId);
+  return appendOrgQuery(appPath('/company/overview'), orgId);
 }
 
 export function buildCompanyHomePath({
@@ -162,7 +192,7 @@ export function buildCompanyHomePath({
   departmentId = '',
   teamId = '',
 } = {}) {
-  return appendOrgQuery('/app/company/home', organizationId, {
+  return appendOrgQuery(appPath('/company/home'), organizationId, {
     departmentId,
     teamId,
   });
@@ -176,7 +206,7 @@ export function buildCompanyWorkspacePath({
   channelId = '',
 } = {}) {
   void organizationId;
-  const base = '/app/company/workspaces';
+  const base = appPath('/company/workspaces');
   const params = new URLSearchParams();
   const deptId = String(departmentId || '').trim();
   const tid = String(teamId || '').trim();
@@ -191,7 +221,7 @@ export function buildCompanyWorkspacePath({
 }
 
 export function buildCompanyChatPath(orgId = '', query = {}) {
-  return appendOrgQuery('/app/company/chat', orgId, {
+  return appendOrgQuery(appPath('/company/chat'), orgId, {
     departmentId: query?.departmentId,
     teamId: query?.teamId,
     channelId: query?.channelId,
@@ -201,14 +231,14 @@ export function buildCompanyChatPath(orgId = '', query = {}) {
 
 /** True when pathname is the company suite chat module (not /workspaces). */
 export function isCompanyChatModulePath(pathname = '') {
-  const p = String(pathname || '').split('?')[0].replace(/\/+$/, '') || '';
-  return p === '/app/company/chat';
+  const p = stripLegacyAppPrefix(String(pathname || '').split('?')[0]).replace(/\/+$/, '') || '';
+  return p === appPath('/company/chat');
 }
 
 /** True when pathname is the company suite documents module. */
 export function isCompanyDocumentsModulePath(pathname = '') {
-  const p = String(pathname || '').split('?')[0].replace(/\/+$/, '') || '';
-  return p === '/app/company/documents';
+  const p = stripLegacyAppPrefix(String(pathname || '').split('?')[0]).replace(/\/+$/, '') || '';
+  return p === appPath('/company/documents');
 }
 
 export function isImmersiveCompanyModulePath(pathname = '') {
@@ -216,59 +246,72 @@ export function isImmersiveCompanyModulePath(pathname = '') {
 }
 
 export function buildCompanyDocumentsPath(orgId = '', query = {}) {
-  return appendOrgQuery('/app/company/documents', orgId, {
+  // Pathname /company/documents already implies documents — omit redundant tab.
+  return appendOrgQuery(appPath('/company/documents'), orgId, {
     departmentId: query?.departmentId,
     teamId: query?.teamId,
-    tab: query?.tab || (query?.departmentId ? 'documents' : ''),
+    tab: query?.tab && query.tab !== 'documents' ? query.tab : '',
   });
 }
 
 export function buildCompanyCalendarPath(orgId = '', query = {}) {
-  return appendOrgQuery('/app/company/calendar', orgId, {
+  // Pathname /company/calendar already implies calendar — omit redundant tab.
+  return appendOrgQuery(appPath('/company/calendar'), orgId, {
     departmentId: query?.departmentId,
-    // Calendar stays department-scoped even in team mode
-    tab: query?.tab || (query?.departmentId ? 'calendar' : ''),
+    tab: query?.tab && query.tab !== 'calendar' ? query.tab : '',
   });
 }
 
 export function buildCompanyApprovalsPath(orgId = '') {
-  return appendOrgQuery('/app/company/approvals', orgId);
+  return appendOrgQuery(appPath('/company/approvals'), orgId);
 }
 
 export function buildCompanyOrgNotificationsPath(orgId = '') {
-  return appendOrgQuery('/app/company/notifications', orgId);
+  return appendOrgQuery(appPath('/company/notifications'), orgId);
 }
 
 export function buildCompanySettingsPath(orgId) {
   const id = String(orgId || '').trim();
   return id
-    ? `/app/company/organizations/${encodeURIComponent(id)}/settings`
-    : '/app/company/workspaces';
+    ? appPath(`/company/organizations/${encodeURIComponent(id)}/settings`)
+    : appPath('/company/workspaces');
 }
 
 /* ——— Projects suite ——— */
 
 export function buildProjectsPickerPath(orgId = '') {
-  return appendOrgQuery('/app/projects', orgId);
+  return appendOrgQuery(appPath('/projects'), orgId);
 }
 
 export function buildProjectsModulePath(projectId, module = 'overview', query = {}) {
   const pid = String(projectId || '').trim();
   if (!pid) return buildProjectsPickerPath(query?.organizationId || query?.orgId || '');
   let mod = String(module || 'overview').trim();
+  if (mod === 'ai-hitl' || mod.startsWith('ai-hitl/')) {
+    return buildAiHitlPath(pid, {
+      tab: mod.includes('review') || query?.tab === 'review' ? 'review' : 'monitor',
+      boardId: query?.boardId,
+      packId: query?.packId,
+      startWhat: query?.startWhat,
+      defaultBoardId: query?.defaultBoardId,
+      linkedPackId: query?.linkedPackId,
+      packCount: query?.packCount,
+    });
+  }
   if (mod.startsWith('planning-')) {
     mod = `planning/${mod.replace(/^planning-/, '')}`;
   } else if (!mod.includes('/')) {
     mod = normalizeProjectModule(mod);
   }
-  const base = `/app/projects/${encodeURIComponent(pid)}/${mod}`;
+  const base = appPath(`/projects/${encodeURIComponent(pid)}/${mod}`);
   const params = new URLSearchParams();
   // organizationId is resolved client-side from project payload / storage — do not write to module URLs.
   const boardId = String(query?.boardId || '').trim();
+  const defaultBoardId = String(query?.defaultBoardId || '').trim();
   const channelId = String(query?.channelId || '').trim();
   const packId = String(query?.packId || '').trim();
   const startWhat = String(query?.startWhat || '').trim();
-  if (boardId) params.set('boardId', boardId);
+  if (boardId && (!defaultBoardId || boardId !== defaultBoardId)) params.set('boardId', boardId);
   if (channelId) params.set('channelId', channelId);
   if (packId) params.set('packId', packId);
   if (startWhat) params.set('startWhat', startWhat);
@@ -278,7 +321,7 @@ export function buildProjectsModulePath(projectId, module = 'overview', query = 
 
 export function buildProjectsNewPath(orgId = '', query = {}) {
   void orgId;
-  const base = '/app/projects/new';
+  const base = appPath('/projects/new');
   const params = new URLSearchParams();
   const title = String(query?.title || '').trim();
   const description = String(query?.description || '').trim();
@@ -298,7 +341,7 @@ export function buildProjectsNewPath(orgId = '', query = {}) {
 
 export function buildProjectsNewAiPath(orgId = '', query = {}) {
   void orgId;
-  const base = '/app/projects/new-ai';
+  const base = appPath('/projects/new-ai');
   const params = new URLSearchParams();
   const projectId = String(query?.projectId || '').trim();
   if (projectId) params.set('projectId', projectId);
@@ -310,21 +353,12 @@ export function buildProjectsNewAiPath(orgId = '', query = {}) {
 
 /**
  * AI HITL Phase 0 workspace (in Projects suite shell).
- * /app/projects/:projectId/ai-hitl?packId=&startWhat=1
+ * /projects/:projectId/ai-hitl[/review]?packId=&startWhat=1
  */
 export function buildProjectsAiHitlPath(projectId, query = {}) {
   const pid = String(projectId || '').trim();
   if (!pid) return buildProjectsPickerPath(query?.organizationId || query?.orgId || '');
-  const base = `/app/projects/${encodeURIComponent(pid)}/ai-hitl`;
-  const params = new URLSearchParams();
-  const boardId = String(query?.boardId || '').trim();
-  const packId = String(query?.packId || '').trim();
-  const startWhat = String(query?.startWhat || '').trim();
-  if (boardId) params.set('boardId', boardId);
-  if (packId) params.set('packId', packId);
-  if (startWhat) params.set('startWhat', startWhat);
-  const qs = params.toString();
-  return qs ? `${base}?${qs}` : base;
+  return buildAiHitlPath(pid, query);
 }
 
 /* ——— Legacy Collaborate builders → new suite paths (compat) ——— */
@@ -353,7 +387,10 @@ export function buildCollaborateProjectsPath(orgId = '', query = {}) {
 
 export function buildCollaborateProjectHubPath(projectId, query = {}) {
   const module = query?.module || query?.tab || 'overview';
-  return buildProjectsModulePath(projectId, module, query);
+  return buildProjectsModulePath(projectId, module, {
+    ...query,
+    defaultBoardId: query?.defaultBoardId,
+  });
 }
 
 export function buildCollaborateTasksPath(orgId = '', query = {}) {
@@ -485,10 +522,10 @@ export function parseLegacyWorkspacePath(pathname) {
 }
 
 /**
- * Map legacy /app/collaborate/* pathname + search → new suite path.
+ * Map legacy /collaborate/* (or /app/collaborate/*) pathname + search → new suite path.
  */
 export function mapCollaboratePathToDualSuite(pathname, search = '') {
-  const path = String(pathname || '').replace(/\/+/g, '/');
+  const path = stripLegacyAppPrefix(String(pathname || '').replace(/\/+/g, '/'));
   const params = new URLSearchParams(
     typeof search === 'string' ? search.replace(/^\?/, '') : ''
   );
@@ -502,61 +539,63 @@ export function mapCollaboratePathToDualSuite(pathname, search = '') {
     return s ? `?${s}` : '';
   };
 
-  if (path === '/app/collaborate' || path === '/app/collaborate/') {
-    return `/app/company/home${qs()}`;
+  if (path === '/collaborate' || path === '/collaborate/') {
+    return `${appPath('/company/home')}${qs()}`;
   }
-  if (path.startsWith('/app/collaborate/overview')) {
-    return `/app/company/overview${qs()}`;
+  if (path.startsWith('/collaborate/overview')) {
+    return `${appPath('/company/overview')}${qs()}`;
   }
-  if (path.startsWith('/app/collaborate/workspaces')) {
-    return `/app/company/workspaces${qs()}`;
+  if (path.startsWith('/collaborate/workspaces')) {
+    return `${appPath('/company/workspaces')}${qs()}`;
   }
-  if (path.startsWith('/app/collaborate/documents')) {
-    return `/app/company/documents${qs()}`;
+  if (path.startsWith('/collaborate/documents')) {
+    return `${appPath('/company/documents')}${qs()}`;
   }
-  if (path.startsWith('/app/collaborate/calendar')) {
-    return `/app/company/calendar${qs()}`;
+  if (path.startsWith('/collaborate/calendar')) {
+    return `${appPath('/company/calendar')}${qs()}`;
   }
-  if (path.startsWith('/app/collaborate/approvals')) {
-    return `/app/company/approvals${qs()}`;
+  if (path.startsWith('/collaborate/approvals')) {
+    return `${appPath('/company/approvals')}${qs()}`;
   }
-  if (path.startsWith('/app/collaborate/notifications')) {
-    return `/app/company/notifications${qs()}`;
+  if (path.startsWith('/collaborate/notifications')) {
+    return `${appPath('/company/notifications')}${qs()}`;
   }
-  if (path.startsWith('/app/collaborate/join/')) {
-    return path.replace('/app/collaborate/join/', '/app/company/join/') + qs();
+  if (path.startsWith('/collaborate/join/')) {
+    return path.replace('/collaborate/join/', `${appPath('/company/join/')}`) + qs();
   }
-  if (path.startsWith('/app/collaborate/organizations/')) {
-    return path.replace('/app/collaborate/organizations/', '/app/company/organizations/') + qs();
+  if (path.startsWith('/collaborate/organizations/')) {
+    return (
+      path.replace('/collaborate/organizations/', `${appPath('/company/organizations/')}`) + qs()
+    );
   }
-  if (path.startsWith('/app/collaborate/admin')) {
+  if (path.startsWith('/collaborate/admin')) {
     return mapLegacyAdminTabToPath(params.get('tab'));
   }
-  if (path.startsWith('/app/collaborate/projects/new-ai')) {
-    return `/app/projects/new-ai${qs()}`;
+  if (path.startsWith('/collaborate/projects/new-ai')) {
+    return `${appPath('/projects/new-ai')}${qs()}`;
   }
-  if (path.startsWith('/app/collaborate/projects/new')) {
-    return `/app/projects/new${qs()}`;
+  if (path.startsWith('/collaborate/projects/new')) {
+    return `${appPath('/projects/new')}${qs()}`;
   }
-  if (path.startsWith('/app/collaborate/projects/chat')) {
+  if (path.startsWith('/collaborate/projects/chat')) {
     const projectId = String(params.get('projectId') || '').trim();
     if (projectId) {
       return buildProjectsModulePath(projectId, 'chat', { organizationId: orgId });
     }
     return buildProjectsPickerPath(orgId);
   }
-  const hubMatch = path.match(/^\/app\/collaborate\/projects\/([^/]+)\/?$/);
+  const hubMatch = path.match(/^\/collaborate\/projects\/([^/]+)\/?$/);
   if (hubMatch) {
     const projectId = decodeURIComponent(hubMatch[1]);
     const tab = String(params.get('tab') || 'overview').trim();
     const boardId = String(params.get('boardId') || '').trim();
     return buildProjectsModulePath(projectId, tab, { organizationId: orgId, boardId });
   }
-  if (path.startsWith('/app/collaborate/projects') || path.startsWith('/app/collaborate/tasks')) {
+  if (path.startsWith('/collaborate/projects') || path.startsWith('/collaborate/tasks')) {
     return buildProjectsPickerPath(orgId);
   }
-  if (path.startsWith('/app/collaborate/requirements')) {
+  if (path.startsWith('/collaborate/requirements')) {
     return buildProjectsPickerPath(orgId);
   }
-  return `/app/company/home${qs()}`;
+  return `${appPath('/company/home')}${qs()}`;
 }

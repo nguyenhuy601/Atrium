@@ -17,7 +17,7 @@ import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
 import { useAppStrings } from '../../locales/appStrings';
 import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
 
-const POS_LIST_PATH = '/app/admin/rbac/positions';
+const POS_LIST_PATH = '/admin/rbac/positions';
 
 export default function PosCreatePanel({ orgId }) {
   const { t } = useAppStrings();

@@ -47,6 +47,7 @@ function formatMessagePreview(message) {
 /** Panel tìm kiếm trong sidebar workspace tổ chức. */
 export default function OrgWorkspaceSearchSidebar({
   organizationId,
+  departmentId = '',
   serverId,
   channels = [],
   isDarkMode,
@@ -80,12 +81,16 @@ export default function OrgWorkspaceSearchSidebar({
     320
   );
 
+  const membersDeptId = String(departmentId || '').trim();
+
   useEffect(() => {
     if (!organizationId || (menuMode !== 'from' && menuMode !== 'mentions')) return;
     let cancelled = false;
     setLoadingMembers(true);
     organizationAPI
-      .getMembers(organizationId)
+      .getMembers(organizationId, {
+        ...(membersDeptId ? { departmentId: membersDeptId } : {}),
+      })
       .then(async (res) => {
         if (cancelled) return;
         const raw = unwrap(res);
@@ -102,7 +107,7 @@ export default function OrgWorkspaceSearchSidebar({
     return () => {
       cancelled = true;
     };
-  }, [organizationId, menuMode]);
+  }, [organizationId, membersDeptId, menuMode]);
 
   const runSearch = useCallback(async () => {
     if (!organizationId) return;

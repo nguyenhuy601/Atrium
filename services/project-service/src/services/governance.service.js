@@ -247,25 +247,27 @@ async function runRetentionStub({ userId, organizationId, dryRun = true }) {
   };
 }
 
-function getSecurityFeatureFlagsStub() {
-  const on = (name) => {
-    const raw = String(process.env[name] ?? '0').trim().toLowerCase();
-    return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
-  };
+function getSecurityFeatureFlagsFallback() {
   return {
-    mfa: on('AUTH_MFA_ENABLED'),
-    sso: on('AUTH_SSO_ENABLED'),
-    ipAllowlist: on('AUTH_IP_ALLOWLIST_ENABLED'),
-    webauthn: on('AUTH_WEBAUTHN_ENABLED'),
+    mfa: false,
+    sso: false,
+    ipAllowlist: false,
+    ipAllowlistStatus: 'DISABLED',
+    ipAllowlistEntryCount: 0,
+    ipAllowlistSource: 'ENVIRONMENT',
+    webauthn: false,
     wave: 'C',
     status: 'deferred',
-    note: 'SSO/LDAP/AD/MFA/IP — plan riêng; không đổi auth flow trong P6',
+    note: 'auth-service security-flags unavailable — showing safe defaults',
   };
 }
 
 async function getSecurityFeatureFlags({ userId, organizationId }) {
   await assertOrgAdminOnly(organizationId, userId);
-  return getSecurityFeatureFlagsStub();
+  const { fetchAuthSecurityFlags } = require('../clients/authSecurityFlags.client');
+  const fromAuth = await fetchAuthSecurityFlags();
+  if (fromAuth) return fromAuth;
+  return getSecurityFeatureFlagsFallback();
 }
 
 function isValidOid(id) {
@@ -334,7 +336,9 @@ module.exports = {
   updateRetentionPolicy,
   runRetentionStub,
   getOrCreateSettings,
-  getSecurityFeatureFlagsStub,
+  getSecurityFeatureFlagsFallback,
+  /** @deprecated alias — dùng getSecurityFeatureFlagsFallback */
+  getSecurityFeatureFlagsStub: getSecurityFeatureFlagsFallback,
   getSecurityFeatureFlags,
   buildActiveProjectsFilter,
   isValidOid,

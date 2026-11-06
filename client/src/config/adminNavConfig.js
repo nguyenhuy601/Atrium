@@ -17,7 +17,7 @@ export function resolveAdminSectionFromPath(pathname) {
   const match = findAdminNavItem(pathname);
   if (match?.item?.settingsTab) return match.item.id;
   const base = String(pathname || '').replace(/\/+$/, '');
-  if (base === '/app/admin') return 'overview';
-  const slug = base.match(/^\/app\/admin\/([^/]+)/)?.[1];
+  if (base === '/admin') return 'overview';
+  const slug = base.match(/^\/(?:app\/)?admin\/([^/]+)/)?.[1];
   return slug || 'overview';
 }

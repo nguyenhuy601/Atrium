@@ -50,7 +50,9 @@
     "./http/s2sSafeGet": "./http/s2sSafeGet.js",
     "./http/*": "./http/*.js",
     "./llm/openaiCompatibleClient": "./llm/openaiCompatibleClient.js",
-    "./llm/*": "./llm/*.js"
+    "./llm/*": "./llm/*.js",
+    "./constants/frontendAppPaths": "./constants/frontendAppPaths.js",
+    "./constants/*": "./constants/*.js"
   },
   "scripts": {
     "test": "node tests/fieldCrypto.test.js"

@@ -227,6 +227,13 @@ export const projectAPI = {
   completeProject: (projectId, body = {}) =>
     apiClient.post(`/projects/${encodeURIComponent(projectId)}/complete`, body),
 
+  /** Frozen closureSnapshot projection — GET ?view=closure-report */
+  getClosureReport: (projectId) =>
+    apiClient.get(`/projects/${encodeURIComponent(projectId)}`, {
+      ...withHubSoftErrorToasts(),
+      params: { view: 'closure-report' },
+    }),
+
   listChangeRequests: (projectId, params = {}) =>
     apiClient.get(`/projects/${encodeURIComponent(projectId)}/change-requests`, {
       params: {

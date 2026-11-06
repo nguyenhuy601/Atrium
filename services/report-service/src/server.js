@@ -11,7 +11,7 @@ const {
 } = require('./workers/analyticsEtlConsumer');
 const { connectAnalyticsDb } = require('./db/analyticsDb');
 
-const PORT = process.env.PORT || 3025;
+const PORT = process.env.PORT || 3026;
 
 try {
   connectRedis();

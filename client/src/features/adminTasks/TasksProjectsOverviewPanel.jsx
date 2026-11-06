@@ -98,19 +98,19 @@ function ProjectActionLinks({ boardId, busy, onArchive, t }) {
       {hasBoard ? (
         <>
           <Link
-            to={`/app/admin/projects/settings?boardId=${encodeURIComponent(boardId)}`}
+            to={`/admin/projects/settings?boardId=${encodeURIComponent(boardId)}`}
             className={linkClass}
           >
             {t('adminDomains.projects.settings')}
           </Link>
           <Link
-            to={`/app/admin/projects/project-team?boardId=${encodeURIComponent(boardId)}`}
+            to={`/admin/projects/project-team?boardId=${encodeURIComponent(boardId)}`}
             className={linkClass}
           >
             {t('adminTasks.openTeam')}
           </Link>
           <Link
-            to={`/app/admin/projects/delegation?boardId=${encodeURIComponent(boardId)}`}
+            to={`/admin/projects/delegation?boardId=${encodeURIComponent(boardId)}`}
             className={linkClass}
           >
             {t('adminTasks.openDelegation')}

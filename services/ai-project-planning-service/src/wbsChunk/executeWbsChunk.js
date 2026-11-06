@@ -1,6 +1,7 @@
 /**
  * One chunk: LLM call, contract accept, quality gate, limited repair.
  * FR the model skips stay uncovered. Does not choose the next planning tool.
+ * Prompt uses wbs-chunk-semantic-v1 + soft token budget / bisect (never strip AC).
  */
 
 const { generateJson } = require('../runtime/ollamaGenerate');
@@ -13,7 +14,7 @@ const {
 } = require('../contracts/howWbsLlmContract');
 const {
   acceptWbsStoryTasks,
-  buildWbsStoryLlmPrompt,
+  buildBudgetedWbsStoryLlmPrompt,
   resolveAcRefToWhitelist,
 } = require('../engines/wbsProposeLlm');
 const {
@@ -29,6 +30,22 @@ function coveredFrIds(leaves) {
     if (frId) ids.add(frId);
   }
   return ids;
+}
+
+function prefixTasks(tasks, prefix) {
+  const prefixToken = String(prefix || '').trim();
+  return (tasks || []).map((leaf) => {
+    const leafId = String(leaf?.id || '').trim();
+    if (!leafId) return { ...leaf, id: leafId };
+    if (!prefixToken) return { ...leaf, id: leafId };
+    const id =
+      leafId === prefixToken ||
+      leafId.startsWith(`${prefixToken}-`) ||
+      leafId.startsWith(prefixToken)
+        ? leafId
+        : `${prefixToken}-${leafId}`;
+    return { ...leaf, id };
+  });
 }
 
 /**
@@ -60,6 +77,8 @@ async function executeWbsChunk(input = {}, opts = {}) {
   let promptChars = 0;
   let model = null;
   let repairAttempts = 0;
+  let budgetTrimSteps = [];
+  let lastEstimatedTokens = 0;
   const clarifications = [];
   const qualityIssues = [];
 
@@ -86,7 +105,7 @@ async function executeWbsChunk(input = {}, opts = {}) {
   }
 
   async function runSliceOnce(slice, prefix, repairFeedback) {
-    const prompt = buildWbsStoryLlmPrompt({
+    const budgeted = buildBudgetedWbsStoryLlmPrompt({
       frUnits: slice,
       stories,
       epics,
@@ -94,7 +113,54 @@ async function executeWbsChunk(input = {}, opts = {}) {
       localeInstruction: input.localeInstruction || '',
       roleAllowList,
       repairFeedback,
+      env,
     });
+    lastEstimatedTokens = budgeted.estimatedTokens;
+    if (budgeted.budgetTrimSteps?.length) {
+      budgetTrimSteps = [...new Set([...budgetTrimSteps, ...budgeted.budgetTrimSteps])];
+    }
+
+    if (budgeted.overBudget && slice.length > 1) {
+      const mid = Math.ceil(slice.length / 2);
+      console.info(
+        `[wbs-chunk] prompt_bisect prefix=${prefix} fr=${slice.length} tokens=${budgeted.estimatedTokens} budget=${budgeted.budget}`
+      );
+      const left = await runSliceOnce(slice.slice(0, mid), `${prefix}b0`, repairFeedback);
+      const right = await runSliceOnce(slice.slice(mid), `${prefix}b1`, repairFeedback);
+      const tasks = [...(left.tasks || []), ...(right.tasks || [])];
+      if (left.ok && right.ok) {
+        return {
+          ok: true,
+          tasks,
+          clarifications: [...(left.clarifications || []), ...(right.clarifications || [])],
+          bisect: true,
+        };
+      }
+      return {
+        ok: false,
+        retryable: left.retryable !== false || right.retryable !== false,
+        needsReview: Boolean(left.needsReview || right.needsReview),
+        reason: left.ok ? right.reason : left.reason,
+        tasks,
+        clarifications: [...(left.clarifications || []), ...(right.clarifications || [])],
+        issues: [...(left.issues || []), ...(right.issues || [])],
+        bisect: true,
+      };
+    }
+
+    if (budgeted.overBudget) {
+      return {
+        ok: false,
+        retryable: false,
+        needsReview: true,
+        reason: 'prompt_over_budget',
+        estimatedTokens: budgeted.estimatedTokens,
+        budget: budgeted.budget,
+        budgetTrimSteps,
+      };
+    }
+
+    const prompt = budgeted.prompt;
     promptChars += prompt.length;
     const numPredict = resolveWbsLlmNumPredict(slice.length, env);
     let llmResult;
@@ -133,20 +199,7 @@ async function executeWbsChunk(input = {}, opts = {}) {
         contractErrors: accepted.errors || [],
       };
     }
-    // Idempotent prefix — LLM may already echo chunk prefix (avoid c0r2-c0r2-TASK-…).
-    const prefixToken = String(prefix || '').trim();
-    const tasks = accepted.tasks.map((leaf) => {
-      const leafId = String(leaf?.id || '').trim();
-      if (!leafId) return { ...leaf, id: leafId };
-      if (!prefixToken) return { ...leaf, id: leafId };
-      const id =
-        leafId === prefixToken ||
-        leafId.startsWith(`${prefixToken}-`) ||
-        leafId.startsWith(prefixToken)
-          ? leafId
-          : `${prefixToken}-${leafId}`;
-      return { ...leaf, id };
-    });
+    const tasks = prefixTasks(accepted.tasks, prefix);
     const quality = assessDecompositionQuality({
       frUnits: slice,
       tasks,
@@ -201,6 +254,7 @@ async function executeWbsChunk(input = {}, opts = {}) {
       );
       if (last.ok) return last;
       if (last.needsReview) return last;
+      if (last.reason === 'prompt_over_budget') return last;
       if (attempt >= maxRepair) break;
       feedback = last.repairFeedback || {
         instruction: 'Fix contract/quality errors.',
@@ -234,6 +288,8 @@ async function executeWbsChunk(input = {}, opts = {}) {
       promptChars,
       model,
       repairAttempts,
+      budgetTrimSteps,
+      estimatedTokens: lastEstimatedTokens,
       inputSnapshotId: input.inputSnapshotId || null,
     };
   }
@@ -274,6 +330,8 @@ async function executeWbsChunk(input = {}, opts = {}) {
     promptChars,
     model,
     repairAttempts,
+    budgetTrimSteps,
+    estimatedTokens: lastEstimatedTokens,
     inputSnapshotId: input.inputSnapshotId || null,
   };
 }

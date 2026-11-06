@@ -21,6 +21,7 @@ export default function SpaceCalendarModule() {
       suiteLayout
       spaceOrganizationId={organizationId}
       spaceProjectId={projectId}
+      spaceDepartmentId={departmentId}
     />
   );
 }

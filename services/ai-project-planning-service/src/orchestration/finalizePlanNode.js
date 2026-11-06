@@ -24,10 +24,37 @@ function sectionRef(toolName, executions) {
  * @param {object} state
  * @returns {object} state update
  */
+function joinRiskScopes(container) {
+  const byScope = container?.analyses?.riskByScope;
+  if (!byScope || typeof byScope !== 'object') return container;
+  const items = [];
+  for (const scope of ['source', 'dependency']) {
+    const rows = Array.isArray(byScope[scope]?.items) ? byScope[scope].items : [];
+    for (const item of rows) {
+      items.push({ ...item, sourceScope: item.sourceScope || scope });
+    }
+  }
+  items.sort((left, right) => String(left.riskId || left.title || '').localeCompare(String(right.riskId || right.title || '')));
+  return {
+    ...container,
+    analyses: {
+      ...container.analyses,
+      risk: {
+        ...(container.analyses?.risk || {}),
+        items,
+        risks: items,
+        joinedFrom: ['source', 'dependency'],
+      },
+    },
+  };
+}
+
 function finalizePlanNode(state) {
-  const executions = Array.isArray(state.toolExecutions) ? state.toolExecutions : [];
-  const done = succeededValidatedTools(state);
-  if (!isHowReadyForFinalize(state)) {
+  const joined = joinRiskScopes(state.container || {});
+  const current = joined === state.container ? state : { ...state, container: joined };
+  const executions = Array.isArray(current.toolExecutions) ? current.toolExecutions : [];
+  const done = succeededValidatedTools(current);
+  if (!isHowReadyForFinalize(current)) {
     const missing = ['WbsTool', 'DependencyTool', 'ScheduleTool'].filter((n) => !done.has(n));
     return {
       gapReport: {
@@ -40,7 +67,7 @@ function finalizePlanNode(state) {
     };
   }
 
-  const container = state.container && typeof state.container === 'object' ? state.container : {};
+  const container = current.container && typeof current.container === 'object' ? current.container : {};
   const engineResult = runProjectPlanEngine(container);
   const updated = applyProjectPlanToContainer(container, engineResult);
 
@@ -82,6 +109,7 @@ function finalizePlanNode(state) {
 }
 
 module.exports = {
+  joinRiskScopes,
   finalizePlanNode,
   sectionRef,
 };

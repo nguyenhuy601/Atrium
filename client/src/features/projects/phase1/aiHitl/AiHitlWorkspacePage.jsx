@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Loader2 } from 'lucide-react';
 import { requirementAPI } from '../../../../services/api/requirementAPI';
@@ -30,6 +31,22 @@ import {
   protectPackDuringFreshRunAwait,
 } from './freshRunUiGuard';
 import { isHowRunWallTimedOut } from './WHAT_MONITOR_CONFIG';
+import {
+  aiHitlNavLinkedPackQueryKey,
+  linkedPackIdFromRow,
+  loadLinkedPackForAiNav,
+} from './loadLinkedPackForAiNav';
+import {
+  AI_HITL_TAB,
+  buildAiHitlPath,
+  legacyHitlTabQueryRedirect,
+  normalizeAiHitlTab,
+  parseAiHitlTabFromPath,
+} from '../../../../utils/aiHitlPath';
+import { mergeCanonicalSearch } from '../../../../utils/canonicalSearchParams';
+import { queryKeys } from '../../../../lib/queryKeys';
+
+const LINKED_PACK_STALE_MS = 30_000;
 
 function unwrap(res) {
   return res?.data?.data ?? res?.data ?? res;
@@ -96,10 +113,17 @@ function buildGate1Summary(pack) {
   };
 }
 
-/** Drop stale Data Gate / Gate1 payload from local state when starting a new WHAT run. */
-function clearStaleReviewLiveRun(prev) {
+/** Drop stale Data Gate / Gate1 payload from local state when starting a new WHAT/HOW run. */
+function clearStaleReviewLiveRun(prev, { startedAt = null } = {}) {
+  const epochStartedAt = startedAt || new Date().toISOString();
   if (!prev || typeof prev !== 'object') {
-    return { status: 'queued', runId: null, gatePreview: null, gate: null };
+    return {
+      status: 'queued',
+      runId: null,
+      gatePreview: null,
+      gate: null,
+      startedAt: epochStartedAt,
+    };
   }
   return {
     ...prev,
@@ -111,16 +135,22 @@ function clearStaleReviewLiveRun(prev) {
     pipelineSubstep: 'prepare',
     pipelineStep: 1,
     currentTool: null,
+    // Reset wall clock so HOW re-run is not immediately treated as wall-stale.
+    startedAt: epochStartedAt,
   };
 }
 
 /**
  * AI HITL workspace — Monitor LangGraph + Review DataGate/Gate1/Gate2.
- * Query: packId, startWhat=1 (auto-start once).
+ * Path tab: /ai-hitl | /ai-hitl/review. Query: packId (non-default), startWhat=1 (one-shot).
  */
 export default function AiHitlWorkspacePage({ projectId, organizationId, onPromoted }) {
   const { t: translate } = useAppStrings();
   const t = useCallback((key, vars) => textOr(translate, key, vars) || translate(key, vars), [translate]);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const queryClient = useQueryClient();
+  const { hitlTab: hitlTabParam } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const { access: requirementAccess, loaded: accessLoaded } = useRequirementAccess(organizationId);
   const { project, capabilities: projectCaps } = useProjectCapabilities(projectId);
@@ -134,13 +164,13 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
 
   const packIdFromQuery = String(searchParams.get('packId') || '').trim();
   const wantStartWhat = ['1', 'true'].includes(String(searchParams.get('startWhat') || '').toLowerCase());
-  const tabFromQuery = String(searchParams.get('tab') || '')
-    .trim()
-    .toLowerCase();
-
-  const [tab, setTab] = useState(() =>
-    tabFromQuery === 'review' || tabFromQuery === 'monitor' ? tabFromQuery : 'monitor'
+  const tabFromPath = normalizeAiHitlTab(
+    hitlTabParam || parseAiHitlTabFromPath(location.pathname) || AI_HITL_TAB.MONITOR
   );
+
+  const legacyHitlRedirect = legacyHitlTabQueryRedirect(location.pathname, location.search);
+
+  const [tab, setTab] = useState(() => tabFromPath);
   const [busy, setBusy] = useState(false);
   const [gateActionLabel, setGateActionLabel] = useState('');
   const [loading, setLoading] = useState(true);
@@ -152,6 +182,8 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
   const awaitingFreshRunRef = useRef(null);
   const packRef = useRef(null);
   const liveRunRef = useRef(null);
+  /** Keep packId out of refresh deps — setPackId must not re-trigger the load effect. */
+  const packIdRef = useRef(packIdFromQuery);
   const [errorMsg, setErrorMsg] = useState('');
   const [autoStarting, setAutoStarting] = useState(false);
   const [gate1Decisions, setGate1Decisions] = useState({});
@@ -187,19 +219,24 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
   const canReviewGate2Po = hitlFlags.canReviewGate2Po;
   const hasPlanningTechReviewer = Boolean(projectCaps.hasPlanningTechReviewer);
 
+  // Sync URL / project identity into ref+state without putting packId in refresh deps.
+  useEffect(() => {
+    packIdRef.current = packIdFromQuery;
+    setPackId(packIdFromQuery);
+  }, [projectId, organizationId, packIdFromQuery]);
+
   const resolvePackId = useCallback(async () => {
     if (packIdFromQuery) return packIdFromQuery;
+    if (packIdRef.current) return packIdRef.current;
     if (!organizationId || !projectId) return '';
-    const listRes = await requirementAPI.listPacks(organizationId, {});
-    const listed = unwrap(listRes);
-    const list = Array.isArray(listed) ? listed : listed?.items || listed?.packs || [];
-    const linked = list.find((row) => {
-      const raw = row?.projectId;
-      const id = raw && typeof raw === 'object' ? raw._id || raw.id || '' : raw;
-      return String(id || '') === String(projectId);
+    // Reuse Sidebar / Phase1Shell cache (and join in-flight) — no extra listPacks.
+    const linked = await queryClient.ensureQueryData({
+      queryKey: aiHitlNavLinkedPackQueryKey(organizationId, projectId),
+      queryFn: () => loadLinkedPackForAiNav(organizationId, projectId),
+      staleTime: LINKED_PACK_STALE_MS,
     });
-    return String(linked?._id || linked?.id || '').trim();
-  }, [organizationId, packIdFromQuery, projectId]);
+    return linkedPackIdFromRow(linked);
+  }, [organizationId, packIdFromQuery, projectId, queryClient]);
 
   const markAwaitingFreshRun = useCallback((phase) => {
     const next = phase === 'how' ? 'how' : phase === 'what' ? 'what' : null;
@@ -221,14 +258,22 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
   }, [liveRun]);
 
   const refresh = useCallback(async () => {
-    const id = packId || (await resolvePackId());
+    const id = packIdRef.current || (await resolvePackId());
     if (!organizationId || !id) {
       setLoading(false);
       return null;
     }
-    if (id !== packId) setPackId(id);
-    const packRes = await requirementAPI.getPack(organizationId, id, { view: 'full' });
-    const next = unwrap(packRes);
+    if (id !== packIdRef.current) {
+      packIdRef.current = id;
+      setPackId(id);
+    }
+    // view=hitl omits excelPreview; fetchQuery dedupes StrictMode / overlapping poll+load.
+    const next = await queryClient.fetchQuery({
+      queryKey: queryKeys.requirements.packHitl(organizationId, id),
+      queryFn: async () =>
+        unwrap(await requirementAPI.getPack(organizationId, id, { view: 'hitl' })),
+      staleTime: 0,
+    });
     const awaiting = awaitingFreshRunRef.current;
     const guarded = protectPackDuringFreshRunAwait(packRef.current, next, awaiting);
     const acceptedPack = guarded.pack;
@@ -277,7 +322,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
     setLiveRun(nextLive);
     setLoading(false);
     return acceptedPack;
-  }, [organizationId, packId, resolvePackId]);
+  }, [organizationId, queryClient, resolvePackId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -335,28 +380,48 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
   }, [shouldPollWhat, refresh]);
 
   const stripStartWhatParam = useCallback(() => {
-    const next = new URLSearchParams(searchParams);
-    if (!next.has('startWhat')) return;
+    if (!searchParams.has('startWhat')) return;
+    const next = mergeCanonicalSearch(searchParams, { startWhat: '' });
     next.delete('startWhat');
-    if (!next.get('packId') && packId) next.set('packId', packId);
     setSearchParams(next, { replace: true });
-  }, [packId, searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams]);
 
-  /** Keep state + ?tab= in sync so deep-link effect cannot yank tab after start/revise. */
+  const goHitlTab = useCallback(
+    (nextTab, { replace = true } = {}) => {
+      const desired = normalizeAiHitlTab(nextTab);
+      setTab(desired);
+      const target = buildAiHitlPath(projectId, {
+        tab: desired,
+        boardId: searchParams.get('boardId') || '',
+        // Preserve packId only if already on URL — do not backfill from state.
+        packId: searchParams.get('packId') || '',
+        startWhat: searchParams.get('startWhat') || '',
+        defaultBoardId: String(project?.defaultBoardId || '').trim(),
+      });
+      const current = `${location.pathname}${location.search || ''}`;
+      if (target === current) return;
+      navigate(target, { replace });
+    },
+    [projectId, searchParams, project?.defaultBoardId, location.pathname, location.search, navigate]
+  );
+
+  /** Keep state + path tab in sync so deep-link effect cannot yank tab after start/revise. */
   const goMonitorTab = useCallback(() => {
-    setTab('monitor');
-    const next = new URLSearchParams(searchParams);
-    if (next.get('tab') === 'monitor') return;
-    next.set('tab', 'monitor');
-    if (!next.get('packId') && packId) next.set('packId', packId);
-    setSearchParams(next, { replace: true });
-  }, [packId, searchParams, setSearchParams]);
+    goHitlTab(AI_HITL_TAB.MONITOR);
+  }, [goHitlTab]);
 
   /** HOW start → Monitor handoff (same pattern as WHAT start). */
   const onHowStarted = useCallback(
     ({ clearResults = false, packStatus = '' } = {}) => {
       goMonitorTab();
       markAwaitingFreshRun('how');
+      const epochStartedAt = new Date().toISOString();
+      // Clear prior liveRun epoch (esp. wall-stale startedAt) so howInFlight + poll unlock.
+      setLiveRun((prev) => {
+        const next = clearStaleReviewLiveRun(prev, { startedAt: epochStartedAt });
+        liveRunRef.current = next;
+        return next;
+      });
       // Optimistic pending so auto-open Review cannot yank back before start API returns.
       setPack((prev) => {
         if (!prev) return prev;
@@ -381,6 +446,8 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
             pipelineStep: null,
             pipelineSubstep: null,
             remoteRunId: null,
+            // Must reset — keeping old startedAt makes isHowRunWallTimedOut true immediately.
+            startedAt: epochStartedAt,
           },
         };
         const nextStatus = String(packStatus || '').trim();
@@ -702,30 +769,18 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
   );
   const gate2RejectReason = String(pack?.aiAnalysis?.gate2?.lastRejectReason || '').trim();
 
-  // Deep-link ?tab=review|monitor from notify / URL
+  // Path tab → local state (legacy ?tab= handled by redirect below).
   useEffect(() => {
-    const q = String(searchParams.get('tab') || '')
-      .trim()
-      .toLowerCase();
-    if (q === 'review' || q === 'monitor') setTab(q);
-  }, [searchParams]);
+    setTab(tabFromPath);
+  }, [tabFromPath]);
 
   // Only auto-open Review when Gate ready — never yank off Monitor while WHAT/HOW is starting/running.
   useEffect(() => {
     if (busy || whatInFlight || howInFlight) return;
     if (reviewMode !== 'gate1' && reviewMode !== 'gate2') return;
-    setTab('review');
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (next.get('tab') === 'review') return prev;
-        next.set('tab', 'review');
-        if (!next.get('packId') && packId) next.set('packId', packId);
-        return next;
-      },
-      { replace: true }
-    );
-  }, [reviewMode, busy, whatInFlight, howInFlight, packId, setSearchParams]);
+    if (tabFromPath === AI_HITL_TAB.REVIEW) return;
+    goHitlTab(AI_HITL_TAB.REVIEW);
+  }, [reviewMode, busy, whatInFlight, howInFlight, tabFromPath, goHitlTab]);
 
   // RULE-R07: legacy Data Gate pause — cancel + free activeKey, then user starts WHAT again
   useEffect(() => {
@@ -848,7 +903,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
     async ({ offset, limit }) => {
       if (!organizationId || !packId) return null;
       const packRes = await requirementAPI.getPack(organizationId, packId, {
-        view: 'full',
+        view: 'hitl',
         gateRowOffset: offset,
         gateRowLimit: limit,
       });
@@ -1567,6 +1622,10 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
     });
   };
 
+  if (legacyHitlRedirect) {
+    return <Navigate to={legacyHitlRedirect} replace />;
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[12rem] items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
@@ -1678,15 +1737,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
             packId={packId}
             onRefresh={refresh}
             onOpenGate2={() => {
-              setTab('review');
-              try {
-                const next = new URLSearchParams(searchParams);
-                next.set('tab', 'review');
-                if (packId && !next.get('packId')) next.set('packId', packId);
-                setSearchParams(next, { replace: true });
-              } catch {
-                /* ignore */
-              }
+              goHitlTab(AI_HITL_TAB.REVIEW);
             }}
             canConfirmWbs={Boolean(canRun || canRerunHow)}
             canApprovePlan={Boolean(canApprove)}

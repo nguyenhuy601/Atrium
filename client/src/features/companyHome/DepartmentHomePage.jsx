@@ -27,7 +27,7 @@ export default function DepartmentHomePage() {
   } = useCompanyHomeData();
 
   const isLoading = shellQuery.isLoading;
-  const isError = shellQuery.isError;
+  const isError = shellQuery.isError || docsQuery.isError;
   const deniedBanner = deniedMessage ? (
     <p className="mx-auto mb-4 max-w-3xl rounded-xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground" role="status">
       {deniedMessage}

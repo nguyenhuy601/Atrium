@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { SpaceProvider, SPACE_KIND } from '../../../context/SpaceContext';
 import { useShellLayout } from '../../../context/ShellLayoutContext';
-import { fetchProjectHubProject } from '../hub/useProjectHubQueries';
+import { fetchProjectHubProject, STALE_PROJECT_HUB_MS } from '../hub/useProjectHubQueries';
 import { queryKeys } from '../../../lib/queryKeys';
 import {
   coerceDeliveryPhase,
@@ -45,9 +45,24 @@ import SpaceDocumentsModule from '../../spaceModules/SpaceDocumentsModule';
 import SpaceProjectChatModule from '../../spaceModules/SpaceProjectChatModule';
 import ProjectHubPage from '../../../pages/Projects/ProjectHubPage';
 import AiHitlWorkspacePage from './aiHitl/AiHitlWorkspacePage';
-import { resolvePostHitlProjectPath } from './aiHitl/aiHitlNavState';
-import { shouldDenyProjectEntry } from '../projectRoleEntry';
+import {
+  isAiHitlIncomplete,
+  resolveAiProjectEntryPath,
+  resolvePostHitlProjectPath,
+} from './aiHitl/aiHitlNavState';
+import {
+  aiHitlNavLinkedPackQueryKey,
+  loadLinkedPackForAiNav,
+} from './aiHitl/loadLinkedPackForAiNav';
+import {
+  canEnterProjectSettings,
+  isAiHitlCollabOpsModule,
+  normalizeProjectCapabilities,
+  shouldDenyProjectEntry,
+} from '../hub/projectEntryGuard';
 import ProjectRoleDeniedRedirect from '../ProjectRoleDeniedRedirect';
+import { AdminLoadErrorState } from '../../../components/adminUsers/adminPanelStates';
+import { resolveApiErrorMessage } from '../../../utils/resolveApiErrorMessage';
 
 /**
  * Nested Phase 1 body for RA + Planning modules (and collab).
@@ -84,20 +99,21 @@ export default function Phase1Shell({
     isPending: projectPending,
     isError: projectError,
     error: projectLoadError,
+    refetch: refetchProject,
   } = useQuery({
     queryKey: queryKeys.projectHub.project(projectId),
     queryFn: () => fetchProjectHubProject(projectId),
     enabled: Boolean(projectId),
     // Planning deep-links must not use a stale deliveryPhase after Start Planning / phase PATCH.
-    staleTime: String(module).startsWith('planning') ? 0 : 30_000,
-    refetchOnMount: String(module).startsWith('planning') ? 'always' : true,
+    staleTime: String(module).startsWith('planning') ? 0 : STALE_PROJECT_HUB_MS,
+    refetchOnMount: String(module).startsWith('planning') ? 'always' : false,
   });
   const deliveryPhase = projectRow
     ? coerceDeliveryPhase(projectRow.deliveryPhase)
     : null;
   const planningUnlocked = isPlanningUnlocked(deliveryPhase);
   const raReadOnly = deliveryPhase === 'delivery_planning';
-  const caps = projectRow?.capabilities || {};
+  const caps = normalizeProjectCapabilities(projectRow?.capabilities);
   const canViewAnalysis = Boolean(caps.canViewAnalysis);
   const canViewPlanning = Boolean(caps.canViewPlanning);
   const orgId = resolveProjectOrganizationId({
@@ -105,6 +121,17 @@ export default function Phase1Shell({
     projectRow,
   });
   const boardId = String(searchParams.get('boardId') || projectRow?.defaultBoardId || '').trim();
+
+  const needsAiHitlGuard =
+    Boolean(projectRow && orgId) &&
+    (deliveryPhase === 'requirement_analysis' || !projectRow?.deliveryPhase);
+
+  const { data: linkedPack, isPending: packPending } = useQuery({
+    queryKey: aiHitlNavLinkedPackQueryKey(orgId, projectId),
+    queryFn: () => loadLinkedPackForAiNav(orgId, projectId),
+    enabled: needsAiHitlGuard,
+    staleTime: 30_000,
+  });
 
   const postPromotePath = useMemo(
     () =>
@@ -121,7 +148,7 @@ export default function Phase1Shell({
     showHeaderLoading(t('nav.projectsModuleSwitching'));
     queryClient.invalidateQueries({ queryKey: queryKeys.projectHub.project(projectId) });
     queryClient.invalidateQueries({
-      queryKey: ['aiHitlNavLinkedPack', String(orgId || ''), String(projectId || '')],
+      queryKey: aiHitlNavLinkedPackQueryKey(orgId, projectId),
     });
     navigate(postPromotePath, { replace: true });
   }, [navigate, orgId, postPromotePath, projectId, queryClient, showHeaderLoading, t]);
@@ -144,6 +171,28 @@ export default function Phase1Shell({
     );
   }
 
+  if (projectError && !projectRow) {
+    if (
+      shouldDenyProjectEntry({
+        isError: true,
+        error: projectLoadError,
+      })
+    ) {
+      return <ProjectRoleDeniedRedirect projectId={projectId} orgId={orgId} />;
+    }
+    return (
+      <div className="flex min-h-[8rem] items-center justify-center p-4">
+        <AdminLoadErrorState
+          message={resolveApiErrorMessage(projectLoadError, {
+            t,
+            fallback: t('workspace.projectsLoadFail'),
+          })}
+          onRetry={() => void refetchProject()}
+        />
+      </div>
+    );
+  }
+
   if (
     shouldDenyProjectEntry({
       projectRow,
@@ -152,6 +201,34 @@ export default function Phase1Shell({
     })
   ) {
     return <ProjectRoleDeniedRedirect projectId={projectId} orgId={orgId} />;
+  }
+
+  if (needsAiHitlGuard && packPending && linkedPack === undefined) {
+    return (
+      <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        <span>{t('common.loading')}</span>
+      </div>
+    );
+  }
+
+  const aiHitlIncomplete =
+    Boolean(projectRow) &&
+    isAiHitlIncomplete({ project: projectRow, pack: linkedPack || null });
+
+  if (aiHitlIncomplete && !isAiHitlCollabOpsModule(module)) {
+    const hitlPath = resolveAiProjectEntryPath({
+      projectId,
+      project: projectRow,
+      pack: linkedPack || null,
+      boardId,
+      organizationId: orgId,
+    });
+    return <Navigate to={hitlPath} replace />;
+  }
+
+  if (projectRow && module === 'settings' && !canEnterProjectSettings(caps)) {
+    return <Navigate to={buildPhase1ModulePath(projectId, 'overview', { organizationId: orgId })} replace />;
   }
 
   // Phase 0 AI HITL may still be RA (or empty phase before heal) — allow in-shell host.

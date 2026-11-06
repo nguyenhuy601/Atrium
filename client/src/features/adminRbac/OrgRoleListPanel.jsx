@@ -31,7 +31,7 @@ import { adminRoleHubLink } from '../../utils/adminHubLinks';
 import { useAdminActionGate } from '../../hooks/useAdminActionGate';
 import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
 
-const ORG_ROLE_MANAGE_HUB = '/app/admin/rbac/org-roles/manage';
+const ORG_ROLE_MANAGE_HUB = '/admin/rbac/org-roles/manage';
 
 function orgRoleLabel(role, t) {
   const code = role?.code || role?.key || '';
@@ -133,7 +133,7 @@ export default function OrgRoleListPanel({ orgId }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">{t('adminRbac.roleListDragHint')}</p>
         <div className="flex flex-wrap gap-2">
-          <Link to="/app/admin/rbac/master-data" className={adminSecondaryBtnClass()}>
+          <Link to="/admin/rbac/master-data" className={adminSecondaryBtnClass()}>
             {t('adminRbac.masterDataTitle')}
           </Link>
         </div>
@@ -167,7 +167,7 @@ export default function OrgRoleListPanel({ orgId }) {
                   ? (role) => (
                       <span className="flex flex-wrap gap-2">
                         <Link
-                          to={`/app/admin/rbac/org-roles/permissions?roleId=${encodeURIComponent(role._id || role.id)}`}
+                          to={`/admin/rbac/org-roles/permissions?roleId=${encodeURIComponent(role._id || role.id)}`}
                           className={adminManageLinkClass()}
                         >
                           {t('adminDomains.rbac.assignRolePermissions')}
@@ -228,7 +228,7 @@ export default function OrgRoleListPanel({ orgId }) {
                   <div className="flex justify-end gap-2 self-center">
                     {canUpdateOrgRole ? (
                       <Link
-                        to={`/app/admin/rbac/org-roles/permissions?roleId=${encodeURIComponent(role._id || role.id)}`}
+                        to={`/admin/rbac/org-roles/permissions?roleId=${encodeURIComponent(role._id || role.id)}`}
                         className={adminManageLinkClass('whitespace-nowrap')}
                       >
                         {t('adminDomains.rbac.assignRolePermissions')}
@@ -260,10 +260,10 @@ export default function OrgRoleListPanel({ orgId }) {
       </AdminUserFormCard>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <Link to="/app/admin/rbac/org-roles/directory" className={adminSecondaryBtnClass()}>
+        <Link to="/admin/rbac/org-roles/directory" className={adminSecondaryBtnClass()}>
           {t('adminDomains.rbac.orgRoleDirectory')}
         </Link>
-        <Link to="/app/admin/rbac/org-roles/lookup" className={adminSecondaryBtnClass()}>
+        <Link to="/admin/rbac/org-roles/lookup" className={adminSecondaryBtnClass()}>
           {t('adminDomains.rbac.orgRoleLookup')}
         </Link>
       </div>

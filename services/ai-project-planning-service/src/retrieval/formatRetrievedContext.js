@@ -40,21 +40,59 @@ function formatRetrievedContext(contextPackage, opts = {}) {
   const items = [];
   let used = 0;
   const requiredIds = new Set(required.map((r) => String(r.sourceId || '')));
+  const seenEmpKeys = new Set();
+  const preferApproved = Boolean(opts.preferApprovedHistory);
 
-  for (const row of citationRows(contextPackage)) {
-    if (row?.required) continue;
-    if (items.length >= maxItems) break;
+  const rowsSorted = citationRows(contextPackage).slice().sort((a, b) => {
+    const aa = String(a?.metadata?.approvalStatus || a?.approvalStatus || '');
+    const bb = String(b?.metadata?.approvalStatus || b?.approvalStatus || '');
+    if (preferApproved) {
+      if (aa === 'approved' && bb !== 'approved') return -1;
+      if (bb === 'approved' && aa !== 'approved') return 1;
+    }
+    return (Number(b?.score) || 0) - (Number(a?.score) || 0);
+  });
+
+  function pushRow(row) {
+    if (row?.required) return false;
+    if (items.length >= maxItems) return false;
     const sourceId = String(row?.sourceId || row?.id || row?.citationId || '').trim();
-    if (sourceId && requiredIds.has(sourceId)) continue;
+    if (sourceId && requiredIds.has(sourceId)) return false;
+    const meta = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+    const empKey = String(meta.empKey || row?.empKey || '').trim();
+    if (empKey) {
+      if (seenEmpKeys.has(empKey)) return false;
+      seenEmpKeys.add(empKey);
+    }
     const snippet = String(row?.snippet || row?.text || '')
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, snippetMax);
-    if (!snippet) continue;
+    if (!snippet) return false;
     const line = sourceId ? `[${sourceId}] ${snippet}` : snippet;
-    if (used + line.length > maxChars) break;
-    items.push({ sourceId: sourceId || null, snippet });
+    if (used + line.length > maxChars) return false;
+    items.push({
+      sourceId: sourceId || null,
+      snippet,
+      empKey: empKey || null,
+      relevanceScore: row?.relevanceScore ?? row?.score ?? null,
+    });
     used += line.length + 1;
+    return true;
+  }
+
+  if (preferApproved) {
+    for (const row of rowsSorted) {
+      const status = String(
+        row?.metadata?.approvalStatus || row?.approvalStatus || ''
+      ).toLowerCase();
+      const docType = String(row?.docType || '');
+      if (docType === 'employee_history' && status !== 'approved') continue;
+      pushRow(row);
+    }
+  }
+  if (!items.length || !preferApproved) {
+    for (const row of rowsSorted) pushRow(row);
   }
 
   const supplementText = items

@@ -1,22 +1,20 @@
 import { useMemo } from 'react';
 import { useAppStrings } from '../../locales/appStrings';
 import { useSpace } from '../../context/SpaceContext';
-import { useOrgShell } from '../../hooks/queries/useOrgShell';
+import { useOrgMyProfile } from '../../hooks/queries/useOrgMyProfile';
+import { useOrgStructureNav } from '../../hooks/queries/useOrgStructure';
 import { useOrganizationDocumentsOverview } from '../../hooks/queries/useOrganizationDocumentsOverview';
-import { filterOrgFilesByScope } from '../orgDocuments/orgDocumentUtils';
 import { COMPANY_SPACE_LEVEL } from '../../utils/companySpaceLevel';
+import { toShellCompat } from '../../utils/orgShellCompat';
 import {
   buildCompanyChatPath,
   buildCompanyDocumentsPath,
   buildCompanyWorkspacePath,
 } from '../../utils/suitePathUtils';
-import {
-  buildCompanyHomeViewModel,
-  countScopedHomeDocuments,
-} from './companyHomeMetrics';
+import { buildCompanyHomeViewModel } from './companyHomeMetrics';
 
 /**
- * Aggregate company home data from existing hooks (no new API).
+ * Aggregate company home data from my-profile + structure?view=nav.
  * Modules mirror getCompanyNavItems (chat + documents only).
  */
 export function useCompanyHomeData() {
@@ -28,10 +26,40 @@ export function useCompanyHomeData() {
   const level = space?.level || COMPANY_SPACE_LEVEL.DEPARTMENT;
   const isTeamLevel = level === COMPANY_SPACE_LEVEL.TEAM && Boolean(teamId);
 
-  const shellQuery = useOrgShell(organizationId, { enabled: Boolean(organizationId) });
+  const profileQuery = useOrgMyProfile(organizationId, {
+    enabled: Boolean(organizationId),
+  });
+  const structureNavQuery = useOrgStructureNav(organizationId, {
+    enabled: Boolean(organizationId),
+  });
   const docsQuery = useOrganizationDocumentsOverview(organizationId, {
     enabled: Boolean(organizationId) && Boolean(departmentId),
+    departmentId,
+    teamId: isTeamLevel ? teamId : '',
+    view: 'summary',
   });
+
+  const shellCompat = useMemo(
+    () =>
+      toShellCompat({
+        profile: profileQuery.data || null,
+        structureNav: Array.isArray(structureNavQuery.data)
+          ? structureNavQuery.data
+          : null,
+      }),
+    [profileQuery.data, structureNavQuery.data]
+  );
+
+  const shellQuery = {
+    data: shellCompat,
+    isLoading: profileQuery.isLoading || structureNavQuery.isLoading,
+    isError: profileQuery.isError || structureNavQuery.isError,
+    error: profileQuery.error || structureNavQuery.error,
+    refetch: () => {
+      profileQuery.refetch();
+      structureNavQuery.refetch();
+    },
+  };
 
   const labels = useMemo(
     () => ({
@@ -49,27 +77,21 @@ export function useCompanyHomeData() {
 
   const documentCount = useMemo(() => {
     if (!docsQuery.isSuccess) return null;
-    return countScopedHomeDocuments(
-      docsQuery.files || [],
-      {
-        departmentId,
-        teamId: isTeamLevel ? teamId : '',
-      },
-      filterOrgFilesByScope
-    );
-  }, [docsQuery.isSuccess, docsQuery.files, departmentId, teamId, isTeamLevel]);
+    const n = Number(docsQuery.documentCount);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  }, [docsQuery.isSuccess, docsQuery.documentCount]);
 
   const viewModel = useMemo(
     () =>
       buildCompanyHomeViewModel({
-        shell: shellQuery.data || null,
+        shell: shellCompat,
         departmentId,
         teamId,
         level,
         documentCount,
         labels,
       }),
-    [shellQuery.data, departmentId, teamId, level, documentCount, labels]
+    [shellCompat, departmentId, teamId, level, documentCount, labels]
   );
 
   const paths = useMemo(() => {

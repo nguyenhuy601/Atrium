@@ -403,8 +403,8 @@ const OPERATOR_MAINTAIN_GRANTS = new Set([
 function operatorSurfacePath(item) {
   const path = String(item?.path || '').split('?')[0].replace(/\/+$/, '');
   if (!path) return false;
-  if (path === '/app/admin/backup' || path.startsWith('/app/admin/backup/')) return true;
-  if (path === '/app/admin/rbac/project-roles' || path.startsWith('/app/admin/rbac/project-roles/')) {
+  if (path === '/admin/backup' || path.startsWith('/admin/backup/')) return true;
+  if (path === '/admin/rbac/project-roles' || path.startsWith('/admin/rbac/project-roles/')) {
     return true;
   }
   return false;

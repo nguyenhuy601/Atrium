@@ -32,6 +32,7 @@ import {
 import NavigationSidebar from '../../components/Layout/NavigationSidebar';
 import api from '../../services/api';
 import { organizationAPI } from '../../services/api/organizationAPI';
+import { toShellCompat } from '../../utils/orgShellCompat';
 import userService from '../../services/userService';
 import friendService from '../../services/friendService';
 import { useAuth } from '../../context/AuthContext';
@@ -405,7 +406,7 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
   const { roomId } = useParams();
   const [searchParams] = useSearchParams();
   const safeRoomId = roomId?.startsWith(':') ? roomId.slice(1) || '' : roomId || '';
-  const voiceRouteBase = suiteLayout ? '/app/communicate/voice' : '/voice';
+  const voiceRouteBase = suiteLayout ? '/communicate/voice' : '/voice';
   const { openFriendCall, session: friendCallSession } = useFriendCallSession();
   const { user } = useAuth();
   const { activeWorkspace, lastOrganizationId, company, singleOrgMode } = useWorkspace();
@@ -871,7 +872,7 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
     const room = String(safeRoomId || '').trim();
     if (!callId || !room.startsWith('friend-1on1-')) return;
     if (friendCallSession?.callId === callId) {
-      navigate('/app/communicate/chat/friends', { replace: true });
+      navigate('/communicate/chat/friends', { replace: true });
       return;
     }
     const media = searchParams.get('friendCallMedia') === 'audio' ? 'audio' : 'video';
@@ -882,7 +883,7 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
       peerUserId: '',
       peerLabel: '',
     });
-    navigate('/app/communicate/chat/friends', { replace: true });
+    navigate('/communicate/chat/friends', { replace: true });
   }, [
     landingDemo,
     safeRoomId,
@@ -905,8 +906,16 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
     (async () => {
       setOrgStructureLoading(true);
       try {
-        const res = await organizationAPI.getOrgShell(selectedOrgId);
-        const shell = res?.data?.data ?? res?.data ?? res;
+        const [profileRes, structureRes] = await Promise.all([
+          organizationAPI.getOrgMyProfile(selectedOrgId, { include: '' }),
+          organizationAPI.getStructure(selectedOrgId, { view: 'nav' }),
+        ]);
+        const profile = profileRes?.data?.data ?? profileRes?.data ?? profileRes;
+        const navNodes = structureRes?.data?.data ?? structureRes?.data ?? structureRes;
+        const shell = toShellCompat({
+          profile,
+          structureNav: Array.isArray(navNodes) ? navNodes : null,
+        });
         const scope = parseMembershipScopeFromAccess(shell?.access?.scope);
         const notifyUnits = resolveMyMeetingNotifyUnits({
           structureSummary: shell?.structureSummary,

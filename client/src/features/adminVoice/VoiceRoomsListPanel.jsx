@@ -16,7 +16,7 @@ import {
 import useAdminVoiceRooms from '../../hooks/useAdminVoiceRooms';
 import { adminQueryHubLink } from '../../utils/adminHubLinks';
 
-const VOICE_MANAGE_ROOMS = '/app/admin/voice/manage-rooms';
+const VOICE_MANAGE_ROOMS = '/admin/voice/manage-rooms';
 
 function roomId(ch) {
   return String(ch._id || ch.id);

@@ -1,7 +1,6 @@
-import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
+import { cloneElement, isValidElement, useEffect, useMemo, useState } from 'react';
 import {
   Bell,
-  Bot,
   Building2,
   Calendar,
   ChevronsLeft,
@@ -28,7 +27,7 @@ import {
 import { useShellLayout } from '../../context/ShellLayoutContext';
 import { useWorkspaceSuite, SUITE } from '../../context/WorkspaceSuiteContext';
 import { useAppStrings } from '../../locales/appStrings';
-import { useFriendPending, useNotificationBadge } from '../../hooks/queries';
+import { useNotificationBadge } from '../../hooks/queries';
 import { useSpace } from '../../context/SpaceContext';
 import {
   buildCompanyApprovalsPath,
@@ -47,7 +46,6 @@ import {
   getDefaultPathForSuite,
 } from '../../utils/suitePathUtils';
 import { COMPANY_SPACE_LEVEL } from '../../utils/companySpaceLevel';
-import AtriumAIPanel from './AtriumAIPanel';
 import { VH_NAV_CHEVRON } from '../../motion/classes';
 import useMotionPresence from '../../motion/useMotionPresence';
 import { VH_MOTION_BASE_MS } from '../../motion/tokens';
@@ -253,8 +251,6 @@ export default function FigmaNavigationSidebar({
     return readCollapsePref(COLLAPSE_KEY, isImmersiveCompanyModulePath(window.location.pathname));
   });
   const [showSuitePicker, setShowSuitePicker] = useState(false);
-  const [showAIPanel, setShowAIPanel] = useState(false);
-  const aiButtonRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
   const { t } = useAppStrings();
@@ -285,10 +281,6 @@ export default function FigmaNavigationSidebar({
     organizationId: activeOrgId,
     enabled: !landingDemo,
   });
-  const { pendingCount } = useFriendPending({
-    enabled: !landingDemo && suiteProp === 'communicate',
-  });
-
   useEffect(() => {
     closeMobileNav();
   }, [location.pathname, closeMobileNav]);
@@ -323,7 +315,7 @@ export default function FigmaNavigationSidebar({
   // Cửa admin: systemAdmin hoặc grant opener — nhãn/path theo persona (Enterprise / Provider / HR / Audit).
   const showAdminSuite = Boolean(canAccessHub);
   const adminNavLabel = t(adminSuiteNav.labelKey);
-  const adminNavPath = adminSuiteNav.path || '/app/admin';
+  const adminNavPath = adminSuiteNav.path || '/admin';
   const suiteLabels = {
     label:
       suiteSegment === 'admin' ? adminNavLabel : t(`nav.suite.${suiteSegment}.label`),
@@ -359,28 +351,28 @@ export default function FigmaNavigationSidebar({
           key: 'overview',
           icon: LayoutDashboard,
           label: t('nav.overview'),
-          path: '/app/communicate/overview',
+          path: '/communicate/overview',
           badge: 0,
         },
         {
           key: 'notifications',
           icon: Bell,
           label: t('nav.notifications'),
-          path: '/app/communicate/notifications',
+          path: '/communicate/notifications',
           badge: landingDemo ? 0 : unreadCount,
         },
         {
           key: 'friends',
           icon: MessageCircle,
           label: t('nav.messages'),
-          path: '/app/communicate/chat/friends',
-          badge: landingDemo ? 0 : pendingCount,
+          path: '/communicate/chat/friends',
+          badge: 0,
         },
         {
           key: 'voice',
           icon: Mic,
           label: t('nav.voiceMeet'),
-          path: '/app/communicate/voice',
+          path: '/communicate/voice',
           badge: 0,
         },
       ];
@@ -453,7 +445,7 @@ export default function FigmaNavigationSidebar({
           key: 'overview',
           icon: LayoutDashboard,
           label: t('nav.overview'),
-          path: isCompany ? buildCompanyOverviewPath(activeOrgId) : '/app/collaborate/overview',
+          path: isCompany ? buildCompanyOverviewPath(activeOrgId) : '/collaborate/overview',
           badge: 0,
         },
         {
@@ -462,7 +454,7 @@ export default function FigmaNavigationSidebar({
           label: isSingleCompany ? t('nav.companyWorkspaces') : t('nav.workspaces'),
           path: isCompany
             ? buildCompanyWorkspacePath({ organizationId: activeOrgId })
-            : '/app/collaborate/workspaces',
+            : '/collaborate/workspaces',
           badge: 0,
         },
         {
@@ -526,7 +518,6 @@ export default function FigmaNavigationSidebar({
     t,
     landingDemo,
     unreadCount,
-    pendingCount,
     activeOrgId,
     spaceDeptId,
     spaceTeamId,
@@ -547,26 +538,26 @@ export default function FigmaNavigationSidebar({
   const isActivePath = (path) => {
     if (!path) return false;
     const base = path.split('?')[0];
-    if (base === '/app/communicate/overview') return location.pathname === '/app/communicate/overview';
-    if (base === '/app/collaborate/overview' || base === '/app/company/overview') {
+    if (base === '/communicate/overview') return location.pathname === '/communicate/overview';
+    if (base === '/collaborate/overview' || base === '/company/overview') {
       return (
-        location.pathname === '/app/collaborate/overview' ||
-        location.pathname === '/app/company/overview'
+        location.pathname === '/collaborate/overview' ||
+        location.pathname === '/company/overview'
       );
     }
-    if (base === '/app/admin') return location.pathname === '/app/admin' || location.pathname.startsWith('/app/admin/');
-    if (base === '/app/collaborate/approvals' || base === '/app/company/approvals') {
+    if (base === '/admin') return location.pathname === '/admin' || location.pathname.startsWith('/admin/');
+    if (base === '/collaborate/approvals' || base === '/company/approvals') {
       return (
-        location.pathname === '/app/collaborate/approvals' ||
-        location.pathname === '/app/company/approvals'
+        location.pathname === '/collaborate/approvals' ||
+        location.pathname === '/company/approvals'
       );
     }
-    if (base === '/app/me/dashboard') return location.pathname === '/app/me/dashboard';
-    if (base === '/app/me/settings') return location.pathname === '/app/me/settings';
-    if (base === '/app/collaborate/workspaces' || base === '/app/company/workspaces') {
+    if (base === '/me/dashboard') return location.pathname === '/me/dashboard';
+    if (base === '/me/settings') return location.pathname === '/me/settings';
+    if (base === '/collaborate/workspaces' || base === '/company/workspaces') {
       return (
-        location.pathname === '/app/collaborate/workspaces' ||
-        location.pathname === '/app/company/workspaces'
+        location.pathname === '/collaborate/workspaces' ||
+        location.pathname === '/company/workspaces'
       );
     }
     return location.pathname === base || location.pathname.startsWith(`${base}/`);
@@ -576,39 +567,39 @@ export default function FigmaNavigationSidebar({
     const path = location.pathname;
     if (suiteProp === 'collaborate' || suiteProp === 'company') {
       if (item.key === 'home') {
-        return path === '/app/company/home' || path.startsWith('/app/company/home/');
+        return path === '/company/home' || path.startsWith('/company/home/');
       }
       if (item.key === 'overview') {
-        return path === '/app/collaborate/overview' || path === '/app/company/overview';
+        return path === '/collaborate/overview' || path === '/company/overview';
       }
       if (item.key === 'workspaces') {
         return (
-          path === '/app/collaborate/workspaces' ||
-          path === '/app/company/workspaces' ||
-          path.startsWith('/app/collaborate/organizations') ||
-          path.startsWith('/app/company/organizations') ||
-          path.startsWith('/app/collaborate/join') ||
-          path.startsWith('/app/company/join')
+          path === '/collaborate/workspaces' ||
+          path === '/company/workspaces' ||
+          path.startsWith('/collaborate/organizations') ||
+          path.startsWith('/company/organizations') ||
+          path.startsWith('/collaborate/join') ||
+          path.startsWith('/company/join')
         );
       }
       if (item.key === 'chat') {
-        return path === '/app/company/chat' || path.startsWith('/app/company/chat');
+        return path === '/company/chat' || path.startsWith('/company/chat');
       }
       if (item.key === 'tasks') {
         return (
-          path === '/app/collaborate/projects' ||
-          path.startsWith('/app/collaborate/projects/') ||
-          path.startsWith('/app/projects')
+          path === '/collaborate/projects' ||
+          path.startsWith('/collaborate/projects/') ||
+          path.startsWith('/projects')
         );
       }
       if (item.key === 'documents') {
-        return path === '/app/collaborate/documents' || path === '/app/company/documents';
+        return path === '/collaborate/documents' || path === '/company/documents';
       }
       if (item.key === 'calendar') {
-        return path === '/app/collaborate/calendar' || path === '/app/company/calendar';
+        return path === '/collaborate/calendar' || path === '/company/calendar';
       }
       if (item.key === 'approvals') {
-        return path === '/app/collaborate/approvals' || path === '/app/company/approvals';
+        return path === '/collaborate/approvals' || path === '/company/approvals';
       }
       return isActivePath(item.path);
     }
@@ -665,6 +656,7 @@ export default function FigmaNavigationSidebar({
                 <span
                   className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left text-[0.6875rem] font-bold uppercase tracking-wider"
                   style={{ color: suiteColor }}
+                  title={suiteLabels.label}
                 >
                   {suiteLabels.label}
                 </span>
@@ -790,46 +782,7 @@ export default function FigmaNavigationSidebar({
             isActive={isActiveNavItem(item)}
           />
         ))}
-
-        {suiteProp === 'communicate' && !railCollapsed && (
-          <div className="mt-2.5">
-            <div className="px-1 pb-1 text-[0.5875rem] font-bold uppercase tracking-[0.1em] text-white/20">
-              {t('nav.aiAssistant')}
-            </div>
-            <button
-              ref={aiButtonRef}
-              type="button"
-              onClick={() => setShowAIPanel((v) => !v)}
-              className="flex w-full cursor-pointer items-center gap-2.5 rounded-[7px] border px-2.5 py-[7px] transition"
-              style={{
-                background: showAIPanel ? 'rgba(249,115,22,0.18)' : 'rgba(249,115,22,0.08)',
-                borderColor: showAIPanel ? 'rgba(249,115,22,0.45)' : 'rgba(249,115,22,0.25)',
-                borderStyle: showAIPanel ? 'solid' : 'dashed',
-                color: '#FB923C',
-              }}
-            >
-              <Bot size={14} className="shrink-0 text-orange-500" />
-              <div className="flex-1 text-left">
-                <div className="text-[0.7812rem] font-semibold text-orange-500">@AtriumAI</div>
-                <div className="mt-px text-[0.625rem] text-orange-400/60">
-                  {t('nav.aiSmartAssistant')}
-                </div>
-              </div>
-              <span className="rounded bg-orange-500/20 px-1 py-px text-[0.5rem] font-bold tracking-wider text-orange-500">
-                BETA
-              </span>
-            </button>
-          </div>
-        )}
       </nav>
-
-      {showAIPanel ? (
-        <AtriumAIPanel
-          onClose={() => setShowAIPanel(false)}
-          anchorRef={aiButtonRef}
-          collapsed={railCollapsed}
-        />
-      ) : null}
 
       <div className={FIGMA_SIDEBAR_FOOTER}>
         <SidebarPositionFooter collapsed={railCollapsed} wrap={false} />

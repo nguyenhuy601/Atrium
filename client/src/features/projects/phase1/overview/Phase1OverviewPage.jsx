@@ -279,6 +279,8 @@ export default function Phase1OverviewPage({ projectId, organizationId, delivery
               organizationId={organizationId}
               navigate={navigate}
               t={t}
+              chipsLocked={!capabilities.canViewAnalysis}
+              chipsLockedHint={t('workspace.phase1AnalysisCapLockedHint')}
             />
           </div>
         ) : null}
@@ -292,10 +294,17 @@ export default function Phase1OverviewPage({ projectId, organizationId, delivery
           planningUnlocked ? (
             <button
               type="button"
-              className="rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium hover:bg-muted"
-              onClick={() =>
-                navigate(buildPhase1ModulePath(projectId, 'planning/overview', { organizationId }))
+              disabled={!capabilities.canViewPlanning}
+              title={
+                capabilities.canViewPlanning
+                  ? undefined
+                  : t('workspace.phase1PlanningCapLockedHint')
               }
+              className="rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => {
+                if (!capabilities.canViewPlanning) return;
+                navigate(buildPhase1ModulePath(projectId, 'planning/overview', { organizationId }));
+              }}
             >
               {t('workspace.phase1OpenPlanning')}
             </button>
@@ -320,6 +329,8 @@ export default function Phase1OverviewPage({ projectId, organizationId, delivery
                     projectId={projectId}
                     organizationId={organizationId}
                     navigate={navigate}
+                    locked={!capabilities.canViewPlanning}
+                    lockedHint={t('workspace.phase1PlanningCapLockedHint')}
                   />
                 );
               })}
@@ -351,6 +362,8 @@ export default function Phase1OverviewPage({ projectId, organizationId, delivery
               organizationId={organizationId}
               navigate={navigate}
               t={t}
+              chipsLocked={!capabilities.canViewPlanning}
+              chipsLockedHint={t('workspace.phase1PlanningCapLockedHint')}
             />
           </div>
         ) : null}

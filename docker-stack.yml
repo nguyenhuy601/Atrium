@@ -18,6 +18,8 @@ services:
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_USE_AUTH=${REDIS_USE_AUTH:-false}
       - PROJECT_SERVICE_URL=http://project-service:3009
+      - REPORT_SERVICE_URL=${REPORT_SERVICE_URL:-http://report-service:3026}
+      - REPORT_AGGREGATOR_MODE=${REPORT_AGGREGATOR_MODE:-c2_api}
     networks:
       - enterprise-network
     deploy:
@@ -347,7 +349,10 @@ services:
       - LLM_JOBS_TYPES=${LLM_JOBS_TYPES:-*}
       - LLM_JOBS_QUEUE=${LLM_JOBS_QUEUE:-ai.planning.llm_jobs}
       - LLM_JOBS_DLQ=${LLM_JOBS_DLQ:-ai.planning.llm_jobs.dlq}
-      - LLM_JOBS_PREFETCH=${LLM_JOBS_PREFETCH:-1}
+      - LLM_JOBS_PREFETCH=${LLM_JOBS_PREFETCH:-2}
+      - LLM_WORKER_MAX=${LLM_WORKER_MAX:-3}
+      - LLM_WORKER_TASKS=${LLM_WORKER_TASKS:-2}
+      - LLM_MAX_INFLIGHT=${LLM_MAX_INFLIGHT:-6}
       - ARTIFACT_STORE=${ARTIFACT_STORE:-0}
       - AI_PLANNING_LLM=${AI_PLANNING_LLM:-1}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
@@ -733,6 +738,43 @@ services:
           cpus: "0.10"
           memory: 80M
 
+  report-service:
+    image: ${REPORT_SERVICE_IMAGE}
+    env_file:
+      - .env
+    environment:
+      - PORT=3026
+      - GATEWAY_INTERNAL_TOKEN=${GATEWAY_INTERNAL_TOKEN}
+      - ORGANIZATION_SERVICE_URL=${ORGANIZATION_SERVICE_URL:-http://organization-service:3013}
+      - FRIEND_SERVICE_URL=${FRIEND_SERVICE_URL:-http://organization-service:3013}
+      - NOTIFICATION_SERVICE_URL=${NOTIFICATION_SERVICE_URL:-http://notification-service:3003}
+      - VOICE_SERVICE_URL=${VOICE_SERVICE_URL:-http://voice-service:3005}
+      - PROJECT_SERVICE_URL=${PROJECT_SERVICE_URL:-http://project-service:3009}
+      - DASHBOARD_RM_MAX_AGE_SEC=${DASHBOARD_RM_MAX_AGE_SEC:-120}
+      - DASHBOARD_STATS_MAX_ORGS=${DASHBOARD_STATS_MAX_ORGS:-1}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_URL=${REDIS_URL:-}
+      - REDIS_SENTINELS=${REDIS_SENTINELS:-}
+      - REDIS_SENTINEL_NAME=${REDIS_SENTINEL_NAME:-mymaster}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_USE_AUTH=${REDIS_USE_AUTH:-false}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - ENABLE_DASHBOARD_PROJECTION_CONSUMER=${ENABLE_DASHBOARD_PROJECTION_CONSUMER:-false}
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: ${REPORT_SERVICE_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          cpus: "0.10"
+          memory: 80M
+
   notification-dispatch-worker:
     image: ${NOTIFICATION_SERVICE_IMAGE}
     command: ["node", "src/worker.js"]
@@ -832,6 +874,28 @@ services:
         reservations:
           cpus: "0.20"
           memory: 96M
+
+  # Single-node Redis (Plan A / desktop). HA: deploy atrium-redis + REDIS_SENTINELS trong .env.
+  # DNS: redis — khớp REDIS_HOST=redis. Không có volume (cache ephemeral).
+  redis:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD}
+    networks:
+      - enterprise-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          cpus: "0.10"
+          memory: 64M
 
   # --- Infra / AI (trước đây Compose extra) — DNS: ollama, minio, qdrant ---
   # Ollama local — mặc định tắt (OLLAMA_REPLICAS=0). Bật lại: OLLAMA_REPLICAS=1 + OLLAMA_BASE_URL.

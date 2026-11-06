@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import {
   Activity,
   ArrowLeftRight,
+  BarChart3,
   Bot,
   Calendar,
   ChevronDown,
@@ -64,13 +65,17 @@ import {
 } from '../../utils/suitePathUtils';
 import {
   fetchProjectHubProject,
+  STALE_PROJECT_HUB_MS,
   fetchProjectHubRoleCatalog,
 } from '../../features/projects/hub/useProjectHubQueries';
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/queryKeys';
 import { coerceDeliveryPhase } from '../../utils/projectPhaseNav';
 import { isAiHitlIncomplete } from '../../features/projects/phase1/aiHitl/aiHitlNavState';
-import { loadLinkedPackForAiNav } from '../../features/projects/phase1/aiHitl/loadLinkedPackForAiNav';
+import {
+  aiHitlNavLinkedPackQueryKey,
+  loadLinkedPackForAiNav,
+} from '../../features/projects/phase1/aiHitl/loadLinkedPackForAiNav';
 import { resolveDeliveryRoleBadges } from './profileDeliveryRoleBadge';
 import useGrantScopes from '../../hooks/useGrantScopes';
 import { PROJECT_CREATE_GRANT } from '../../lib/capabilities';
@@ -152,6 +157,7 @@ const MODULE_ICONS = {
   documents: FileText,
   members: Users,
   activity: Activity,
+  reports: BarChart3,
   settings: Settings,
   picker: FolderKanban,
   new: Plus,
@@ -463,7 +469,7 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
   const { canAccessHub, adminSuiteNav } = useCompanyAdminAccess();
   const showAdminSuite = Boolean(canAccessHub);
   const adminNavLabel = t(adminSuiteNav.labelKey);
-  const adminNavPath = adminSuiteNav.path || '/app/admin';
+  const adminNavPath = adminSuiteNav.path || '/admin';
   const { projectId: projectIdParam, module: moduleParam, planningModule } = useParams();
   const [searchParams] = useSearchParams();
   const { company, activeWorkspace } = useWorkspace();
@@ -477,7 +483,8 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
     queryKey: queryKeys.projectHub.project(projectId),
     queryFn: () => fetchProjectHubProject(projectId),
     enabled: Boolean(projectId),
-    staleTime: 30_000,
+    staleTime: STALE_PROJECT_HUB_MS,
+    refetchOnMount: false,
   });
 
   useEffect(() => {
@@ -531,7 +538,7 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
       !projectRow?.deliveryPhase);
 
   const { data: linkedPack } = useQuery({
-    queryKey: ['aiHitlNavLinkedPack', String(orgId || ''), String(projectId || '')],
+    queryKey: aiHitlNavLinkedPackQueryKey(orgId, projectId),
     queryFn: () => loadLinkedPackForAiNav(orgId, projectId),
     enabled: needsAiHitlPack,
     staleTime: 30_000,
@@ -605,6 +612,7 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
       deliveryPhase,
       capabilities: projectCapabilities,
       aiHitlIncomplete,
+      projectStatus: projectRow?.status,
     }).map((item) => {
       const params = new URLSearchParams();
       if (boardId) params.set('boardId', boardId);
@@ -623,7 +631,7 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
         readOnlyBadge: item.readOnly ? t('workspace.phase1RaReadOnlyBadge') : '',
         icon: MODULE_ICONS[item.key] || MODULE_ICONS[item.module] || LayoutDashboard,
         path: item.pathSeg
-          ? `/app/projects/${encodeURIComponent(projectId)}/${item.pathSeg}${
+          ? `/projects/${encodeURIComponent(projectId)}/${item.pathSeg}${
               qs ? `?${qs}` : ''
             }`
           : buildProjectsModulePath(projectId, item.module, {
@@ -676,9 +684,9 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
   const isItemActive = (item) => {
     if (!projectId) {
       if (item.key === 'picker') {
-        return location.pathname === '/app/projects' || location.pathname === '/app/projects/';
+        return location.pathname === '/projects' || location.pathname === '/projects/';
       }
-      if (item.key === 'new') return location.pathname.startsWith('/app/projects/new');
+      if (item.key === 'new') return location.pathname.startsWith('/projects/new');
       return false;
     }
     if (item.pathSeg && item.pathSeg.includes('/')) {

@@ -517,7 +517,7 @@ export default function UsersListPanel({ orgId }) {
       toast.error(t('adminUsers.removeSystemAdminBlocked'));
       return;
     }
-    navigate(adminUserHubLink('/app/admin/users/people-ops', id, 'delete'));
+    navigate(adminUserHubLink('/admin/users/people-ops', id, 'delete'));
   };
 
   return (
@@ -536,7 +536,7 @@ export default function UsersListPanel({ orgId }) {
         </div>
         {canInvite ? (
           <div className="flex flex-wrap gap-2">
-            <Link to="/app/admin/users/import" className={adminPrimaryBtnClass('px-3.5')}>
+            <Link to="/admin/users/import" className={adminPrimaryBtnClass('px-3.5')}>
               <UserPlus className="h-4 w-4" />
               {t('adminDomains.users.import')}
             </Link>

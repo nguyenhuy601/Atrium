@@ -24,7 +24,7 @@ import { useAppStrings } from '../../locales/appStrings';
 import { unitId, unitName } from '../../utils/adminOrgStructureUtils';
 import { adminOrgUnitHubLink } from '../../utils/adminHubLinks';
 
-const DIVISION_MANAGE_HUB = '/app/admin/org-structure/divisions/manage';
+const DIVISION_MANAGE_HUB = '/admin/org-structure/divisions/manage';
 
 export default function DivisionListPanel({ orgId }) {
   const { t } = useAppStrings();
@@ -54,7 +54,7 @@ export default function DivisionListPanel({ orgId }) {
       wide
       actions={
         canCreateDivision ? (
-          <Link to="/app/admin/org-structure/divisions/create" className={adminPrimaryBtnClass()}>
+          <Link to="/admin/org-structure/divisions/create" className={adminPrimaryBtnClass()}>
             <Plus className="h-4 w-4" />
             {t('adminDomains.orgStructure.divisionCreate')}
           </Link>
@@ -157,7 +157,7 @@ export default function DivisionListPanel({ orgId }) {
                 message={t('adminOrg.noDivisions')}
                 action={
                   canCreateDivision && !query.trim() ? (
-                    <Link to="/app/admin/org-structure/divisions/create" className={adminPrimaryBtnClass()}>
+                    <Link to="/admin/org-structure/divisions/create" className={adminPrimaryBtnClass()}>
                       <Plus className="h-4 w-4" aria-hidden />
                       {t('adminDomains.orgStructure.divisionCreate')}
                     </Link>

@@ -56,7 +56,7 @@ export function resolveDeliveryRoleBadges(roleKeys) {
  * @returns {string}
  */
 export function projectIdFromPathname(pathname) {
-  const m = String(pathname || '').match(/^\/app\/projects\/([^/]+)/);
+  const m = String(pathname || '').match(/^\/(?:app\/)?projects\/([^/]+)/);
   if (!m) return '';
   const id = decodeURIComponent(m[1] || '').trim();
   if (!id || id === 'new' || id === 'new-ai' || id === 'requirements') return '';

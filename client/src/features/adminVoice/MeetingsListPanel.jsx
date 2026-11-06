@@ -20,7 +20,7 @@ import {
 } from '../../utils/adminVoiceUtils';
 import { adminMeetingHubLink } from '../../utils/adminHubLinks';
 
-const MEETING_OPS_HUB = '/app/admin/voice/meeting-ops';
+const MEETING_OPS_HUB = '/admin/voice/meeting-ops';
 const STATUS_FILTER_OPTIONS = ['scheduled', 'active', 'ended'];
 
 export default function MeetingsListPanel({ orgId }) {

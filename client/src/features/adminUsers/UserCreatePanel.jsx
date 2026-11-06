@@ -353,7 +353,7 @@ export default function UserCreatePanel({ orgId, embedded = false }) {
               />
             </label>
           ) : null}
-          <Link to="/app/admin/rbac/positions" className={TEXT_LINK_CLASS}>
+          <Link to="/admin/rbac/positions" className={TEXT_LINK_CLASS}>
             {t('adminUsers.inviteJobTitleManageLink')}
           </Link>
         </div>

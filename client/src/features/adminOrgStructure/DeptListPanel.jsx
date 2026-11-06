@@ -27,7 +27,7 @@ import { adminOrgUnitHubLink } from '../../utils/adminHubLinks';
 import { departmentHeadId, unitId, unitName } from '../../utils/adminOrgStructureUtils';
 import { memberLabelById } from '../../utils/adminUserUtils';
 
-const DEPT_MANAGE_HUB = '/app/admin/org-structure/departments/manage';
+const DEPT_MANAGE_HUB = '/admin/org-structure/departments/manage';
 
 export default function DeptListPanel({ orgId }) {
   const { t } = useAppStrings();
@@ -76,7 +76,7 @@ export default function DeptListPanel({ orgId }) {
       actions={
         <>
           {canCreateDept ? (
-            <Link to="/app/admin/org-structure/departments/create" className={adminPrimaryBtnClass()}>
+            <Link to="/admin/org-structure/departments/create" className={adminPrimaryBtnClass()}>
               <Plus className="h-4 w-4" />
               {t('adminDomains.orgStructure.deptCreate')}
             </Link>
@@ -87,7 +87,7 @@ export default function DeptListPanel({ orgId }) {
             </Link>
           ) : null}
           {canUpdateDept ? (
-            <Link to="/app/admin/org-structure/departments/transfer" className={adminSecondaryBtnClass()}>
+            <Link to="/admin/org-structure/departments/transfer" className={adminSecondaryBtnClass()}>
               {t('adminDomains.orgStructure.deptTransfer')}
             </Link>
           ) : null}
@@ -185,7 +185,7 @@ export default function DeptListPanel({ orgId }) {
                 message={t('adminOrg.noDepartments')}
                 action={
                   canCreateDept && !query.trim() ? (
-                    <Link to="/app/admin/org-structure/departments/create" className={adminPrimaryBtnClass()}>
+                    <Link to="/admin/org-structure/departments/create" className={adminPrimaryBtnClass()}>
                       <Plus className="h-4 w-4" aria-hidden />
                       {t('adminDomains.orgStructure.deptCreate')}
                     </Link>

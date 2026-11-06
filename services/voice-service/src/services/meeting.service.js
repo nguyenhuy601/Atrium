@@ -46,7 +46,8 @@ class MeetingService {
   // Tạo meeting mới
   async createMeeting(meetingData) {
     try {
-      const { title, description, hostId, serverId, organizationId, startTime } = meetingData;
+      const { title, description, hostId, serverId, organizationId, departmentId, startTime } =
+        meetingData;
 
       // Kiểm tra hostId có tồn tại không
       try {
@@ -70,6 +71,7 @@ class MeetingService {
         hostId,
         serverId,
         organizationId,
+        departmentId: departmentId || null,
         startTime: startTime || new Date(),
         status: 'scheduled',
         participants: [

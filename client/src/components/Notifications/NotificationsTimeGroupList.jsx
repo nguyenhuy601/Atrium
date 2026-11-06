@@ -16,8 +16,6 @@ export default function NotificationsTimeGroupList({
   onOpen,
   onMarkRead,
   onDelete,
-  onAcceptFriend,
-  onRejectFriend,
   onJoinVoice,
   labels = {},
 }) {
@@ -45,8 +43,6 @@ export default function NotificationsTimeGroupList({
                 onOpen={onOpen}
                 onMarkRead={onMarkRead}
                 onDelete={onDelete}
-                onAcceptFriend={onAcceptFriend}
-                onRejectFriend={onRejectFriend}
                 onJoinVoice={onJoinVoice}
                 labels={labels}
               />

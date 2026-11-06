@@ -24,7 +24,28 @@ function integerScore1To5(value) {
   return value;
 }
 
-async function buildRiskSemantic({ pack = {}, container = {}, env = process.env, contextPackage = null, snapshot = null, snapshotId = null } = {}) {
+function applyRiskScope(semanticOut, riskScope) {
+  if (!semanticOut?.semantic?.upstream) return semanticOut;
+  const upstream = { ...semanticOut.semantic.upstream };
+  if (riskScope === 'source') {
+    upstream.deps = [];
+    upstream.blockingDeps = [];
+    upstream.archHigh = [];
+  } else if (riskScope === 'dependency') {
+    upstream.highCapabilities = [];
+    upstream.gaps = [];
+    upstream.archHigh = [];
+  } else {
+    return semanticOut;
+  }
+  return {
+    ...semanticOut,
+    semantic: { ...semanticOut.semantic, upstream },
+    riskScope,
+  };
+}
+
+async function buildRiskSemantic({ pack = {}, container = {}, env = process.env, contextPackage = null, snapshot = null, snapshotId = null, riskScope = null } = {}) {
   const { normalizeDeriveLocale } = require('../../semantic/buildSemanticDeriveContext');
   const {
     assembleHowToolContext,
@@ -52,7 +73,7 @@ async function buildRiskSemantic({ pack = {}, container = {}, env = process.env,
   const hasTrigger = triggers.length > 0;
   const missingSlots = missingSlotsFor('RISK', layer);
   if (!locale) missingSlots.push('business.locale');
-  return {
+  const built = {
     ok: contextAllowsWork(layer) && Boolean(locale) && (hasTrigger || frBrief.length > 0),
     missingSlots,
     openQuestions: hasTrigger
@@ -79,6 +100,7 @@ async function buildRiskSemantic({ pack = {}, container = {}, env = process.env,
       layer: slimLayer(layer),
     },
   };
+  return applyRiskScope(built, riskScope);
 }
 
 function buildRiskFacts(semOut) {
@@ -228,6 +250,7 @@ const RiskSecState = Annotation.Root({
   contextPackage: field(),
   snapshot: field(),
   snapshotId: field(),
+  riskScope: field(),
   semanticOut: field(),
   facts: field(),
   proposed: field(),
@@ -245,6 +268,7 @@ function buildRiskSecGraph() {
       contextPackage: s.contextPackage,
       snapshot: s.snapshot,
       snapshotId: s.snapshotId,
+      riskScope: s.riskScope || null,
     }),
   }));
   graph.addNode('fact', async (s) => ({ facts: buildRiskFacts(s.semanticOut || {}) }));
@@ -275,7 +299,10 @@ function buildRiskSecGraph() {
     });
     result.model = proposed.meta?.model || null;
     result.meta.llmCalls = proposed.meta?.llmCalls || 0;
-    return { result, containerPatch: applyRiskToContainer(s.container || {}, result) };
+    return {
+      result,
+      containerPatch: applyRiskToContainer(s.container || {}, result, s.riskScope || null),
+    };
   });
   graph.addEdge(START, 'semantic');
   graph.addEdge('semantic', 'fact');
@@ -296,6 +323,7 @@ async function runRiskSecGraph(input = {}) {
     contextPackage: input.contextPackage || null,
     snapshot: input.snapshot || null,
     snapshotId: input.snapshotId || null,
+    riskScope: input.riskScope || null,
   });
   return { result: out.result, containerPatch: out.containerPatch };
 }

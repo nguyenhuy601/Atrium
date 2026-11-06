@@ -13,13 +13,15 @@ const {
   Send,
   interrupt,
 } = require('@langchain/langgraph');
-const { resolveWbsChunkTransport, resolveWbsChunkConcurrency } = require('./wbsChunkContract');
+const { resolveWbsChunkTransport } = require('./wbsChunkContract');
+const { runScaledPool } = require('../runtime/workerScale');
 const { planWbsCallSlices } = require('../contracts/howWbsLlmContract');
 const { listWorkUnitsByRun, markDeadLetter } = require('./wbsWorkUnitStore');
 const { dispatchWbsChunk } = require('./wbsChunkDispatcher');
 const { processWbsChunk } = require('./processWbsChunk');
 const { publishWbsChunkDeadLetter } = require('./wbsChunkPublisher');
 const { reconcileWbsChunks } = require('./wbsChunkReconcile');
+const { filterStoriesForChunkFr } = require('../engines/buildWbsChunkSemantic');
 
 function lastWrite() {
   return Annotation();
@@ -56,6 +58,7 @@ async function planChunks(state, config) {
   for (const slice of slices) {
     const chunkIndex = chunks.length;
     const idPrefix = `c${chunkIndex}`;
+    const slimStories = filterStoriesForChunkFr(state.stories || [], slice);
     chunks.push({
       runId: state.runId,
       generationId: state.generationId || null,
@@ -63,7 +66,7 @@ async function planChunks(state, config) {
       chunkIndex,
       input: {
         frUnits: slice,
-        stories: state.stories || [],
+        stories: slimStories.length ? slimStories : state.stories || [],
         epics: state.epics || [],
         features: state.features || [],
         semantic: state.semantic || null,
@@ -96,19 +99,6 @@ async function enqueueChunk(state, config) {
   return { receipts: [out.unit?.workUnitId].filter(Boolean) };
 }
 
-async function mapPool(items, limit, fn) {
-  const queue = [...items];
-  const workers = Math.max(1, Math.min(queue.length || 1, limit));
-  await Promise.all(
-    Array.from({ length: workers }, async () => {
-      while (queue.length) {
-        const item = queue.shift();
-        if (item) await fn(item);
-      }
-    })
-  );
-}
-
 async function awaitWorkers(state, config) {
   const env = envOf(config);
   // Memory: drain in this node. Rabbit: interrupt fan-in — runWbsChunkOrchestrator
@@ -117,12 +107,15 @@ async function awaitWorkers(state, config) {
   if (resolveWbsChunkTransport(env) === 'memory') {
     const units = await listWorkUnitsByRun(state.runId, env);
     const todo = units.filter((unit) => unit.status === 'PENDING' || unit.status === 'QUEUED');
-    await mapPool(todo, resolveWbsChunkConcurrency(env), (unit) =>
-      processWbsChunk(unit.workUnitId, {
-        env,
-        generateJsonFn: config.configurable?.generateJsonFn,
-        messageSnapshotId: unit.inputSnapshotId,
-      })
+    await runScaledPool(
+      todo,
+      (unit) =>
+        processWbsChunk(unit.workUnitId, {
+          env,
+          generateJsonFn: config.configurable?.generateJsonFn,
+          messageSnapshotId: unit.inputSnapshotId,
+        }),
+      env
     );
     return {};
   }

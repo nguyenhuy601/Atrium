@@ -9,11 +9,11 @@ import {
   Settings,
   Timer,
   TrendingUp,
-  Users,
   Zap,
 } from 'lucide-react';
 import { AppSearchField } from '../../features/search';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import NavigationSidebar from '../../components/Layout/NavigationSidebar';
 import ShellWaveBackdrop from '../../components/Layout/ShellWaveBackdrop';
@@ -36,11 +36,11 @@ import api from '../../services/api';
 import { meetingAPI } from '../../services/api/meetingAPI';
 import {
   useDashboardSummary,
-  useFriendPending,
-  useFriendsList,
   useNotificationsPreview,
   useOrganizationsMy,
 } from '../../hooks/queries';
+import { queryKeys } from '../../lib/queryKeys';
+import { STALE_TIME_DASHBOARD_MS } from '../../lib/queryClient';
 import { appShellBg } from '../../theme/shellTheme';
 import { useLandingSafeNavigate } from '../../hooks/useLandingSafeNavigate';
 import { useLocation } from 'react-router-dom';
@@ -266,8 +266,6 @@ function DashboardPage({
     organizationRoleKeys: [],
     overdueItems: [],
   });
-  /** Bạn bè cho khung Trạng thái nhóm (từ GET /api/friends) */
-  const [presenceFriends, setPresenceFriends] = useState([]);
   /** Cuộc họp sắp tới (từ GET /api/meetings + startFrom/startTo) */
   const [upcomingMeetings, setUpcomingMeetings] = useState([]);
   const [workspaceEntries, setWorkspaceEntries] = useState([]);
@@ -281,7 +279,7 @@ function DashboardPage({
   const { role, isGuest, isPersonal, isManagerOrAbove, meta } = useUiRole();
   const { singleOrgMode, company } = useWorkspace();
   const isSingleCompany = singleOrgMode || readSingleOrgModeFlag();
-  const { onlineUsers, connected: socketConnected, on, off } = useSocket();
+  const { on, off } = useSocket();
   const navigate = useLandingSafeNavigate(landingDemo);
   const location = useLocation();
   const { t } = useAppStrings();
@@ -294,17 +292,40 @@ function DashboardPage({
     ['communicate', 'collaborate'].includes(String(suiteScope || '').toLowerCase());
   const showEnterpriseSections = isSuiteOverview ? !isGuest && !isPersonal : isManagerOrAbove;
 
+  const queryClient = useQueryClient();
   const orgsQuery = useOrganizationsMy({ enabled: communicateEnabled });
   const summaryQuery = useDashboardSummary({ enabled: communicateEnabled });
-  const friendsQuery = useFriendsList({ enabled: communicateEnabled });
-  const pendingQuery = useFriendPending({ enabled: communicateEnabled });
   const notificationsQuery = useNotificationsPreview({
     limit: 8,
     enabled: communicateEnabled,
   });
+  /**
+   * Không chờ GET /friends trên Overview — friendsTotal lấy từ dashboard summary;
+   * roster bạn bè chỉ fetch on-demand ở tab Chat/Friends / call host.
+   */
+  const dashboardSourcesReady =
+    communicateEnabled &&
+    orgsQuery.isFetched &&
+    summaryQuery.isFetched &&
+    notificationsQuery.isFetched;
+  /** Trì hoãn messages — không cạnh tranh TTFB với dashboard/me; heatmap/DM phụ. */
+  const [messagesFetchEnabled, setMessagesFetchEnabled] = useState(false);
+  useEffect(() => {
+    if (!dashboardSourcesReady) {
+      setMessagesFetchEnabled(false);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setMessagesFetchEnabled(true), 1200);
+    return () => window.clearTimeout(timer);
+  }, [dashboardSourcesReady]);
+  const messagesSummaryQuery = useQuery({
+    queryKey: queryKeys.dashboard.messagesSummary(),
+    queryFn: () => fetchMessagesForDashboardPaged(api, { maxPages: 1, limit: 30 }),
+    enabled: messagesFetchEnabled,
+    staleTime: STALE_TIME_DASHBOARD_MS,
+    refetchOnWindowFocus: false,
+  });
   const refetchSummary = summaryQuery.refetch;
-  const refetchFriends = friendsQuery.refetch;
-  const refetchPending = pendingQuery.refetch;
   const refetchNotifications = notificationsQuery.refetch;
 
   const dashboardQueryErrorNotifiedRef = useRef(false);
@@ -313,9 +334,7 @@ function DashboardPage({
     // Suite overview hiển thị lỗi summary inline (có retry) — không toast trùng.
     const summaryFailed = !suiteLayout && summaryQuery.isError && summaryQuery.error;
     const failedQuery =
-      summaryFailed ||
-      (orgsQuery.isError && orgsQuery.error) ||
-      (friendsQuery.isError && friendsQuery.error);
+      summaryFailed || (orgsQuery.isError && orgsQuery.error);
     if (!failedQuery) {
       dashboardQueryErrorNotifiedRef.current = false;
       return;
@@ -331,16 +350,14 @@ function DashboardPage({
     summaryQuery.error,
     orgsQuery.isError,
     orgsQuery.error,
-    friendsQuery.isError,
-    friendsQuery.error,
     t,
   ]);
 
   useEffect(() => {
     if (!suiteLayout || landingDemo || isMeScope) return;
     const overviewPaths = new Set([
-      '/app/communicate/overview',
-      '/app/company/overview',
+      '/communicate/overview',
+      '/company/overview',
     ]);
     if (!overviewPaths.has(location.pathname)) return;
     const root = document.querySelector(`[aria-label="${t('dashboard.ariaOverview')}"]`);
@@ -354,11 +371,10 @@ function DashboardPage({
   useEffect(() => {
     if (landingDemo || isMeScope) return undefined;
 
-    const hardRefreshMetrics = () => {
-      refetchSummary?.();
-      refetchFriends?.();
-      refetchPending?.();
+    /** Chỉ refresh list thông báo / messages — không refetch dashboard/me (tránh double TTFB). */
+    const softRefreshNotifySurfaces = () => {
       refetchNotifications?.();
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.messagesSummary() });
       setMetricsTick((v) => v + 1);
     };
 
@@ -368,7 +384,7 @@ function DashboardPage({
       if (scope === 'personal' && Number.isFinite(next)) {
         setMetrics((prev) => ({ ...prev, unread: Math.max(0, next) }));
       }
-      hardRefreshMetrics();
+      softRefreshNotifySurfaces();
     };
 
     const notificationEvents = [
@@ -380,36 +396,16 @@ function DashboardPage({
       'notification:deleted',
       'notification:deleted_read_all',
     ];
-    const friendEvents = [
-      'friend:request_received',
-      'friend:request_sent',
-      'friend:request_accepted',
-      'friend:request_rejected',
-      'friend:blocked',
-      'friend:unblocked',
-    ];
-
-    notificationEvents.forEach((ev) => on(ev, hardRefreshMetrics));
-    friendEvents.forEach((ev) => on(ev, hardRefreshMetrics));
+    notificationEvents.forEach((ev) => on(ev, softRefreshNotifySurfaces));
     on('notification:unread_updated', handleUnreadUpdated);
-    window.addEventListener(NOTIFICATIONS_REFRESH_EVENT, hardRefreshMetrics);
+    window.addEventListener(NOTIFICATIONS_REFRESH_EVENT, softRefreshNotifySurfaces);
 
     return () => {
-      notificationEvents.forEach((ev) => off(ev, hardRefreshMetrics));
-      friendEvents.forEach((ev) => off(ev, hardRefreshMetrics));
+      notificationEvents.forEach((ev) => off(ev, softRefreshNotifySurfaces));
       off('notification:unread_updated', handleUnreadUpdated);
-      window.removeEventListener(NOTIFICATIONS_REFRESH_EVENT, hardRefreshMetrics);
+      window.removeEventListener(NOTIFICATIONS_REFRESH_EVENT, softRefreshNotifySurfaces);
     };
-  }, [
-    landingDemo,
-    isMeScope,
-    on,
-    off,
-    refetchSummary,
-    refetchFriends,
-    refetchPending,
-    refetchNotifications,
-  ]);
+  }, [landingDemo, isMeScope, on, off, queryClient, refetchNotifications]);
 
   const displayName =
     user?.fullName ||
@@ -472,7 +468,6 @@ function DashboardPage({
         organizationRoleKeys: [],
         overdueItems: [],
       });
-      setPresenceFriends([]);
       setUpcomingMeetings([]);
       setWorkspaceEntries([]);
       setActivityDailyMap({});
@@ -481,6 +476,8 @@ function DashboardPage({
       return;
     }
     if (isMeScope) return;
+    // KPI từ summary/orgs/notif — không chờ messages (heatmap/DM hydrate sau).
+    if (!dashboardSourcesReady) return;
     let cancelled = false;
     (async () => {
       try {
@@ -534,10 +531,10 @@ function DashboardPage({
           company
         );
 
-        const friendsRaw = Array.isArray(friendsQuery.data) ? friendsQuery.data : [];
-        const friendsTotal =
-          summary?.friendsTotal ??
-          (friendsQuery.isLoading && friendsQuery.data === undefined ? null : friendsRaw.length);
+        // Prefer BFF/summary count — avoid blocking Overview on GET /friends roster.
+        const friendsTotal = Number.isFinite(Number(summary?.friendsTotal))
+          ? Number(summary.friendsTotal)
+          : null;
         const totalMembersFromOrgs = orgList.reduce((sum, org) => {
           const direct =
             org?.memberCount ??
@@ -554,21 +551,6 @@ function DashboardPage({
           summary?.membersTotal ??
           summary?.activeMembersTotal ??
           (orgIds.length ? totalMembersFromOrgs : null);
-
-        const presence = friendsRaw.slice(0, 12).map((row) => {
-          const u = row.friendId && typeof row.friendId === 'object' ? row.friendId : null;
-          const name =
-            u?.displayName || u?.username || (u?.email ? String(u.email).split('@')[0] : null) ||
-            t('dashboard.quickNavFriends');
-          const st = String(u?.status || 'offline').toLowerCase();
-          return {
-            id: u?._id || u?.userId || row.friendId,
-            name,
-            avatarUrl: u?.avatar || null,
-            status: ['online', 'away', 'busy', 'offline'].includes(st) ? st : 'offline',
-          };
-        });
-        setPresenceFriends(presence);
 
         let activeVoiceMeetings = summary?.activeVoiceMeetings ?? null;
         if (activeVoiceMeetings == null && summary?.upcomingMeetings == null) {
@@ -650,8 +632,7 @@ function DashboardPage({
           .slice(0, 8);
         setUpcomingMeetings(mergedUpcoming);
 
-        const pendingCount = summary?.pendingCount ?? pendingQuery.pendingCount ?? 0;
-        const pendingApprovals = summary?.pendingApprovals ?? pendingCount;
+        const pendingApprovals = summary?.pendingApprovals ?? 0;
         const unread =
           summary?.unread ?? (Number(notificationsQuery.data?.unreadCount) || 0);
         const notifRows = Array.isArray(notificationsQuery.data?.notifications)
@@ -684,7 +665,7 @@ function DashboardPage({
               ? buildCollaborateTasksPath(orgId)
               : buildCommunicateChannelsPath();
           }
-          return kind === 'task' ? buildProjectsPickerPath('') : '/app/communicate/chat/friends';
+          return kind === 'task' ? buildProjectsPickerPath('') : '/communicate/chat/friends';
         };
         const weekDayLabels = [
           t('dashboard.weekDaySun'),
@@ -740,7 +721,7 @@ function DashboardPage({
             kind,
           });
         };
-        const msgRows = await fetchMessagesForDashboardPaged(api, { maxPages: 1, limit: 30 }).catch(() => []);
+        const msgRows = Array.isArray(messagesSummaryQuery.data) ? messagesSummaryQuery.data : [];
         msgRows.forEach((msg) => {
           const senderId = getRowId(msg.senderId);
           if (currentUserKey && senderId !== currentUserKey) return;
@@ -748,22 +729,7 @@ function DashboardPage({
           if (key) daily[key] = { tasks: daily[key]?.tasks || 0, messages: (daily[key]?.messages || 0) + 1 };
         });
         const avgResponseMinutes = null;
-        const communicationCount =
-          (Number(unread) || 0) + mergedUpcoming.length + (Number(pendingCount) || 0);
-
-        const friendNameById = new Map();
-        friendsRaw.forEach((row) => {
-          const u = row.friendId && typeof row.friendId === 'object' ? row.friendId : null;
-          const fid = String(u?._id || u?.id || u?.userId || row.friendId || '').trim();
-          if (!fid) return;
-          const n =
-            u?.displayName ||
-            u?.name ||
-            u?.username ||
-            (u?.email ? String(u.email).split('@')[0] : '') ||
-            t('dashboard.friendFallback');
-          friendNameById.set(fid, n);
-        });
+        const communicationCount = (Number(unread) || 0) + mergedUpcoming.length;
 
         const dmLatestByPeer = new Map();
         const makePreview = (msg) =>
@@ -785,7 +751,6 @@ function DashboardPage({
             const receiverObj = msg?.receiverId && typeof msg.receiverId === 'object' ? msg.receiverId : null;
             const peerObj = senderId === mySide ? receiverObj : senderObj;
             const peerName =
-              friendNameById.get(peerId) ||
               peerObj?.displayName ||
               peerObj?.name ||
               peerObj?.username ||
@@ -817,7 +782,7 @@ function DashboardPage({
             loading: false,
             orgCount,
             friendsTotal,
-            pendingCount,
+            pendingCount: 0,
             unread,
             taskDone,
             activeVoiceMeetings,
@@ -845,7 +810,6 @@ function DashboardPage({
       } catch {
         if (!cancelled) {
           setMetrics((m) => ({ ...m, loading: false }));
-          setPresenceFriends([]);
           setWorkspaceEntries([]);
           setUpcomingMeetings([]);
           setActivityDailyMap({});
@@ -865,38 +829,14 @@ function DashboardPage({
     demoVariant,
     locale,
     t,
+    dashboardSourcesReady,
+    messagesSummaryQuery.isFetched,
     orgsQuery.data,
     summaryQuery.data,
-    friendsQuery.data,
-    pendingQuery.pendingCount,
     notificationsQuery.data,
+    messagesSummaryQuery.data,
     company,
   ]);
-
-  /**
-   * Presence realtime: khi socket đã kết nối, danh sách `onlineUsers` từ socket-service là nguồn đúng
-   * (ai không còn trong danh sách = offline). Không fallback `p.status` từ API khi đã connected — API/DB
-   * có thể vẫn là "online" vài giây sau khi peer đã disconnect.
-   */
-  const displayPresenceFriends = useMemo(() => {
-    const set = new Set((onlineUsers || []).map(String));
-    return presenceFriends.map((p) => {
-      const idStr = String(p?.id ?? '');
-      const inLiveList = set.has(idStr);
-      if (socketConnected) {
-        return { ...p, status: inLiveList ? 'online' : 'offline' };
-      }
-      return {
-        ...p,
-        status: inLiveList ? 'online' : p.status,
-      };
-    });
-  }, [presenceFriends, onlineUsers, socketConnected]);
-
-  const onlineFriendCount = useMemo(
-    () => displayPresenceFriends.filter((p) => p.status === 'online').length,
-    [displayPresenceFriends]
-  );
 
   const { isDarkMode } = useTheme();
 
@@ -1061,13 +1001,10 @@ function DashboardPage({
       key: 'friends',
       label: t('dashboard.statFriends'),
       value: fmt(metrics.friendsTotal),
-      detail: metrics.loading
-        ? loadingDetail
-        : t('dashboard.detailFriends', { count: metrics.pendingCount }),
+      detail: metrics.loading ? loadingDetail : t('friendChat.dmSubtitle'),
       drilldown: {
         nguon: t('dashboard.drilldownSourceFriendsApi'),
         soBan: metrics.friendsTotal ?? '—',
-        loiMoiCho: metrics.pendingCount,
       },
     });
     const myOpenCard = card({
@@ -1270,9 +1207,6 @@ function DashboardPage({
     if (metrics.pendingApprovals > 0) {
       lines.push(t('dashboard.insightPendingApprovals', { n: metrics.pendingApprovals }));
     }
-    if (metrics.pendingCount > 0) {
-      lines.push(t('dashboard.insightPendingFriends', { n: metrics.pendingCount }));
-    }
     if (metrics.unread > 0) {
       lines.push(t('dashboard.insightUnread', { n: metrics.unread }));
     }
@@ -1282,20 +1216,15 @@ function DashboardPage({
     if (metrics.taskDone != null && metrics.taskDone > 0) {
       lines.push(t('dashboard.insightTasksDone', { n: metrics.taskDone }));
     }
-    if (onlineFriendCount > 0) {
-      lines.push(t('dashboard.insightOnlineFriends', { n: onlineFriendCount }));
-    }
     if (!lines.length) {
       lines.push(t('dashboard.insightNoAlerts'));
     }
     return lines;
   }, [
     metrics.pendingApprovals,
-    metrics.pendingCount,
     metrics.unread,
     metrics.taskDone,
     upcomingMeetings,
-    onlineFriendCount,
     t,
   ]);
 
@@ -1331,11 +1260,9 @@ function DashboardPage({
       {
         label: t('dashboard.quickNavCommunicate'),
         icon: MessageCircle,
-        path: '/app/communicate/chat/friends',
+        path: '/communicate/chat/friends',
         color: '#2563EB',
-        desc: t('dashboard.quickNavDescUnread', {
-          n: pendingQuery.pendingCount || metrics.pendingCount || 0,
-        }),
+        desc: t('dashboard.quickNavDescUnread', { n: metrics.unread || 0 }),
       },
       {
         label: isSingleCompany ? t('nav.companyWorkspaces') : t('dashboard.quickNavOrg'),
@@ -1349,7 +1276,7 @@ function DashboardPage({
       {
         label: t('dashboard.quickNavMeetings'),
         icon: Mic,
-        path: '/app/communicate/voice',
+        path: '/communicate/voice',
         color: '#F59E0B',
         desc: t('dashboard.quickNavDescLiveRooms', {
           n: upcomingMeetings.filter((m) => m.soon).length || upcomingMeetings.length,
@@ -1358,7 +1285,7 @@ function DashboardPage({
       {
         label: t('dashboard.quickNavCalendar'),
         icon: Calendar,
-        path: '/app/me/calendar',
+        path: '/me/calendar',
         color: '#10B981',
         desc: t('dashboard.quickNavDescMeetingsToday', { n: upcomingMeetings.length }),
       },
@@ -1372,7 +1299,7 @@ function DashboardPage({
       {
         label: t('dashboard.quickNavNotifications'),
         icon: Bell,
-        path: '/app/communicate/notifications',
+        path: '/communicate/notifications',
         color: '#EF4444',
         desc: t('dashboard.quickNavDescPending', { n: metrics.unread || 0 }),
       },
@@ -1381,8 +1308,8 @@ function DashboardPage({
         icon: Settings,
         path:
           isSingleCompany && meta.canManageMembers
-            ? '/app/admin'
-            : '/app/me/settings',
+            ? '/admin'
+            : '/me/settings',
         color: '#64748B',
         desc:
           isSingleCompany && meta.canManageMembers
@@ -1390,13 +1317,13 @@ function DashboardPage({
             : t('dashboard.quickNavDescSystemSettings'),
       },
     ],
-    [t, metrics.unread, metrics.orgCount, upcomingMeetings, pendingQuery.pendingCount, metrics.pendingCount, isSingleCompany, meta.canManageMembers]
+    [t, metrics.unread, metrics.orgCount, upcomingMeetings, isSingleCompany, meta.canManageMembers]
   );
 
   const filteredQuickNav = useMemo(() => {
     if (isGuest) {
       return quickNavItems.filter((item) =>
-        ['/app/communicate/chat/friends', '/app/communicate/notifications', '/app/me/calendar', '/app/me/settings'].includes(
+        ['/communicate/chat/friends', '/communicate/notifications', '/me/calendar', '/me/settings'].includes(
           item.path
         )
       );
@@ -1404,11 +1331,11 @@ function DashboardPage({
     if (isPersonal) {
       return quickNavItems.filter((item) =>
         [
-          '/app/communicate/chat/friends',
-          '/app/communicate/notifications',
-          '/app/me/calendar',
+          '/communicate/chat/friends',
+          '/communicate/notifications',
+          '/me/calendar',
           buildCompanyDocumentsPath(),
-          '/app/me/settings',
+          '/me/settings',
         ].includes(item.path)
       );
     }
@@ -1503,9 +1430,9 @@ function DashboardPage({
       case 'open':
         return { path: buildProjectsPickerPath(''), cta: t('dashboard.statOpenTasks') };
       case 'friends':
-        return { path: '/app/communicate/chat/friends', cta: t('dashboard.statOpenFriends') };
+        return { path: '/communicate/chat/friends', cta: t('dashboard.statOpenFriends') };
       case 'notify':
-        return { path: '/app/communicate/notifications', cta: t('dashboard.statOpenNotify') };
+        return { path: '/communicate/notifications', cta: t('dashboard.statOpenNotify') };
       default:
         return null;
     }
@@ -1514,14 +1441,14 @@ function DashboardPage({
   const navigateFromActivityType = (type) => {
     if (type === 'task') navigate(buildProjectsPickerPath(''));
     else if (type === 'file') navigate(buildCompanyDocumentsPath());
-    else if (type === 'message') navigate('/app/communicate/chat/friends');
-    else navigate('/app/communicate/notifications');
+    else if (type === 'message') navigate('/communicate/chat/friends');
+    else navigate('/communicate/notifications');
   };
   const performanceMiniStats = useMemo(
     () => [
       {
         label: t('dashboard.miniActiveMembers'),
-        value: `${onlineFriendCount}/${displayPresenceFriends.length || 0}`,
+        value: String(metrics.totalMembers ?? '—'),
         color: '#2563EB',
       },
       {
@@ -1535,7 +1462,7 @@ function DashboardPage({
         color: '#EF4444',
       },
     ],
-    [t, onlineFriendCount, displayPresenceFriends.length, metrics.myOpen, metrics.overdue]
+    [t, metrics.totalMembers, metrics.myOpen, metrics.overdue]
   );
 
   const shellH = landingDemo ? 'min-h-[760px] h-[760px]' : 'h-screen';
@@ -1551,7 +1478,7 @@ function DashboardPage({
       greetingShort={greetingShort}
       displayName={displayName}
       aiInsights={aiInsights}
-      priorityDm={pendingQuery.pendingCount || metrics.pendingCount || recentDmContacts.length}
+      priorityDm={recentDmContacts.length}
       priorityMeetings={Math.min(upcomingMeetings.length, 3)}
       pendingApprovals={metrics.pendingApprovals || 0}
       heroStats={heroStats}
@@ -1624,27 +1551,21 @@ function DashboardPage({
       quickNavItems={filteredQuickNav}
       quickNavCols={quickNavCols}
       onNavigate={navigate}
-      pendingBannerLabel={
-        !metrics.loading && metrics.pendingCount > 0
-          ? t('dashboard.pendingInvites', { n: metrics.pendingCount })
-          : ''
-      }
-      onPendingClick={() => navigate('/app/communicate/chat/friends?tab=requests')}
+      pendingBannerLabel=""
+      onPendingClick={undefined}
       recentMessages={recentMessagesUi}
       upcomingMeetings={upcomingMeetingsUi}
       meetingsEmptyLabel={t('dashboard.noMeetingsWeek')}
       workspaces={workspacesUi}
-      addFriendLabel={t('dashboard.addFriend')}
       hideWorkspacesPanel={isSingleCompany}
       onCreateRoom={() => {
         toast.success(t('dashboard.toastCreatingRoom'));
-        setTimeout(() => navigate('/app/communicate/voice'), 600);
+        setTimeout(() => navigate('/communicate/voice'), 600);
       }}
       onCreateWorkspace={() => {
         toast.success(t('dashboard.toastGotoWorkspace'));
         navigate(buildCompanyWorkspacePath());
       }}
-      onAddFriend={undefined}
       onWorkspaceClick={(ws) =>
         navigate(ws.slug ? buildCommunicateChannelsPath() : buildCompanyWorkspacePath())
       }
@@ -1684,9 +1605,9 @@ function DashboardPage({
               />
             </div>
             <div className="ml-auto flex items-center gap-2">
-              <button type="button" onClick={() => navigate('/app/communicate/notifications')} className={`relative rounded-xl p-2.5 transition ${isDarkMode ? 'text-[#9ca3af] hover:bg-white/[0.06] hover:text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'}`} aria-label={t('dashboard.ariaNotifications')}>
+              <button type="button" onClick={() => navigate('/communicate/notifications')} className={`relative rounded-xl p-2.5 transition ${isDarkMode ? 'text-[#9ca3af] hover:bg-white/[0.06] hover:text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'}`} aria-label={t('dashboard.ariaNotifications')}>
                 <Bell className="h-5 w-5" strokeWidth={2} />
-                {(metrics.unread > 0 || metrics.pendingCount > 0) && (
+                {metrics.unread > 0 && (
                   <span className={`absolute right-2 top-2 h-2 w-2 rounded-full bg-rose-500 ring-2 ${isDarkMode ? 'ring-[#0D0D0F]' : 'ring-white'}`} />
                 )}
               </button>

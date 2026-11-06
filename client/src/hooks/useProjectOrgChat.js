@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
-import { useOrgShell } from './queries/useOrgShell';
+import { useOrgAccessibleChannels } from './queries/useOrgAccessibleChannels';
 import {
   removeOrgChannelMessageCache,
   upsertOrgChannelMessageCache,
@@ -83,13 +83,13 @@ export default function useProjectOrgChat({
   const currentUserId = String(user?.userId || user?._id || user?.id || '').trim();
 
   const {
-    data: shell,
+    data: accessData,
     isLoading: shellLoading,
     isError: shellError,
     error: shellQueryError,
     refetch: refetchShell,
-  } = useOrgShell(orgId);
-  const access = shell?.access || {};
+  } = useOrgAccessibleChannels(orgId);
+  const access = accessData || {};
   const matrix = access.permissionsByChannelId || {};
   const allProjectChannels = useMemo(
     () => (Array.isArray(access.projectChannels) ? access.projectChannels : []),

@@ -84,7 +84,7 @@ export default function ApprovalHubPage({ projectId, readOnly = false }) {
         },
         {
           status: 'ba_review',
-          need: capabilities.canReviewAnalysisBa && canBaAuthorQueue,
+          need: capabilities.canReviewAnalysisBa,
           labelKey: 'workspace.phase1QueueBaReview',
         },
         {

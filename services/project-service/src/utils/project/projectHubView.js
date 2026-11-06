@@ -20,7 +20,25 @@ const HUB_OMIT_KEYS = [
   'workflowDefinition',
   'workflowTransitions',
   'workflow',
+  'phase2ManualStaging',
+  'background',
 ];
+
+/**
+ * Mongo exclusion for hub getProject — skip BSON of large Mixed dumps.
+ * Keep visibilityPolicy / informationLevelOverrides for resolveProjectAccess (omitted in JSON after).
+ */
+const HUB_PROJECT_MONGO_EXCLUDE = [
+  '-budgetStub',
+  '-closureSnapshot',
+  '-technicalSetup',
+  '-methodologySettings',
+  '-phase2ManualStaging',
+  '-background',
+].join(' ');
+
+/** Boards on hub bootstrap — only identity for defaultBoardId / slim boards[]. */
+const HUB_BOARD_MONGO_SELECT = '_id title isActive';
 
 function isHubView(view) {
   return HUB_VIEW_ALIASES.has(String(view || '').trim().toLowerCase());
@@ -64,4 +82,6 @@ module.exports = {
   toProjectHubView,
   HUB_VIEW_ALIASES,
   HUB_OMIT_KEYS,
+  HUB_PROJECT_MONGO_EXCLUDE,
+  HUB_BOARD_MONGO_SELECT,
 };

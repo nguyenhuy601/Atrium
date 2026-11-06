@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -114,8 +114,6 @@ export default function ProjectHubPage({
     String(boardIdFromQuery || '').trim()
   );
   const [accessibleTaskBoards, setAccessibleTaskBoards] = useState([]);
-  const [projectBriefs, setProjectBriefs] = useState([]);
-  const [loadingProjectBriefs, setLoadingProjectBriefs] = useState(false);
   const {
     scope: taskWorkspaceScopeRaw,
     loading: taskWorkspaceScopeLoading,
@@ -127,12 +125,36 @@ export default function ProjectHubPage({
     ? undefined
     : taskWorkspaceScopeRaw;
 
+  const briefsQueryEnabled = Boolean(orgId) && Boolean(taskWorkspaceScope);
+  const projectBriefsQuery = useQuery({
+    queryKey: queryKeys.projects.briefs(orgId, 'open'),
+    queryFn: async () => {
+      const res = await taskAPI.listProjectBriefs(
+        { organizationId: String(orgId), status: 'open' },
+        {
+          timeout: 4000,
+          skipPermissionDeniedToast: true,
+          skipNotFoundToast: true,
+          skipGlobalErrorHandling: true,
+        }
+      );
+      const payload = unwrapTaskApiPayload(res);
+      if (Array.isArray(payload)) return payload;
+      if (Array.isArray(payload?.data)) return payload.data;
+      return [];
+    },
+    enabled: briefsQueryEnabled,
+    staleTime: STALE_TIME_PROJECTS_LIST_MS,
+  });
+  const projectBriefs = briefsQueryEnabled ? projectBriefsQuery.data ?? [] : [];
+  const loadingProjectBriefs = briefsQueryEnabled && projectBriefsQuery.isPending;
+
   const resolveSelectedBoardId = useCallback((list) => {
     const preferred = String(boardIdFromQuery || '').trim();
     if (preferred && list.some((b) => String(b._id) === preferred)) {
       return preferred;
     }
-    if (preferred) return preferred;
+    // Prefer not in this project's board list → ignore (fail-closed to project default).
     if (projectId && list.some((b) => String(b.projectId || '') === projectId)) {
       const hit = list.find((b) => String(b.projectId || '') === projectId);
       return hit?._id ? String(hit._id) : '';
@@ -144,8 +166,16 @@ export default function ProjectHubPage({
   useEffect(() => {
     const preferred = String(boardIdFromQuery || '').trim();
     if (!preferred) return;
-    setSelectedTaskBoardId((prev) => (prev === preferred ? prev : preferred));
-  }, [boardIdFromQuery]);
+    setSelectedTaskBoardId((prev) => {
+      if (prev === preferred) return prev;
+      // Avoid selecting a foreign boardId before/after project boards load.
+      if (taskBoards.length > 0) {
+        return taskBoards.some((b) => String(b._id) === preferred) ? preferred : prev;
+      }
+      if (projectId) return prev;
+      return preferred;
+    });
+  }, [boardIdFromQuery, taskBoards, projectId]);
 
   const applyBoardPickerList = useCallback(
     (list) => {
@@ -285,85 +315,24 @@ export default function ProjectHubPage({
       return undefined;
     }
     const pid = String(projectId || '').trim();
-    const bid = String(boardIdFromQuery || '').trim();
     let cancelled = false;
-    let idleHandle = null;
-    let deferTimer = null;
 
     (async () => {
-      if (pid && bid) {
-        const ok = await loadProjectBoardsFast();
-        if (cancelled) return;
-        if (ok) {
-          const scheduleOrgList = () => {
-            if (cancelled) return;
-            void loadOrgTaskBoards();
-          };
-          if (typeof requestIdleCallback === 'function') {
-            idleHandle = requestIdleCallback(scheduleOrgList, { timeout: 3000 });
-          } else {
-            deferTimer = setTimeout(scheduleOrgList, 2000);
-          }
-          return;
-        }
+      // Project-scoped hub: only project boards — never merge org-wide picker list.
+      if (pid) {
+        await loadProjectBoardsFast();
+        return;
       }
+      if (cancelled) return;
       await loadOrgTaskBoards();
     })();
 
     return () => {
       cancelled = true;
-      if (idleHandle != null && typeof cancelIdleCallback === 'function') {
-        cancelIdleCallback(idleHandle);
-      }
-      if (deferTimer) clearTimeout(deferTimer);
     };
-  }, [orgId, projectId, boardIdFromQuery, loadProjectBoardsFast, loadOrgTaskBoards]);
+  }, [orgId, projectId, loadProjectBoardsFast, loadOrgTaskBoards]);
 
-  useEffect(() => {
-    if (!orgId) {
-      setProjectBriefs([]);
-      setLoadingProjectBriefs(false);
-      return undefined;
-    }
-    if (taskWorkspaceScope === undefined) return undefined;
-    if (!taskWorkspaceScope) {
-      setProjectBriefs([]);
-      setLoadingProjectBriefs(false);
-      return undefined;
-    }
-    let cancelled = false;
-    setLoadingProjectBriefs(true);
-    taskAPI
-      .listProjectBriefs(
-        { organizationId: String(orgId), status: 'open' },
-        {
-          timeout: 4000,
-          skipPermissionDeniedToast: true,
-          skipNotFoundToast: true,
-          skipGlobalErrorHandling: true,
-        }
-      )
-      .then((res) => {
-        if (cancelled) return;
-        const payload = unwrapTaskApiPayload(res);
-        const list = Array.isArray(payload)
-          ? payload
-          : Array.isArray(payload?.data)
-            ? payload.data
-            : [];
-        setProjectBriefs(list);
-      })
-      .catch(() => {
-        if (!cancelled) setProjectBriefs([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingProjectBriefs(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [orgId, taskWorkspaceScope]);
-
+  // Hydrate default board in state only — do not push default boardId onto URL.
   useEffect(() => {
     const pid = String(projectId || '').trim();
     const bid = String(boardIdFromQuery || '').trim();
@@ -377,14 +346,7 @@ export default function ProjectHubPage({
           boards?.[0];
         const nextBoardId = String(main?._id || '').trim();
         if (!cancelled && nextBoardId) {
-          navigate(
-            buildCollaborateProjectHubPath(pid, {
-              module: currentModule,
-              organizationId: orgId,
-              boardId: nextBoardId,
-            }),
-            { replace: true }
-          );
+          setSelectedTaskBoardId((prev) => prev || nextBoardId);
         }
       } catch {
         /* hub empty until user picks */
@@ -393,20 +355,39 @@ export default function ProjectHubPage({
     return () => {
       cancelled = true;
     };
-  }, [projectId, boardIdFromQuery, orgId, navigate, queryClient, currentModule]);
+  }, [projectId, boardIdFromQuery, orgId, queryClient]);
 
+  // Sync URL only when selected board differs from default (or clearing a stale boardId).
   useEffect(() => {
     if (!projectId || !selectedTaskBoardId) return;
     if (String(boardIdFromQuery || '') === String(selectedTaskBoardId)) return;
+    const defaultBoardId = String(
+      taskBoards.find((b) => b && b.isActive !== false)?._id ||
+        taskBoards[0]?._id ||
+        ''
+    ).trim();
+    const selected = String(selectedTaskBoardId).trim();
+    const urlBoard = String(boardIdFromQuery || '').trim();
+    // No URL board + selected is default → keep URL clean.
+    if (!urlBoard && defaultBoardId && selected === defaultBoardId) return;
     navigate(
       buildCollaborateProjectHubPath(projectId, {
         module: currentModule,
         organizationId: orgId,
-        boardId: selectedTaskBoardId,
+        boardId: selected,
+        defaultBoardId,
       }),
       { replace: true }
     );
-  }, [projectId, selectedTaskBoardId, orgId, boardIdFromQuery, navigate, currentModule]);
+  }, [
+    projectId,
+    selectedTaskBoardId,
+    orgId,
+    boardIdFromQuery,
+    navigate,
+    currentModule,
+    taskBoards,
+  ]);
 
   const refreshTaskBoardView = useCallback(async () => {
     if (!selectedTaskBoardId) return;

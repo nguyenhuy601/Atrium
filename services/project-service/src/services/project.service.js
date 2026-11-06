@@ -701,6 +701,7 @@ async function listProjects({
   const wantTiming = timingOn === '1' || timingOn === 'true' || timingOn === 'on';
   const tTotal = Date.now();
   const timing = {
+    alignMs: 0,
     visibilityMs: 0,
     projectQueryMs: 0,
     boardMemberMs: 0,
@@ -718,7 +719,9 @@ async function listProjects({
     : null;
   if (!userOid || !orgOid) return [];
 
-  await alignOrgProjectStatusToPhase(orgOid);
+  // Do not run alignOrgProjectStatusToPhase on GET list (write-on-read + Atlas RTT).
+  // Lifecycle align stays on write / get-one helpers when needed.
+  timing.alignMs = 0;
 
   let allowArchived = false;
   if (includeArchived) {
@@ -762,27 +765,19 @@ async function listProjects({
   }
   timing.visibilityMs = Date.now() - tVis;
 
+  // memberProjectIds only needs membership projectId — do not wait on ProjectRole.
+  const memberProjectIds = [
+    ...new Set(
+      (memberRows || [])
+        .map((r) => String(r.projectId || '').trim())
+        .filter((id) => mongoose.Types.ObjectId.isValid(id))
+    ),
+  ].map((id) => new mongoose.Types.ObjectId(id));
+
   const roleIdsNeeded = [
     ...new Set(memberRows.map((r) => String(r.projectRoleId || '')).filter(Boolean)),
   ];
   const ProjectRole = require('../models/ProjectRole');
-  const roleDocs = roleIdsNeeded.length
-    ? await ProjectRole.find({ _id: { $in: roleIdsNeeded } }).select('_id key').lean()
-    : [];
-  const roleKeyById = new Map(roleDocs.map((r) => [String(r._id), String(r.key || '').trim()]));
-  const roleKeysByProject = new Map();
-  for (const row of memberRows) {
-    const pid = String(row.projectId || '');
-    if (!pid) continue;
-    if (!roleKeysByProject.has(pid)) roleKeysByProject.set(pid, []);
-    const rk = roleKeyById.get(String(row.projectRoleId || '')) || '';
-    if (rk) roleKeysByProject.get(pid).push(rk);
-  }
-  const memberProjectIds = [...roleKeysByProject.keys()]
-    .filter((id) => mongoose.Types.ObjectId.isValid(id))
-    .map((id) => new mongoose.Types.ObjectId(id));
-
-  let projects;
   const elevated =
     useV2 && visibilityCtx
       ? isOrgElevatedMembershipRole(visibilityCtx.membershipRole)
@@ -796,9 +791,28 @@ async function listProjects({
   if (cardView) {
     projectQuery.select(CARD_LIST_PROJECT_SELECT);
   }
+
+  // Parallel: role key lookup + project list (independent after membership rows).
   const tProj = Date.now();
-  projects = await projectQuery.lean();
+  const [roleDocs, projects] = await Promise.all([
+    roleIdsNeeded.length
+      ? ProjectRole.find({ _id: { $in: roleIdsNeeded } }).select('_id key').lean()
+      : Promise.resolve([]),
+    projectQuery.lean(),
+  ]);
   timing.projectQueryMs = Date.now() - tProj;
+
+  const roleKeyById = new Map(
+    (roleDocs || []).map((r) => [String(r._id), String(r.key || '').trim()])
+  );
+  const roleKeysByProject = new Map();
+  for (const row of memberRows) {
+    const pid = String(row.projectId || '');
+    if (!pid) continue;
+    if (!roleKeysByProject.has(pid)) roleKeysByProject.set(pid, []);
+    const rk = roleKeyById.get(String(row.projectRoleId || '')) || '';
+    if (rk) roleKeysByProject.get(pid).push(rk);
+  }
 
   if (!projects.length) return [];
 
@@ -811,12 +825,43 @@ async function listProjects({
     boardQuery.select('_id projectId');
   }
   const tBoard = Date.now();
-  const [boards, membershipRows] = await Promise.all([
-    boardQuery.lean(),
-    ProjectMembership.find({ projectId: { $in: projectIds } })
-      .select('projectId userId projectRoleId')
-      .lean(),
-  ]);
+  /** @type {object[]|null} full membership rows — null on card view (count via aggregate + PM query scoped) */
+  let membershipRows = null;
+  /** @type {Map<string, Set<string>|number>} */
+  const memberCountByProject = new Map();
+  let boards;
+
+  if (cardView) {
+    const [boardDocs, countRows] = await Promise.all([
+      boardQuery.lean(),
+      ProjectMembership.aggregate([
+        { $match: { projectId: { $in: projectIds } } },
+        { $group: { _id: { projectId: '$projectId', userId: '$userId' } } },
+        { $group: { _id: '$_id.projectId', n: { $sum: 1 } } },
+      ]),
+    ]);
+    boards = boardDocs;
+    for (const row of countRows || []) {
+      const key = String(row?._id || '');
+      if (!key) continue;
+      memberCountByProject.set(key, Number(row.n) || 0);
+    }
+  } else {
+    const [boardDocs, rows] = await Promise.all([
+      boardQuery.lean(),
+      ProjectMembership.find({ projectId: { $in: projectIds } })
+        .select('projectId userId projectRoleId')
+        .lean(),
+    ]);
+    boards = boardDocs;
+    membershipRows = rows;
+    for (const row of membershipRows) {
+      const key = String(row.projectId);
+      if (!memberCountByProject.has(key)) memberCountByProject.set(key, new Set());
+      const uid = String(row.userId || '').trim();
+      if (uid) memberCountByProject.get(key).add(uid);
+    }
+  }
   timing.boardMemberMs = Date.now() - tBoard;
 
   const boardsByProject = new Map();
@@ -824,14 +869,6 @@ async function listProjects({
     const key = String(b.projectId);
     if (!boardsByProject.has(key)) boardsByProject.set(key, []);
     boardsByProject.get(key).push(b);
-  }
-
-  const memberCountByProject = new Map();
-  for (const row of membershipRows) {
-    const key = String(row.projectId);
-    if (!memberCountByProject.has(key)) memberCountByProject.set(key, new Set());
-    const uid = String(row.userId || '').trim();
-    if (uid) memberCountByProject.get(key).add(uid);
   }
 
   // GET list must not heal membership / ensureOrgProjectRoles (write-path only).
@@ -853,10 +890,18 @@ async function listProjects({
     const key = String(p._id);
     const pBoards = boardsByProject.get(key) || [];
     const defaultBoard = pBoards[0] || null;
-    const memberUsers = memberCountByProject.get(key);
-    const memberCount = memberUsers ? memberUsers.size : 0;
+    const memberUsersOrCount = memberCountByProject.get(key);
+    const memberCount =
+      typeof memberUsersOrCount === 'number'
+        ? memberUsersOrCount
+        : memberUsersOrCount
+          ? memberUsersOrCount.size
+          : 0;
     const projectRoleKeys = roleKeysByProject.get(key) || [];
-    const isMember = projectRoleKeys.length > 0 || (memberUsers && memberUsers.has(String(userId)));
+    // roleKeysByProject always has an entry when the actor has any membership row for the project.
+    const isMember =
+      roleKeysByProject.has(key) ||
+      (memberUsersOrCount instanceof Set && memberUsersOrCount.has(String(userId)));
 
     let access = { discover: true, informationLevel: 'details', audiences: [] };
     if (useV2 && actor) {
@@ -894,12 +939,18 @@ async function listProjects({
 
   try {
     const summaryTiming = {};
-    await attachListProjectCardSummaries(result, String(organizationId), {
-      memberships: membershipRows,
+    const summaryDeps = {
       progressMode: cardView ? 'card' : 'full',
+      // Card list: skip S2S profile batch — keep pm.userId; displayName lazy ('—').
+      skipProfiles: cardView,
       organizationId: String(organizationId),
       timingOut: wantTiming ? summaryTiming : undefined,
-    });
+    };
+    // Card view: omit full membership dump — PM loader queries only project_manager roles.
+    if (Array.isArray(membershipRows)) {
+      summaryDeps.memberships = membershipRows;
+    }
+    await attachListProjectCardSummaries(result, String(organizationId), summaryDeps);
     if (wantTiming) {
       timing.progressMs = Number(summaryTiming.progressMs) || 0;
       timing.pmMs = Number(summaryTiming.pmMs) || 0;
@@ -911,17 +962,7 @@ async function listProjects({
 
   if (wantTiming) {
     logger.info(
-      '[listProjects] timing view=%s projects=%s visibilityMs=%s projectQueryMs=%s boardMemberMs=%s healMs=%s progressMs=%s pmMs=%s profilesMs=%s totalMs=%s',
-      cardView ? 'card' : 'full',
-      result.length,
-      timing.visibilityMs,
-      timing.projectQueryMs,
-      timing.boardMemberMs,
-      timing.healMs,
-      timing.progressMs,
-      timing.pmMs,
-      timing.profilesMs,
-      Date.now() - tTotal
+      `[listProjects] timing view=${cardView ? 'card' : 'full'} projects=${result.length} alignMs=${timing.alignMs} visibilityMs=${timing.visibilityMs} projectQueryMs=${timing.projectQueryMs} boardMemberMs=${timing.boardMemberMs} healMs=${timing.healMs} progressMs=${timing.progressMs} pmMs=${timing.pmMs} profilesMs=${timing.profilesMs} totalMs=${Date.now() - tTotal}`
     );
   }
 
@@ -944,7 +985,7 @@ async function loadProjectReadContext({ userId, projectId }) {
     throw makeProjectNotFoundError();
   }
 
-  const resolved = await resolveUserProjectPermissions({ userId, projectId });
+  const resolved = await resolveUserProjectPermissions({ userId, projectId, project });
   let informationLevel = String(resolved.informationLevel || 'details').toLowerCase();
   let access = null;
   let defaultBoardDoc = null;
@@ -1034,28 +1075,110 @@ async function loadProjectReadContext({ userId, projectId }) {
   };
 }
 
-async function getProject({ userId, projectId }) {
+/**
+ * Align status/deliveryPhase on an already-loaded project doc (avoids extra findById).
+ * @returns {Promise<object>} project (possibly patched in-memory)
+ */
+async function alignLoadedProjectStatusToPhase(project) {
+  if (!project || !project._id) return project;
+  const aligned = alignedLifecycleFields({
+    status: project.status,
+    deliveryPhase: project.deliveryPhase,
+    analysisMode: project.analysisMode,
+  });
+  const $set = {};
+  if (String(project.status || '') !== aligned.status) $set.status = aligned.status;
+  const storedPhase = project.deliveryPhase == null ? '' : String(project.deliveryPhase);
+  if (aligned.deliveryPhase && storedPhase !== aligned.deliveryPhase) {
+    $set.deliveryPhase = aligned.deliveryPhase;
+  }
+  if (!Object.keys($set).length) return project;
+  await Project.updateOne({ _id: project._id }, { $set });
+  return { ...project, ...$set };
+}
+
+async function getProject({ userId, projectId, view } = {}) {
+  const { isHubView } = require('../utils/project/projectHubView');
+  const hub = isHubView(view);
+  if (hub) {
+    const { hubGetCache, hubGetCacheKey } = require('../utils/project/projectHubGetCache');
+    const key = hubGetCacheKey(userId, projectId);
+    if (key) {
+      const tWall = Date.now();
+      const result = await hubGetCache.getOrLoad(key, () =>
+        getProjectUncached({ userId, projectId, view, hub: true })
+      );
+      const wallMs = Date.now() - tWall;
+      // Cache hit ≈ 0–2ms; miss logs detailed breakdown inside uncached.
+      if (wallMs <= 5) {
+        logger.info(`[getProject] timing view=hub cache=hit wallMs=${wallMs}`);
+      }
+      return result;
+    }
+  }
+  return getProjectUncached({ userId, projectId, view, hub });
+}
+
+async function getProjectUncached({ userId, projectId, view, hub: hubFlag } = {}) {
   const { makeProjectNotFoundError } = require('../utils/project/projectNotFoundError');
-  await alignOneProjectStatusToPhase(projectId);
-  const project = await Project.findById(projectId).lean();
+  const { isHubView, HUB_PROJECT_MONGO_EXCLUDE, HUB_BOARD_MONGO_SELECT } = require('../utils/project/projectHubView');
+  const hub = hubFlag === true || isHubView(view);
+  const tTotal = Date.now();
+  const timing = {
+    projectMs: 0,
+    alignMs: 0,
+    visibilityMs: 0,
+    membershipMs: 0,
+    boardsMs: 0,
+    capsMs: 0,
+    cache: 'miss',
+  };
+
+  let t0 = Date.now();
+  let projectQuery = Project.findById(projectId);
+  if (hub) {
+    projectQuery = projectQuery.select(HUB_PROJECT_MONGO_EXCLUDE);
+  }
+  let project = await projectQuery.lean();
+  timing.projectMs = Date.now() - t0;
   if (!project || project.isActive === false) {
     throw makeProjectNotFoundError();
   }
 
+  t0 = Date.now();
+  project = await alignLoadedProjectStatusToPhase(project);
+  timing.alignMs = Date.now() - t0;
+
   const useV2 = isProjectVisibilityV2Enabled();
   if (useV2) {
-    const visibilityCtx = await fetchProjectVisibilityContext(project.organizationId, userId);
-    const membershipRows = await ProjectMembership.find({
-      projectId: project._id,
-      userId,
-    })
-      .select('projectRoleId')
-      .lean();
-    const roleIds = membershipRows.map((r) => r.projectRoleId).filter(Boolean);
-    const ProjectRole = require('../models/ProjectRole');
-    const roleDocs = roleIds.length
-      ? await ProjectRole.find({ _id: { $in: roleIds } }).select('key').lean()
-      : [];
+    const { loadMembershipRolesForUser } = require('./projectAccess.service');
+    const tVis = Date.now();
+    const tMem = Date.now();
+    const tBoard = Date.now();
+    // Hub: only need defaultBoardId — overlap findOne with visibility/membership (FE loads full boards via listBoards).
+    const hubBoardPromise = hub
+      ? TaskBoard.findOne({ projectId, isActive: true })
+          .select(HUB_BOARD_MONGO_SELECT)
+          .sort({ createdAt: 1 })
+          .lean()
+          .then((row) => {
+            timing.boardsMs = Date.now() - tBoard;
+            return row;
+          })
+      : Promise.resolve(null);
+    const [visibilityCtx, membershipBundle, hubDefaultBoard] = await Promise.all([
+      fetchProjectVisibilityContext(project.organizationId, userId).then((ctx) => {
+        timing.visibilityMs = Date.now() - tVis;
+        return ctx;
+      }),
+      loadMembershipRolesForUser(project._id, userId).then((bundle) => {
+        timing.membershipMs = Date.now() - tMem;
+        return bundle;
+      }),
+      hubBoardPromise,
+    ]);
+    const membershipRows = membershipBundle.memberships || [];
+    const roleDocs = membershipBundle.roles || [];
     const projectRoleKeys = roleDocs.map((r) => String(r.key || '').trim()).filter(Boolean);
     const isMember =
       membershipRows.length > 0 ||
@@ -1087,10 +1210,18 @@ async function getProject({ userId, projectId }) {
       throw makeProjectNotFoundError();
     }
 
-    const boards =
-      access.informationLevel === 'summary'
-        ? []
-        : await TaskBoard.find({ projectId, isActive: true }).sort({ createdAt: 1 }).lean();
+    let boards = [];
+    if (access.informationLevel !== 'summary') {
+      if (hub) {
+        boards = hubDefaultBoard ? [hubDefaultBoard] : [];
+      } else {
+        t0 = Date.now();
+        boards = await TaskBoard.find({ projectId, isActive: true }).sort({ createdAt: 1 }).lean();
+        timing.boardsMs = Date.now() - t0;
+      }
+    } else if (hub) {
+      timing.boardsMs = timing.boardsMs || Date.now() - tBoard;
+    }
     const defaultBoard = boards[0] || null;
     const basePayload = applyInformationLevelToProject(
       {
@@ -1102,11 +1233,34 @@ async function getProject({ userId, projectId }) {
       },
       access.informationLevel
     );
-    return attachProjectCapabilities(basePayload, userId, project._id);
+    t0 = Date.now();
+    const result = await attachProjectCapabilities(basePayload, userId, project._id, {
+      project,
+      visibilityCtx,
+      membershipBundle,
+    });
+    timing.capsMs = Date.now() - t0;
+    if (hub) {
+      logger.info(
+        `[getProject] timing view=hub projectMs=${timing.projectMs} alignMs=${timing.alignMs} visibilityMs=${timing.visibilityMs} membershipMs=${timing.membershipMs} boardsMs=${timing.boardsMs} capsMs=${timing.capsMs} totalMs=${Date.now() - tTotal}`
+      );
+    }
+    return result;
   }
 
   const boardService = require('./taskBoard.service');
-  const boards = await TaskBoard.find({ projectId, isActive: true }).sort({ createdAt: 1 }).lean();
+  t0 = Date.now();
+  let boards;
+  if (hub) {
+    const row = await TaskBoard.findOne({ projectId, isActive: true })
+      .select(HUB_BOARD_MONGO_SELECT)
+      .sort({ createdAt: 1 })
+      .lean();
+    boards = row ? [row] : [];
+  } else {
+    boards = await TaskBoard.find({ projectId, isActive: true }).sort({ createdAt: 1 }).lean();
+  }
+  timing.boardsMs = Date.now() - t0;
   const defaultBoard = boards[0] || null;
   if (defaultBoard) {
     const ok = await boardService.ensureBoardViewAccess(defaultBoard._id, userId);
@@ -1116,7 +1270,8 @@ async function getProject({ userId, projectId }) {
   } else if (String(project.createdBy) !== String(userId)) {
     throw makeProjectNotFoundError();
   }
-  return attachProjectCapabilities(
+  t0 = Date.now();
+  const result = await attachProjectCapabilities(
     {
       ...project,
       projectId: String(project._id),
@@ -1124,11 +1279,19 @@ async function getProject({ userId, projectId }) {
       boards,
     },
     userId,
-    project._id
+    project._id,
+    { project }
   );
+  timing.capsMs = Date.now() - t0;
+  if (hub) {
+    logger.info(
+      `[getProject] timing view=hub projectMs=${timing.projectMs} alignMs=${timing.alignMs} boardsMs=${timing.boardsMs} capsMs=${timing.capsMs} totalMs=${Date.now() - tTotal}`
+    );
+  }
+  return result;
 }
 
-async function attachProjectCapabilities(payload, userId, projectId) {
+async function attachProjectCapabilities(payload, userId, projectId, opts = {}) {
   if (payload && typeof payload === 'object') {
     delete payload.technicalSetup;
     const { coerceDeliveryPhase } = require('../constants/projectDeliveryPhase');
@@ -1150,7 +1313,17 @@ async function attachProjectCapabilities(payload, userId, projectId) {
   if (!isProjectRbacEnabled()) {
     return payload;
   }
-  const resolved = await resolveUserProjectPermissions({ userId, projectId });
+  const { projectTechReviewerFlags } = require('../utils/phase1GatePolicy');
+  const [resolved, flags] = await Promise.all([
+    resolveUserProjectPermissions({
+      userId,
+      projectId,
+      project: opts.project || null,
+      visibilityCtx: opts.visibilityCtx || null,
+      membershipBundle: opts.membershipBundle || null,
+    }),
+    projectTechReviewerFlags(projectId).catch(() => null),
+  ]);
   // Legacy flag kept false: không creator/orgAdmin dump cho analysis/planning view.
   // Settings hub: chỉ permission key (không OR bypass / vai trò).
   const bypass = false;
@@ -1162,16 +1335,8 @@ async function attachProjectCapabilities(payload, userId, projectId) {
     matrixHas('analysis:artifact_import') && matrixHas('analysis:document_upload');
   /** Draft BA — canonical submit gate (không OR chéo key). */
   const canBaAuthorFromRole = matrixHas('analysis:submit_ba_review');
-  let hasAnalysisTechReviewer = false;
-  let hasPlanningTechReviewer = false;
-  try {
-    const { projectTechReviewerFlags } = require('../utils/phase1GatePolicy');
-    const flags = await projectTechReviewerFlags(projectId);
-    hasAnalysisTechReviewer = Boolean(flags?.hasAnalysisTechReviewer);
-    hasPlanningTechReviewer = Boolean(flags?.hasPlanningTechReviewer);
-  } catch {
-    /* non-blocking */
-  }
+  const hasAnalysisTechReviewer = Boolean(flags?.hasAnalysisTechReviewer);
+  const hasPlanningTechReviewer = Boolean(flags?.hasPlanningTechReviewer);
   return {
     ...payload,
     capabilities: {
@@ -1205,6 +1370,8 @@ async function attachProjectCapabilities(payload, userId, projectId) {
       canUpdateBacklog: unionHas('backlog:update'),
       canEstimate: unionHas('task:estimate'),
       canViewActivityTab: bypass || unionHas('activity:view'),
+      /** Closure report dashboard — report:view (tách khỏi activity:view). */
+      canViewReport: bypass || unionHas('report:view'),
       canViewAnalysis: bypass || matrixHas('analysis:view'),
       canEditAnalysis: matrixHas('analysis:artifact_edit'),
       canImportAnalysis: canImportFromRole,
