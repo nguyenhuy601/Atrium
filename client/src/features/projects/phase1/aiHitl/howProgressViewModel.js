@@ -538,6 +538,41 @@ function resolveHowActivity(liveRun, state, runningToolIds = []) {
 }
 
 /**
+ * True when liveRun is a newer HOW epoch than a still-stamped phase ready/completed.
+ * Covers re-run race: BE already running while pack.phase_how still says completed.
+ * False for zombie liveRun left "running" after the same phase succeeded.
+ */
+export function isLiveNewerThanCompletedHowPhase(liveRun, phaseHow) {
+  if (!liveRun || !isInFlightStatus(liveRun?.status)) return false;
+  const liveRunId = String(liveRun?.runId || '').trim();
+  const phaseRunId = String(phaseHow?.remoteRunId || phaseHow?.runId || '').trim();
+  if (liveRunId && phaseRunId && liveRunId !== phaseRunId) return true;
+  // Optimistic local clear (onHowStarted) nulls runId while status is queued/running.
+  if (!liveRunId && isInFlightStatus(liveRun?.status)) return true;
+  const liveStarted = liveRun?.startedAt ? new Date(liveRun.startedAt).getTime() : NaN;
+  const phaseEndedRaw =
+    phaseHow?.completedAt || phaseHow?.finishedAt || phaseHow?.endedAt || null;
+  const phaseEnded = phaseEndedRaw ? new Date(phaseEndedRaw).getTime() : NaN;
+  if (Number.isFinite(liveStarted) && Number.isFinite(phaseEnded) && liveStarted > phaseEnded) {
+    return true;
+  }
+  return false;
+}
+
+function resolveHowInFlightUxState(live, phase, liveRun, phaseHow, now) {
+  const maxLive = Number(WHAT_MONITOR_CONFIG.howRunMaxLiveMs) || 0;
+  if (maxLive > 0) {
+    // Wall from startedAt only — progress heartbeats must not keep a zombie clock alive.
+    const startedRaw = liveRun?.startedAt || phaseHow?.startedAt || null;
+    const startedAt = startedRaw ? new Date(startedRaw).getTime() : NaN;
+    if (Number.isFinite(startedAt) && now - startedAt > maxLive) {
+      return 'failed';
+    }
+  }
+  return live === 'queued' || phase === 'queued' ? 'queued' : 'running';
+}
+
+/**
  * Map liveRun + phase_how status → Monitor UX state.
  * incomplete/stopped ≠ failed (RULE-FE-01).
  * @param {object|null} liveRun
@@ -549,8 +584,17 @@ export function normalizeHowRunStatus(liveRun, phaseHow, now = Date.now()) {
   const live = norm(liveRun?.status);
   const phase = norm(phaseHow?.status);
   if (live === 'waiting_human' || phase === 'waiting_human') return 'waiting_human';
-  if (['ready', 'completed', 'confirmed', 'succeeded'].includes(live) ||
-      ['ready', 'completed', 'confirmed'].includes(phase)) {
+
+  const phaseSucceeded = ['ready', 'completed', 'confirmed'].includes(phase);
+  const liveSucceeded = ['ready', 'completed', 'confirmed', 'succeeded'].includes(live);
+
+  // Live in-flight wins over stale phase ready/completed (re-run / poll lag).
+  // Same-epoch zombie liveRun after phase success still falls through to succeeded.
+  if (isInFlightStatus(live) && (!phaseSucceeded || isLiveNewerThanCompletedHowPhase(liveRun, phaseHow))) {
+    return resolveHowInFlightUxState(live, phase, liveRun, phaseHow, now);
+  }
+
+  if (liveSucceeded || phaseSucceeded) {
     return 'succeeded';
   }
   // Prefer phase terminal over a stale liveRun still marked running.
@@ -568,17 +612,8 @@ export function normalizeHowRunStatus(liveRun, phaseHow, now = Date.now()) {
   ) {
     return 'finalizing';
   }
-  if (isInFlightStatus(live) || isInFlightStatus(phase)) {
-    const maxLive = Number(WHAT_MONITOR_CONFIG.howRunMaxLiveMs) || 0;
-    if (maxLive > 0) {
-      // Wall from startedAt only — progress heartbeats must not keep a zombie clock alive.
-      const startedRaw = liveRun?.startedAt || phaseHow?.startedAt || null;
-      const startedAt = startedRaw ? new Date(startedRaw).getTime() : NaN;
-      if (Number.isFinite(startedAt) && now - startedAt > maxLive) {
-        return 'failed';
-      }
-    }
-    return live === 'queued' || phase === 'queued' ? 'queued' : 'running';
+  if (isInFlightStatus(phase)) {
+    return resolveHowInFlightUxState(live, phase, liveRun, phaseHow, now);
   }
   return 'idle';
 }

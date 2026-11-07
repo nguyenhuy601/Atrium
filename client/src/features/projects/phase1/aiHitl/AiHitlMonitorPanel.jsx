@@ -172,6 +172,8 @@ function WhatMonitorBody({
   pipeline,
   phaseDone,
   hasProposeOutput = false,
+  /** Optimistic re-run window — keep overlay open before pack/live statuses converge. */
+  forceLoading = false,
   rerunWhatButton = null,
   t,
 }) {
@@ -206,17 +208,18 @@ function WhatMonitorBody({
   const terminalFail =
     vm.state === 'failed' || vm.state === 'cancelled' || vm.state === 'error';
   const showLoadingCard =
-    !phaseDone &&
-    !srsApproved &&
-    !vm.waitingHuman &&
-    !terminalFail &&
-    (vm.state === 'running' || vm.state === 'queued' || vm.state === 'finalizing');
+    Boolean(forceLoading) ||
+    (!phaseDone &&
+      !srsApproved &&
+      !vm.waitingHuman &&
+      !terminalFail &&
+      (vm.state === 'running' || vm.state === 'queued' || vm.state === 'finalizing'));
 
   useEffect(() => {
-    if (!clockLive) return undefined;
+    if (!clockLive && !forceLoading) return undefined;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [clockLive]);
+  }, [clockLive, forceLoading]);
 
   const activeMacro = srsApproved
     ? 6
@@ -280,7 +283,7 @@ function WhatMonitorBody({
         done={progress.done}
         total={progress.total}
         heroText={heroText}
-        showSpinner={Boolean(vm.showSpinner)}
+        showSpinner={Boolean(forceLoading || vm.showSpinner)}
         t={t}
       />
       {phaseDone &&
@@ -309,6 +312,8 @@ function HowMonitorBody({
   phaseDone,
   howNotStarted,
   hasProposeOutput = false,
+  /** Optimistic re-run window — keep overlay open before pack/live statuses converge. */
+  forceLoading = false,
   startHowButton,
   howRerunPicker = null,
   t,
@@ -321,15 +326,16 @@ function HowMonitorBody({
     !phaseDone &&
     !howNotStarted &&
     (clockLive ||
+      Boolean(forceLoading) ||
       hasProposeOutput ||
       vm.state === 'finalizing' ||
       vm.state === 'waiting_human');
 
   useEffect(() => {
-    if (!clockLive) return undefined;
+    if (!clockLive && !forceLoading) return undefined;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [clockLive]);
+  }, [clockLive, forceLoading]);
 
   const howFailed = vm.state === 'failed' || vm.state === 'cancelled' || vm.state === 'error';
   const howIncomplete = vm.state === 'incomplete';
@@ -338,11 +344,12 @@ function HowMonitorBody({
   const activeMacro =
     phaseDone || howNotStarted || howTerminalStopped ? 0 : vm.macroStep || 1;
   const showLoadingCard =
-    !phaseDone &&
-    !howNotStarted &&
-    !howTerminalStopped &&
-    !vm.waitingHuman &&
-    (vm.state === 'running' || vm.state === 'queued' || vm.state === 'finalizing');
+    Boolean(forceLoading) ||
+    (!phaseDone &&
+      !howNotStarted &&
+      !howTerminalStopped &&
+      !vm.waitingHuman &&
+      (vm.state === 'running' || vm.state === 'queued' || vm.state === 'finalizing'));
 
   const macroDef = HOW_MACRO_STEPS.find((m) => m.step === activeMacro) || null;
   const phaseLabel = macroDef
@@ -397,7 +404,7 @@ function HowMonitorBody({
         done={progress.done}
         total={progress.total}
         heroText={heroText}
-        showSpinner={Boolean(vm.showSpinner)}
+        showSpinner={Boolean(forceLoading || vm.showSpinner)}
         t={t}
       />
       {howNotStarted ? startHowButton : null}
@@ -621,6 +628,7 @@ export default function AiHitlMonitorPanel({
         pipeline={pipeline}
         phaseDone={false}
         hasProposeOutput={!awaitingFreshRun && shouldShowWhatMonitorResults(pack)}
+        forceLoading={awaitingFreshRun === 'what'}
         rerunWhatButton={rerunWhatButton}
         t={t}
       />
@@ -633,6 +641,7 @@ export default function AiHitlMonitorPanel({
         phaseDone={false}
         howNotStarted
         hasProposeOutput={false}
+        forceLoading={awaitingFreshRun === 'how'}
         startHowButton={startHowButton}
         howRerunPicker={howRerunPicker}
         t={t}
@@ -647,6 +656,7 @@ export default function AiHitlMonitorPanel({
         pipeline={pipeline}
         phaseDone
         hasProposeOutput={!awaitingFreshRun && shouldShowWhatMonitorResults(pack)}
+        forceLoading={false}
         rerunWhatButton={rerunWhatButton}
         t={t}
       />
@@ -656,13 +666,15 @@ export default function AiHitlMonitorPanel({
       <HowMonitorBody
         liveRun={liveRun}
         phaseHow={phaseHow}
-        phaseDone={phase === 'how_done'}
-        howNotStarted={phase === 'how' && howNotStarted}
+        // Re-run window: never treat prior how_done as finished while overlay must stay open.
+        phaseDone={phase === 'how_done' && awaitingFreshRun !== 'how'}
+        howNotStarted={phase === 'how' && howNotStarted && awaitingFreshRun !== 'how'}
         hasProposeOutput={
           !awaitingFreshRun && phase === 'how'
             ? shouldShowHowMonitorResults(pack)
-            : phase === 'how_done'
+            : phase === 'how_done' && awaitingFreshRun !== 'how'
         }
+        forceLoading={awaitingFreshRun === 'how'}
         startHowButton={startHowButton}
         howRerunPicker={howRerunPicker}
         t={t}

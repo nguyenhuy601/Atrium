@@ -48,17 +48,42 @@ function mapFrBrief(row) {
 
 /**
  * Prompt-only slice — omit layer.requiredData / supportingContext.
+ * Drop description/deliverable here (they live in FACTS.evidence) to shrink DashScope input.
  */
 function semanticPromptSlice(semantic = {}) {
+  const frBrief = Array.isArray(semantic.business?.frBrief)
+    ? semantic.business.frBrief.map((row) => {
+        if (!row?.id) return null;
+        const out = { id: String(row.id) };
+        if (row.title) out.title = String(row.title).slice(0, 80);
+        if (row.statement) out.statement = String(row.statement).slice(0, 120);
+        return out;
+      }).filter(Boolean)
+    : [];
+  const taskBrief = Array.isArray(semantic.upstream?.taskBrief)
+    ? semantic.upstream.taskBrief.map((task) => {
+        if (!task?.id) return null;
+        const out = {
+          id: String(task.id),
+          title: String(task.title || task.name || task.id).slice(0, 80),
+        };
+        if (task.area) out.area = String(task.area).slice(0, 24);
+        if (Array.isArray(task.dependsOn) && task.dependsOn.length) {
+          out.dependsOn = task.dependsOn.map(String);
+        }
+        if (Array.isArray(task.sourceFrIds) && task.sourceFrIds.length) {
+          out.sourceFrIds = task.sourceFrIds.map(String);
+        }
+        return out;
+      }).filter(Boolean)
+    : [];
   return {
     business: {
       locale: semantic.business?.locale || 'vi',
       projectName: semantic.business?.projectName || '',
-      frBrief: Array.isArray(semantic.business?.frBrief) ? semantic.business.frBrief : [],
+      frBrief,
     },
-    upstream: {
-      taskBrief: Array.isArray(semantic.upstream?.taskBrief) ? semantic.upstream.taskBrief : [],
-    },
+    upstream: { taskBrief },
   };
 }
 

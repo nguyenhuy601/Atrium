@@ -29,6 +29,8 @@ import { resolveHitlRequirementFlags } from './resolveHitlRequirementFlags';
 import {
   isPhaseInFlightStatus,
   protectPackDuringFreshRunAwait,
+  readStoredAwaitingFreshRun,
+  writeStoredAwaitingFreshRun,
 } from './freshRunUiGuard';
 import { isHowRunWallTimedOut } from './WHAT_MONITOR_CONFIG';
 import {
@@ -47,6 +49,9 @@ import { mergeCanonicalSearch } from '../../../../utils/canonicalSearchParams';
 import { queryKeys } from '../../../../lib/queryKeys';
 
 const LINKED_PACK_STALE_MS = 30_000;
+
+/** Module-level — remount of AiHitlWorkspacePage must not re-auto-open Review. */
+let __aiHitlAutoOpenedReviewKey = '';
 
 function unwrap(res) {
   return res?.data?.data ?? res?.data ?? res;
@@ -177,9 +182,12 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
   const [packId, setPackId] = useState(packIdFromQuery);
   const [pack, setPack] = useState(null);
   const [liveRun, setLiveRun] = useState(null);
-  /** 'what' | 'how' — hide stale Monitor results until poll shows a real new run. */
-  const [awaitingFreshRun, setAwaitingFreshRun] = useState(null);
-  const awaitingFreshRunRef = useRef(null);
+  /** 'what' | 'how' — hide stale Monitor results until poll shows a real new run.
+   * Restored from sessionStorage so navigate review→monitor remount cannot drop the overlay. */
+  const [awaitingFreshRun, setAwaitingFreshRun] = useState(() =>
+    readStoredAwaitingFreshRun(packIdFromQuery)
+  );
+  const awaitingFreshRunRef = useRef(readStoredAwaitingFreshRun(packIdFromQuery));
   const packRef = useRef(null);
   const liveRunRef = useRef(null);
   /** Keep packId out of refresh deps — setPackId must not re-trigger the load effect. */
@@ -223,6 +231,11 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
   useEffect(() => {
     packIdRef.current = packIdFromQuery;
     setPackId(packIdFromQuery);
+    const stored = readStoredAwaitingFreshRun(packIdFromQuery);
+    if (stored && awaitingFreshRunRef.current !== stored) {
+      awaitingFreshRunRef.current = stored;
+      setAwaitingFreshRun(stored);
+    }
   }, [projectId, organizationId, packIdFromQuery]);
 
   const resolvePackId = useCallback(async () => {
@@ -242,12 +255,14 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
     const next = phase === 'how' ? 'how' : phase === 'what' ? 'what' : null;
     awaitingFreshRunRef.current = next;
     setAwaitingFreshRun(next);
-  }, []);
+    writeStoredAwaitingFreshRun(packIdRef.current || packIdFromQuery, next);
+  }, [packIdFromQuery]);
 
   const clearAwaitingFreshRun = useCallback(() => {
     awaitingFreshRunRef.current = null;
     setAwaitingFreshRun(null);
-  }, []);
+    writeStoredAwaitingFreshRun(packIdRef.current || packIdFromQuery, null);
+  }, [packIdFromQuery]);
 
   // Keep refs aligned for refresh() races (optimistic clear vs poll).
   useEffect(() => {
@@ -282,6 +297,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
     if (guarded.release && awaiting) {
       awaitingFreshRunRef.current = null;
       setAwaitingFreshRun(null);
+      writeStoredAwaitingFreshRun(id, null);
     }
 
     const prevLive = liveRunRef.current;
@@ -413,8 +429,9 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
   /** HOW start → Monitor handoff (same pattern as WHAT start). */
   const onHowStarted = useCallback(
     ({ clearResults = false, packStatus = '' } = {}) => {
-      goMonitorTab();
+      // Persist awaiting BEFORE navigate — remount on /review→/ai-hitl must restore it.
       markAwaitingFreshRun('how');
+      goMonitorTab();
       const epochStartedAt = new Date().toISOString();
       // Clear prior liveRun epoch (esp. wall-stale startedAt) so howInFlight + poll unlock.
       setLiveRun((prev) => {
@@ -774,13 +791,30 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
     setTab(tabFromPath);
   }, [tabFromPath]);
 
-  // Only auto-open Review when Gate ready — never yank off Monitor while WHAT/HOW is starting/running.
+  // Auto-open Review once per gate readiness (module-level so remount cannot re-yank).
   useEffect(() => {
     if (busy || whatInFlight || howInFlight) return;
+    if (awaitingFreshRun) return;
     if (reviewMode !== 'gate1' && reviewMode !== 'gate2') return;
     if (tabFromPath === AI_HITL_TAB.REVIEW) return;
+    const gateKey = `${packIdRef.current || packIdFromQuery}:${reviewMode}:${String(
+      reviewMode === 'gate2' ? howStatusNorm : whatStatusNorm
+    )}`;
+    if (__aiHitlAutoOpenedReviewKey === gateKey) return;
+    __aiHitlAutoOpenedReviewKey = gateKey;
     goHitlTab(AI_HITL_TAB.REVIEW);
-  }, [reviewMode, busy, whatInFlight, howInFlight, tabFromPath, goHitlTab]);
+  }, [
+    reviewMode,
+    busy,
+    whatInFlight,
+    howInFlight,
+    awaitingFreshRun,
+    tabFromPath,
+    goHitlTab,
+    packIdFromQuery,
+    howStatusNorm,
+    whatStatusNorm,
+  ]);
 
   // RULE-R07: legacy Data Gate pause — cancel + free activeKey, then user starts WHAT again
   useEffect(() => {
@@ -1692,7 +1726,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
               type="button"
               role="tab"
               aria-selected={tab === id}
-              onClick={() => setTab(id)}
+              onClick={() => goHitlTab(id)}
               className={`rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors sm:px-4 ${
                 tab === id
                   ? 'border-primary text-foreground'

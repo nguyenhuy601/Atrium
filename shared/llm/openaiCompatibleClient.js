@@ -25,6 +25,17 @@ const QWEN_MAX_OUTPUT_TOKENS = 8192;
 /** Absolute remote clamp — never send above this on openai_compatible. */
 const DASHSCOPE_COMPAT_MAX_OUTPUT_TOKENS = 16384;
 
+/**
+ * Soft prompt character budgets (system+user) for tools that chunk by input size.
+ * DashScope errors like `Range of input length should be [1, 8192]` are model-specific;
+ * keep a safety margin under the published ceiling.
+ */
+const INPUT_CHAR_BUDGET_TIGHT = 7500; // under 8192 (qwen-mt / some Algo limits)
+const INPUT_CHAR_BUDGET_CHAT = 48000; // ~12k tokens @ chars/4 — qwen3 / plus / flash / omni
+const INPUT_CHAR_BUDGET_WIDE = 96000; // larger-context chat when known
+const INPUT_CHAR_BUDGET_MIN = 2000;
+const INPUT_CHAR_BUDGET_MAX = 120000;
+
 function llmProvider(env = process.env) {
   return String(env.LLM_PROVIDER || 'ollama').trim().toLowerCase();
 }
@@ -63,6 +74,85 @@ function resolveChatMaxOutputTokens(env = process.env, modelName) {
       : QWEN_MAX_OUTPUT_TOKENS;
   }
   return envCeiling != null ? envCeiling : QWEN_PLUS_MAX_OUTPUT_TOKENS;
+}
+
+/**
+ * Soft max prompt chars for one chat call (not the provider context window).
+ * Used by Dependency/WBS-style chunkers so switching LLM_CHAT_MODEL does not
+ * require retuning HOW_DEP_LLM_PROMPT_CHAR_BUDGET.
+ *
+ * Override: LLM_CHAT_MAX_INPUT_CHARS (clamped).
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @param {string} [modelName]
+ * @returns {number}
+ */
+function resolveChatMaxInputChars(env = process.env, modelName) {
+  const envCap = Number(env.LLM_CHAT_MAX_INPUT_CHARS);
+  if (Number.isFinite(envCap) && envCap >= INPUT_CHAR_BUDGET_MIN) {
+    return Math.min(INPUT_CHAR_BUDGET_MAX, Math.round(envCap));
+  }
+
+  const model = String(modelName || chatModel(env) || '')
+    .trim()
+    .toLowerCase();
+
+  // Translation / MT family — DashScope often enforces ~8192 input length.
+  if (
+    model.includes('qwen-mt') ||
+    model.includes('mt-flash') ||
+    model.includes('mt-plus') ||
+    /(^|[-_])mt([-_]|$)/.test(model)
+  ) {
+    return INPUT_CHAR_BUDGET_TIGHT;
+  }
+
+  // Known roomy chat / omni models.
+  if (
+    model.includes('qwen-long') ||
+    model.includes('qwen2.5-72b') ||
+    model.includes('qwen2.5-32b')
+  ) {
+    return INPUT_CHAR_BUDGET_WIDE;
+  }
+
+  if (
+    model.includes('qwen3') ||
+    model.includes('qwen-plus') ||
+    model.includes('qwen-flash') ||
+    model.includes('qwen-turbo') ||
+    model.includes('qwen-max') ||
+    model.includes('omni')
+  ) {
+    return INPUT_CHAR_BUDGET_CHAT;
+  }
+
+  // Unknown remote model — stay under the strict Algo 8192 class.
+  if (isOpenAiCompatibleProvider(env)) {
+    return INPUT_CHAR_BUDGET_TIGHT;
+  }
+  return INPUT_CHAR_BUDGET_CHAT;
+}
+
+/**
+ * Prompt char budget for chunking: min across the reactive model chain
+ * (primary + fallbacks), so a tight fallback cannot be hit with an oversized prompt.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {number}
+ */
+function resolveChatPromptCharBudget(env = process.env) {
+  const envCap = Number(env.LLM_CHAT_MAX_INPUT_CHARS);
+  if (Number.isFinite(envCap) && envCap >= INPUT_CHAR_BUDGET_MIN) {
+    return Math.min(INPUT_CHAR_BUDGET_MAX, Math.round(envCap));
+  }
+  if (isOpenAiCompatibleProvider(env)) {
+    const chain = chatModelCandidates(env);
+    if (chain.length) {
+      return Math.min(...chain.map((name) => resolveChatMaxInputChars(env, name)));
+    }
+  }
+  return resolveChatMaxInputChars(env);
 }
 
 function parseModelList(raw) {
@@ -596,7 +686,12 @@ module.exports = {
   QWEN_PLUS_MAX_OUTPUT_TOKENS,
   QWEN_MAX_OUTPUT_TOKENS,
   DASHSCOPE_COMPAT_MAX_OUTPUT_TOKENS,
+  INPUT_CHAR_BUDGET_TIGHT,
+  INPUT_CHAR_BUDGET_CHAT,
+  INPUT_CHAR_BUDGET_WIDE,
   resolveChatMaxOutputTokens,
+  resolveChatMaxInputChars,
+  resolveChatPromptCharBudget,
   DEFAULT_REMOTE_EMBED_MODEL,
   llmProvider,
   isOpenAiCompatibleProvider,

@@ -1,5 +1,5 @@
 /**
- * Dependency Propose — LLM one-shot (HOW sec pattern).
+ * Dependency Propose — LLM (HOW sec pattern), chunked under DashScope input ceiling.
  * LLM chooses two time events; code maps to FS|SS|FF|SF in accept.
  * No AUTO_EDGE / SRS heuristic promote. LLM fail ≠ COMPLETE_NO_EDGES.
  */
@@ -9,6 +9,11 @@ const { invokeHowSemanticLlm } = require('../../engines/howSemanticLlm');
 const { semanticPromptSlice } = require('./dependencySemantic');
 const { PROMPT_VERSION } = require('./dependencyAnalysisStatus');
 const { EVENT_PAIR_TO_TYPE } = require('./dependencyTypeMap');
+const {
+  buildDependencyProposeChunks,
+  mergeDependencyLlmChunkResults,
+  promptCharLength,
+} = require('./dependencyProposeBudget');
 
 const LLM_SHAPE = {
   edges: [
@@ -28,19 +33,45 @@ const LLM_SHAPE = {
       depType: 'optional FS|SS|FF|SF — must match event map if set',
     },
   ],
-  openQuestions: [{ code: 'DEP_OQ|DEP_TYPE_UNRESOLVED|DEP_WBS_REFINEMENT_REQUIRED', message: 'string', relatedTaskIds: [] }],
+  openQuestions: [
+    {
+      code: 'DEP_OQ|DEP_TYPE_UNRESOLVED|DEP_WBS_REFINEMENT_REQUIRED',
+      message: 'string',
+      relatedTaskIds: [],
+    },
+  ],
 };
 
+/**
+ * Compact evidence for the prompt — skip redundant title when description exists.
+ */
 function factsPromptSlice(facts = {}) {
-  return {
-    evidence: (facts.evidence || []).map((e) => ({
-      id: e.id,
-      taskId: e.taskId || null,
-      frId: e.frId || null,
-      field: e.field,
-      text: e.text ? String(e.text).slice(0, 160) : '',
-    })),
-  };
+  const byTask = new Map();
+  for (const e of facts.evidence || []) {
+    const taskId = e?.taskId ? String(e.taskId) : '';
+    const frId = e?.frId ? String(e.frId) : '';
+    const field = String(e?.field || '');
+    const key = taskId || frId;
+    if (!key) continue;
+    if (!byTask.has(key)) byTask.set(key, []);
+    byTask.get(key).push({ ...e, field, taskId: taskId || null, frId: frId || null });
+  }
+
+  const evidence = [];
+  for (const rows of byTask.values()) {
+    const hasDesc = rows.some((r) => r.field === 'description' && String(r.text || '').trim());
+    for (const e of rows) {
+      if (hasDesc && e.field === 'title') continue;
+      evidence.push({
+        id: e.id,
+        taskId: e.taskId || null,
+        frId: e.frId || null,
+        field: e.field,
+        text: e.text ? String(e.text).slice(0, 100) : '',
+      });
+    }
+  }
+  return { evidence };
 }
 
 function eventTypeMapHint() {
@@ -100,6 +131,48 @@ function buildDependencyPrompt({ semantic, facts, languageInstruction = '' }) {
   return { system, user };
 }
 
+async function invokeOneDependencyPrompt({
+  system,
+  user,
+  env,
+  generateJsonFn,
+  timeoutMs,
+}) {
+  const llm = await invokeHowSemanticLlm({
+    system,
+    user,
+    env,
+    generateJsonFn,
+    timeoutMs,
+  });
+  if (!llm.ok) {
+    return {
+      ok: false,
+      data: { edges: [], openQuestions: [] },
+      meta: {
+        fallbackReason: llm.meta?.fallbackReason || 'llm_failed',
+        llmCalls: llm.meta?.llmCalls || 1,
+        model: llm.meta?.model || null,
+      },
+    };
+  }
+  const data =
+    llm.data && typeof llm.data === 'object'
+      ? {
+          edges: Array.isArray(llm.data.edges) ? llm.data.edges : [],
+          openQuestions: Array.isArray(llm.data.openQuestions) ? llm.data.openQuestions : [],
+        }
+      : { edges: [], openQuestions: [] };
+  return {
+    ok: true,
+    data,
+    meta: {
+      llmCalls: llm.meta?.llmCalls || 1,
+      model: llm.meta?.model || null,
+    },
+  };
+}
+
 /**
  * @returns {Promise<{ ok: boolean, data: object|null, skipped?: boolean, meta: object }>}
  */
@@ -147,54 +220,101 @@ async function proposeDependencyWithLlm({
     languageInstruction = '';
   }
 
-  const { system, user } = buildDependencyPrompt({
+  const { resolveHowSecAttemptTimeoutMs } = require('../howSecAttemptTimeout');
+  const timeoutMs = resolveHowSecAttemptTimeoutMs(env);
+
+  const { charBudget, chunks } = buildDependencyProposeChunks({
     semantic,
     facts,
+    buildPrompt: buildDependencyPrompt,
     languageInstruction,
-  });
-
-  const { resolveHowSecAttemptTimeoutMs } = require('../howSecAttemptTimeout');
-  const llm = await invokeHowSemanticLlm({
-    system,
-    user,
     env,
-    generateJsonFn,
-    timeoutMs: resolveHowSecAttemptTimeoutMs(env),
   });
 
-  if (!llm.ok) {
+  if (!chunks.length) {
     return {
       ok: false,
+      skipped: true,
       data: { edges: [], openQuestions: [] },
       meta: {
-        fallbackReason: llm.meta?.fallbackReason || 'llm_failed',
-        analysisStatus: 'FAILED',
-        source: 'llm_failed',
-        llmCalls: llm.meta?.llmCalls || 1,
-        providerAttempts: llm.meta?.llmCalls || 1,
-        model: llm.meta?.model || null,
+        fallbackReason: 'missing_SEMANTIC',
+        analysisStatus: 'SEMANTIC_INCOMPLETE',
+        llmCalls: 0,
+        providerAttempts: 0,
         promptVersion: PROMPT_VERSION,
+        charBudget,
       },
     };
   }
 
-  const data =
-    llm.data && typeof llm.data === 'object'
-      ? {
-          edges: Array.isArray(llm.data.edges) ? llm.data.edges : [],
-          openQuestions: Array.isArray(llm.data.openQuestions) ? llm.data.openQuestions : [],
-        }
-      : { edges: [], openQuestions: [] };
+  // Guard: even a 1-task chunk can exceed budget if evidence is huge — fail closed with clear reason.
+  for (const chunk of chunks) {
+    const len = promptCharLength(chunk.prompt.system, chunk.prompt.user);
+    if (len > charBudget && chunk.taskIds.length <= 1) {
+      return {
+        ok: false,
+        data: { edges: [], openQuestions: [] },
+        meta: {
+          fallbackReason: `dep_prompt_over_budget:${len}>${charBudget}`,
+          analysisStatus: 'FAILED',
+          source: 'llm_failed',
+          llmCalls: 0,
+          providerAttempts: 0,
+          promptVersion: PROMPT_VERSION,
+          charBudget,
+          promptChars: len,
+        },
+      };
+    }
+  }
+
+  const chunkResults = [];
+  for (const chunk of chunks) {
+    const result = await invokeOneDependencyPrompt({
+      system: chunk.prompt.system,
+      user: chunk.prompt.user,
+      env,
+      generateJsonFn,
+      timeoutMs,
+    });
+    chunkResults.push(result);
+  }
+
+  const merged = mergeDependencyLlmChunkResults(chunkResults);
+
+  if (merged.failedChunkCount > 0) {
+    return {
+      ok: false,
+      data: { edges: merged.edges, openQuestions: merged.openQuestions },
+      meta: {
+        fallbackReason: merged.failures[0] || 'llm_failed',
+        analysisStatus: 'FAILED',
+        source: 'llm_failed',
+        llmCalls: merged.llmCalls,
+        providerAttempts: merged.llmCalls,
+        model: merged.model,
+        promptVersion: PROMPT_VERSION,
+        charBudget,
+        chunkCount: merged.chunkCount,
+        failedChunkCount: merged.failedChunkCount,
+      },
+    };
+  }
 
   return {
     ok: true,
-    data,
+    data: {
+      edges: merged.edges,
+      openQuestions: merged.openQuestions,
+    },
     meta: {
-      llmCalls: 1,
-      providerAttempts: 1,
-      model: llm.meta?.model || null,
+      llmCalls: merged.llmCalls,
+      providerAttempts: merged.llmCalls,
+      model: merged.model,
       source: 'fact_llm',
       promptVersion: PROMPT_VERSION,
+      charBudget,
+      chunkCount: merged.chunkCount,
     },
   };
 }
