@@ -64,7 +64,7 @@ export const FIGMA_ORG_TASK_MODAL_CARD =
   'rounded-xl border border-border bg-card p-4 shadow-sm';
 
 export const FIGMA_ORG_TASK_MODAL_INPUT =
-  'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary';
+  'w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground shadow-sm outline-none transition hover:border-border-strong focus:border-primary focus-visible:ring-2 focus-visible:ring-ring';
 
 export const FIGMA_ORG_TASK_MODAL_PRIMARY_BTN =
   'w-full rounded-lg bg-primary py-2 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-50';

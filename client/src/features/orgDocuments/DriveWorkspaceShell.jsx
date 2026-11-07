@@ -12,7 +12,9 @@ import {
   X,
 } from 'lucide-react';
 import { useAppStrings } from '../../locales/appStrings';
+import QueryStateView from '../../components/Shared/QueryStateView';
 import useModalA11y from '../../components/Shared/useModalA11y';
+import { VH_MOTION_BTN, VH_MOTION_SPINNER } from '../../motion/classes';
 import { formatFileSize, resolveOrgFileOpenUrl, toDriveAttachmentRef } from './orgDocumentUtils';
 import { getDriveFacetTheme } from './driveFacetTheme';
 import { isStoredObjectAttachment } from '../projects/board/taskBoardAttachmentOpen';
@@ -383,7 +385,7 @@ export default function DriveWorkspaceShell({
           <button
             type="button"
             onClick={onBackToChat}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/60 px-2.5 py-1.5 text-[11px] font-semibold text-foreground transition hover:bg-muted hover:text-primary"
+            className={`inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/60 px-2.5 py-1.5 text-[11px] font-semibold text-foreground transition hover:bg-muted hover:text-primary ${VH_MOTION_BTN}`}
             title={t('documents.driveBackToChat')}
             aria-label={t('documents.driveBackToChat')}
           >
@@ -471,17 +473,14 @@ export default function DriveWorkspaceShell({
                 onClick={() => onReload?.()}
                 aria-busy={loading}
                 disabled={loading}
-                className="shrink-0 rounded-md px-2 py-1 font-semibold transition-colors motion-reduce:transition-none hover:bg-destructive/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30 disabled:opacity-60"
+                className={`shrink-0 rounded-md px-2 py-1 font-semibold transition-colors motion-reduce:transition-none hover:bg-destructive/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30 disabled:opacity-60 ${VH_MOTION_BTN}`}
               >
                 {t('documents.orgRetry')}
               </button>
             </div>
           ) : null}
           {loading && files.length === 0 ? (
-            <div role="status" className="flex flex-col items-center py-10 text-muted-foreground">
-              <Loader2 className="h-6 w-6 motion-safe:animate-spin opacity-70" aria-hidden />
-              <p className="mt-2 text-xs">{t('documents.orgLoading')}</p>
-            </div>
+            <QueryStateView loading loadingClassName="py-10" skeletonLines={4} />
           ) : error && files.length === 0 ? (
             <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-center">
               <p className="text-xs text-destructive">{error}</p>
@@ -490,7 +489,7 @@ export default function DriveWorkspaceShell({
                 onClick={() => onReload?.()}
                 aria-busy={loading}
                 disabled={loading}
-                className="mt-2 rounded-lg bg-destructive px-3 py-1.5 text-xs font-semibold text-destructive-foreground transition motion-reduce:transition-none hover:opacity-90 disabled:opacity-60"
+                className={`mt-2 rounded-lg bg-destructive px-3 py-1.5 text-xs font-semibold text-destructive-foreground transition motion-reduce:transition-none hover:opacity-90 disabled:opacity-60 ${VH_MOTION_BTN}`}
               >
                 {t('documents.orgRetry')}
               </button>
@@ -502,7 +501,7 @@ export default function DriveWorkspaceShell({
               <button
                 type="button"
                 onClick={() => onQueryChange?.('')}
-                className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                className={`inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${VH_MOTION_BTN}`}
               >
                 <X className="h-3.5 w-3.5" aria-hidden />
                 {t('documents.driveClearSearch')}
@@ -629,10 +628,10 @@ function DrivePreviewBody({ file, onOpenFile, onOpenInWorkspace, openingFile = f
             onOpenFile?.(file);
           }}
           disabled={openingFile}
-          className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:cursor-wait disabled:opacity-70"
+          className={`inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:cursor-wait disabled:opacity-70 ${VH_MOTION_BTN}`}
         >
           {openingFile ? (
-            <Loader2 className="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden />
+            <Loader2 className={`h-3.5 w-3.5 ${VH_MOTION_SPINNER}`} aria-hidden />
           ) : (
             <ExternalLink className="h-3.5 w-3.5" aria-hidden />
           )}
@@ -642,7 +641,7 @@ function DrivePreviewBody({ file, onOpenFile, onOpenInWorkspace, openingFile = f
           <button
             type="button"
             onClick={() => onOpenInWorkspace(file)}
-            className="inline-flex items-center gap-1 rounded-lg bg-muted px-3 py-1.5 text-xs font-semibold text-foreground"
+            className={`inline-flex items-center gap-1 rounded-lg bg-muted px-3 py-1.5 text-xs font-semibold text-foreground ${VH_MOTION_BTN}`}
           >
             <MessageSquare className="h-3.5 w-3.5" aria-hidden />
             {t('documents.orgOpenInChannel')}

@@ -7,7 +7,12 @@ import {
   resolvePlanningBarRange,
   unionPlanningBounds,
 } from './planningGanttUtils';
-import { kindChipClass, statusBadgeClass, formatPhase1StatusLabel } from '../shared/phase1UiTokens';
+import {
+  kindChipClass,
+  statusBadgeClass,
+  formatPhase1StatusLabel,
+  formatPhase1KindLabel,
+} from '../shared/phase1UiTokens';
 
 const TRACK_PX = 640;
 const STORAGE_KEY = 'vh.phase1.ganttExpanded';
@@ -64,7 +69,9 @@ export default function PlanningGanttPanel({
         <div className="min-w-0">
           <h2 className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
             {t('workspace.phase1GanttTitle')}
-            {kind ? <span className={kindChipClass(kind)}>{kind}</span> : null}
+            {kind ? (
+              <span className={kindChipClass(kind)}>{formatPhase1KindLabel(kind, t)}</span>
+            ) : null}
           </h2>
           {open ? (
             <p className="text-[10px] text-muted-foreground">

@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { motion } from 'motion/react';
 import { X } from 'lucide-react';
 import OtOverrideConfirmModal from '../../../../features/adminTasks/OtOverrideConfirmModal';
 import {
@@ -16,6 +17,16 @@ import ActivityTab from './ActivityTab';
 import AttachmentsTab from './AttachmentsTab';
 import WorklogTab from './WorklogTab';
 import ApprovalsTab from './ApprovalsTab';
+import MotionPresence from '../../../../motion/primitives/MotionPresence';
+import TabPanelMotion from '../../../../motion/primitives/TabPanelMotion';
+import {
+  motionBackdrop,
+  motionDrawerRight,
+  motionModalPanel,
+  motionOverlayShell,
+} from '../../../../motion/overlayMotion';
+import useOverlayScrollLock from '../../../../motion/useOverlayScrollLock';
+import { VH_MOTION_BTN } from '../../../../motion/classes';
 
 const TAB_COMPONENTS = {
   overview: OverviewTab,
@@ -82,7 +93,7 @@ function WorkItemDetailHeader() {
       </div>
       <button
         type="button"
-        className="rounded p-2 text-muted-foreground hover:text-foreground sm:p-1"
+        className={`rounded p-2 text-muted-foreground hover:text-foreground sm:p-1 ${VH_MOTION_BTN}`}
         onClick={onClose}
         aria-label={t('workspace.projectHubWorkDrawerClose')}
       >
@@ -109,7 +120,7 @@ function WorkItemDetailTabs() {
           role="tab"
           aria-selected={selectedId === item.id}
           onClick={() => setActiveTab(item.id)}
-          className={`min-h-11 shrink-0 rounded-lg px-3 py-1.5 text-[11px] font-semibold ${
+          className={`min-h-11 shrink-0 rounded-lg px-3 py-1.5 text-[11px] font-semibold ${VH_MOTION_BTN} ${
             selectedId === item.id
               ? 'bg-primary text-primary-foreground'
               : 'bg-muted text-muted-foreground'
@@ -129,7 +140,9 @@ function WorkItemDetailBody() {
   const Comp = TAB_COMPONENTS[tabId] || OverviewTab;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 scrollbar-overlay">
-      <Comp />
+      <TabPanelMotion activeKey={tabId}>
+        <Comp />
+      </TabPanelMotion>
     </div>
   );
 }
@@ -177,8 +190,18 @@ function HoursOverrideHost() {
   );
 }
 
-function WorkItemDetailInner({ chrome = 'modal', drawerLayout = 'embedded' }) {
+function WorkItemDetailInner({
+  chrome = 'modal',
+  drawerLayout = 'embedded',
+  onPresenceExitComplete,
+}) {
   const { open, onClose, workItem, t, issueId } = useWorkItemDetail();
+  const { release } = useOverlayScrollLock(Boolean(open));
+
+  const handleExitComplete = () => {
+    release();
+    onPresenceExitComplete?.();
+  };
 
   useEffect(() => {
     if (!open) return undefined;
@@ -189,7 +212,7 @@ function WorkItemDetailInner({ chrome = 'modal', drawerLayout = 'embedded' }) {
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  if (!open || !issueId) return null;
+  if (!issueId) return null;
 
   const panel = (
     <>
@@ -201,49 +224,100 @@ function WorkItemDetailInner({ chrome = 'modal', drawerLayout = 'embedded' }) {
   );
 
   if (chrome === 'drawer') {
-    const asideCls =
-      drawerLayout === 'overlay'
-        ? 'fixed inset-y-0 right-0 z-50 flex h-full w-full max-w-md flex-col overflow-hidden border-l border-border bg-surface shadow-lg'
-        : 'fixed inset-y-0 right-0 z-40 flex h-full min-h-0 w-full shrink-0 animate-slide-in-right flex-col overflow-hidden border-l border-border bg-surface sm:relative sm:z-auto sm:max-w-md';
+    const isOverlayLayout = drawerLayout === 'overlay';
 
     return (
-      <>
-        <button
-          type="button"
-          className={`fixed inset-0 z-30 bg-black/40 ${drawerLayout === 'overlay' ? '' : 'sm:hidden'}`}
-          aria-label={t('workspace.projectHubWorkDrawerClose')}
-          onClick={onClose}
-        />
-        <aside
-          className={asideCls}
-          role="dialog"
-          aria-modal="true"
-          aria-label={workItem?.title || t('workspace.projectHubWorkDetails')}
-        >
-          {panel}
-        </aside>
-      </>
+      <MotionPresence open={open} initial onExitComplete={handleExitComplete}>
+        {isOverlayLayout ? (
+          <motion.div
+            key="work-item-detail-drawer-overlay"
+            className="fixed inset-0 z-50 vh-motion-respect"
+            {...motionOverlayShell}
+          >
+            <motion.button
+              type="button"
+              className="absolute inset-0 bg-black/40"
+              aria-label={t('workspace.projectHubWorkDrawerClose')}
+              onClick={onClose}
+              {...motionBackdrop}
+            />
+            <motion.aside
+              className="absolute inset-y-0 right-0 z-50 flex h-full w-full max-w-md flex-col overflow-hidden border-l border-border bg-surface shadow-lg"
+              role="dialog"
+              aria-modal="true"
+              aria-label={workItem?.title || t('workspace.projectHubWorkDetails')}
+              {...motionDrawerRight}
+            >
+              {panel}
+            </motion.aside>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="work-item-detail-drawer-embedded"
+            className="contents"
+            initial={{ opacity: 1 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 1 }}
+          >
+            <motion.button
+              type="button"
+              className="fixed inset-0 z-30 bg-black/40 sm:hidden"
+              aria-label={t('workspace.projectHubWorkDrawerClose')}
+              onClick={onClose}
+              {...motionBackdrop}
+            />
+            <motion.aside
+              className="fixed inset-y-0 right-0 z-40 flex h-full min-h-0 w-full shrink-0 flex-col overflow-hidden border-l border-border bg-surface sm:relative sm:z-auto sm:max-w-md"
+              role="dialog"
+              aria-modal="true"
+              aria-label={workItem?.title || t('workspace.projectHubWorkDetails')}
+              {...motionDrawerRight}
+            >
+              {panel}
+            </motion.aside>
+          </motion.div>
+        )}
+      </MotionPresence>
     );
   }
 
+  if (typeof document === 'undefined') return null;
+
+  // Flex-center overlay (như Shared Modal) — không dùng left/top 50% + -translate-* vì
+  // motionModalPanel ghi đè transform và làm panel lệch góc dưới-phải.
   return createPortal(
-    <>
-      <div className="fixed inset-0 z-[10070] bg-black/60" onClick={onClose} aria-hidden />
-      <div
-        className="fixed left-1/2 top-1/2 z-[10071] flex max-h-[92vh] w-[min(768px,96vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-surface text-foreground shadow-2xl"
-        role="dialog"
-        aria-modal="true"
-        aria-label={workItem?.title || t('workspace.projectHubWorkDetails')}
+    <MotionPresence open={open} initial onExitComplete={handleExitComplete}>
+      <motion.div
+        key="work-item-detail-modal"
+        className="fixed inset-0 z-[10070] flex items-center justify-center p-2 sm:p-4 vh-motion-respect"
+        {...motionOverlayShell}
       >
-        {panel}
-      </div>
-    </>,
+        <motion.div
+          className="absolute inset-0 bg-black/60"
+          onClick={onClose}
+          aria-hidden
+          {...motionBackdrop}
+        />
+        <motion.div
+          className="relative z-[10071] flex max-h-[min(92dvh,92vh)] w-[min(768px,96vw)] origin-center flex-col overflow-hidden rounded-xl border border-border bg-surface text-foreground shadow-2xl"
+          role="dialog"
+          aria-modal="true"
+          aria-label={workItem?.title || t('workspace.projectHubWorkDetails')}
+          onClick={(e) => e.stopPropagation()}
+          {...motionModalPanel}
+        >
+          {panel}
+        </motion.div>
+      </motion.div>
+    </MotionPresence>,
     document.body
   );
 }
 
 /**
  * Work item detail thống nhất — Board/List (modal) và Backlog/CR (drawer).
+ * Giữ workItem cuối khi `open=false` để MotionPresence kịp chạy exit
+ * (parent thường clear detail id + workItem cùng lúc).
  */
 export default function WorkItemDetail({
   open = false,
@@ -252,11 +326,26 @@ export default function WorkItemDetail({
   workItem = null,
   ...providerProps
 }) {
-  if (!open || !workItem) return null;
+  const [heldItem, setHeldItem] = useState(workItem);
+  const openRef = useRef(open);
+  openRef.current = open;
+
+  useEffect(() => {
+    if (workItem) setHeldItem(workItem);
+  }, [workItem]);
+
+  const item = workItem || heldItem;
+  if (!item) return null;
 
   return (
-    <WorkItemDetailProvider open={open} workItem={workItem} {...providerProps}>
-      <WorkItemDetailInner chrome={chrome} drawerLayout={drawerLayout} />
+    <WorkItemDetailProvider open={open} workItem={item} {...providerProps}>
+      <WorkItemDetailInner
+        chrome={chrome}
+        drawerLayout={drawerLayout}
+        onPresenceExitComplete={() => {
+          if (!openRef.current) setHeldItem(null);
+        }}
+      />
     </WorkItemDetailProvider>
   );
 }

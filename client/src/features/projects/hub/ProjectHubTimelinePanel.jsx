@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Minus, Plus, Search } from 'lucide-react';
+import {
+  CalendarRange,
+  ChevronDown,
+  ChevronRight,
+  Crosshair,
+  Maximize2,
+  Minus,
+  Plus,
+  Search,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAppStrings } from '../../../locales/appStrings';
 import UserAvatar from '../../../components/Shared/UserAvatar';
@@ -10,6 +19,15 @@ import ProjectHubIssueTypeBadge from './ProjectHubIssueTypeBadge';
 import WorkItemDetail from './WorkItemDetail';
 import { buildListTree } from './projectHubHierarchy';
 import { flattenExpandedRows } from './projectHubListLazy';
+import {
+  HUB_TL_GANTT_HEAD,
+  HUB_TL_ICON_BTN,
+  HUB_TL_LEGEND_CHIP,
+  HUB_TL_SEARCH,
+  HUB_TL_SELECT,
+  HUB_TL_TOOLBAR,
+  HUB_TL_WORK_HEAD,
+} from './projectHubUiClasses';
 import {
   TIMELINE_DAY_LABEL_NUM_MIN_PX,
   TIMELINE_PX_PER_UNIT,
@@ -50,15 +68,19 @@ import {
   displayIssueKey,
   dueDateTone,
   formatHubDate,
-  statusBucketPillClass,
   timelineBarForegroundClass,
   timelineBarToneClass,
+  timelineStatusDotClass,
+  timelineWorkTypeBarClass,
   unwrapPlanningEntity,
 } from './projectHubUtils';
 import { childWorkStats } from './projectHubBacklogStats';
 
-const WORK_COL_PX = 288;
-const HEADER_PX = 56;
+/** Cột trái hẹp — trọng tâm Gantt thời gian bên phải. */
+const WORK_COL_PX = 188;
+const HEADER_PX = 40;
+const BAR_H_PX = 28;
+const BAR_TOP_PX = Math.max(0, Math.round((TIMELINE_ROW_PX - BAR_H_PX) / 2));
 const TYPE_FILTERS = ['epic', 'feature', 'story', 'task', 'bug', 'subtask'];
 const STATUS_FILTERS = ['todo', 'progress', 'done'];
 const TYPE_LABEL_KEYS = {
@@ -120,6 +142,7 @@ function nodeBarClass(node, lists) {
   return timelineBarToneClass({
     bucket: nodeStatusBucket(node, lists),
     dueTone: nodeDueTone(node, lists),
+    workType: node?.workType,
   });
 }
 
@@ -130,16 +153,27 @@ function nodeBarForegroundClass(node, lists) {
   });
 }
 
-function nodeRowToneClass(index, hovered) {
-  if (hovered) return 'bg-muted/50';
-  return index % 2 === 1 ? 'bg-muted/20' : '';
+function nodeStatusDot(node, lists) {
+  return timelineStatusDotClass({
+    bucket: nodeStatusBucket(node, lists),
+    dueTone: nodeDueTone(node, lists),
+  });
 }
 
+function nodeRowToneClass(index, hovered) {
+  if (hovered) return 'bg-primary/10';
+  return index % 2 === 1 ? 'bg-muted/35' : 'bg-surface';
+}
+
+/** Legend Gantt: loại việc (màu bar todo) + trạng thái ghi đè. */
 const TIMELINE_LEGEND = [
-  { key: 'todo', bucket: 'todo', dueTone: 'none', labelKey: STATUS_LABEL_KEYS.todo },
-  { key: 'progress', bucket: 'progress', dueTone: 'none', labelKey: STATUS_LABEL_KEYS.progress },
-  { key: 'done', bucket: 'done', dueTone: 'none', labelKey: STATUS_LABEL_KEYS.done },
-  { key: 'overdue', bucket: 'todo', dueTone: 'overdue', labelKey: 'workspace.projectHubStatOverdue' },
+  { key: 'epic', kind: 'type', workType: 'epic', labelKey: TYPE_LABEL_KEYS.epic },
+  { key: 'feature', kind: 'type', workType: 'feature', labelKey: TYPE_LABEL_KEYS.feature },
+  { key: 'story', kind: 'type', workType: 'story', labelKey: TYPE_LABEL_KEYS.story },
+  { key: 'task', kind: 'type', workType: 'task', labelKey: TYPE_LABEL_KEYS.task },
+  { key: 'progress', kind: 'status', bucket: 'progress', dueTone: 'none', labelKey: STATUS_LABEL_KEYS.progress },
+  { key: 'done', kind: 'status', bucket: 'done', dueTone: 'none', labelKey: STATUS_LABEL_KEYS.done },
+  { key: 'overdue', kind: 'status', bucket: 'todo', dueTone: 'overdue', labelKey: 'workspace.projectHubStatOverdue' },
 ];
 
 function resolveAssignee(raw) {
@@ -323,10 +357,8 @@ export default function ProjectHubTimelinePanel({
 
   const titleCls = 'text-foreground';
   const muted = 'text-muted-foreground';
-  const controlBtn =
-    'rounded-md border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40';
   const iconBtn =
-    'rounded-md p-1.5 text-muted-foreground transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+    'rounded-full p-1 text-muted-foreground transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   const bounds = useMemo(
     () => resolveProjectTimeBounds(projectPayload, board),
     [projectPayload, board]
@@ -446,9 +478,6 @@ export default function ProjectHubTimelinePanel({
       return a <= t0 && t0 <= b;
     });
   }, [sprints, todayX]);
-
-  const selectCls =
-    'rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
   const centerToday = useCallback(() => {
     const el = rightRef.current;
@@ -712,121 +741,116 @@ export default function ProjectHubTimelinePanel({
   }
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden" aria-busy={planningLoading || undefined}>
-      <div className="flex flex-col gap-2 border-b border-border px-3 py-2 sm:px-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="relative min-w-0 flex-1">
-            <Search
-              size={14}
-              className={`pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 ${muted}`}
-              aria-hidden
-            />
-            <span className="sr-only">{t('workspace.projectHubTimelineSearchPh')}</span>
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t('workspace.projectHubTimelineSearchPh')}
-              className="w-full rounded-md border border-border bg-background py-1.5 pl-7 pr-2 text-xs text-foreground transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          </label>
-          <select
-            className={selectCls}
-            value={epicFilter}
-            onChange={(e) => setEpicFilter(e.target.value)}
-            aria-label={t('workspace.projectHubTimelineFilterEpic')}
-          >
-            <option value="">{t('workspace.projectHubPlanAllEpics')}</option>
-            {epics.map((epic) => (
-              <option key={entityId(epic)} value={entityId(epic)}>
-                {displayIssueKey(projectCode, entityId(epic))} {epic.title || ''}
-              </option>
-            ))}
-          </select>
-          <select
-            className={selectCls}
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            aria-label={t('workspace.projectHubTimelineFilterType')}
-          >
-            <option value="">{t('workspace.projectHubTimelineFilterType')}</option>
-            {TYPE_FILTERS.map((id) => (
-              <option key={id} value={id}>
-                {t(TYPE_LABEL_KEYS[id])}
-              </option>
-            ))}
-          </select>
-          <select
-            className={selectCls}
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            aria-label={t('workspace.projectHubTimelineFilterStatus')}
-          >
-            <option value="">{t('workspace.projectHubTimelineFilterStatus')}</option>
-            {STATUS_FILTERS.map((id) => (
-              <option key={id} value={id}>
-                {t(STATUS_LABEL_KEYS[id])}
-              </option>
-            ))}
-          </select>
-          <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:ml-auto">
-            <button
-              type="button"
-              className={controlBtn}
-              onClick={jumpToSchedule}
-              disabled={!canJumpToSchedule}
-              aria-label={t('workspace.projectHubTimelineJumpScheduleAria')}
-            >
-              {t('workspace.projectHubTimelineJumpSchedule')}
-            </button>
-            <button
-              type="button"
-              className={controlBtn}
-              onClick={centerToday}
-              aria-label={t('workspace.projectHubTimelineTodayAria')}
-            >
-              {t('workspace.projectHubTimelineToday')}
-            </button>
-            <button
-              type="button"
-              className={controlBtn}
-              onClick={fitTimeline}
-              aria-label={t('workspace.projectHubTimelineFitAria')}
-            >
-              {t('workspace.projectHubTimelineFit')}
-            </button>
-          </div>
-        </div>
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/20" aria-busy={planningLoading || undefined}>
+      <div className={HUB_TL_TOOLBAR}>
+        <label className="relative shrink-0">
+          <Search
+            size={13}
+            className={`pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 ${muted}`}
+            aria-hidden
+          />
+          <span className="sr-only">{t('workspace.projectHubTimelineSearchPh')}</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('workspace.projectHubTimelineSearchPh')}
+            className={HUB_TL_SEARCH}
+          />
+        </label>
+        <select
+          className={HUB_TL_SELECT}
+          value={epicFilter}
+          onChange={(e) => setEpicFilter(e.target.value)}
+          aria-label={t('workspace.projectHubTimelineFilterEpic')}
+        >
+          <option value="">{t('workspace.projectHubPlanAllEpics')}</option>
+          {epics.map((epic) => (
+            <option key={entityId(epic)} value={entityId(epic)}>
+              {displayIssueKey(projectCode, entityId(epic))} {epic.title || ''}
+            </option>
+          ))}
+        </select>
+        <select
+          className={`${HUB_TL_SELECT} max-w-[7rem]`}
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          aria-label={t('workspace.projectHubTimelineFilterType')}
+        >
+          <option value="">{t('workspace.projectHubTimelineFilterType')}</option>
+          {TYPE_FILTERS.map((id) => (
+            <option key={id} value={id}>
+              {t(TYPE_LABEL_KEYS[id])}
+            </option>
+          ))}
+        </select>
+        <select
+          className={`${HUB_TL_SELECT} max-w-[8rem]`}
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          aria-label={t('workspace.projectHubTimelineFilterStatus')}
+        >
+          <option value="">{t('workspace.projectHubTimelineFilterStatus')}</option>
+          {STATUS_FILTERS.map((id) => (
+            <option key={id} value={id}>
+              {t(STATUS_LABEL_KEYS[id])}
+            </option>
+          ))}
+        </select>
         <div
-          className="flex flex-wrap items-center gap-x-2.5 gap-y-1"
+          className="hidden items-center gap-1 sm:flex"
           role="list"
           aria-label={t('workspace.projectHubTimelineLegendAria')}
         >
           {TIMELINE_LEGEND.map((item) => (
-            <span
-              key={item.key}
-              className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
-              role="listitem"
-            >
+            <span key={item.key} className={HUB_TL_LEGEND_CHIP} role="listitem" title={t(item.labelKey)}>
               <span
-                className={`h-2 w-2 shrink-0 rounded-sm ${timelineBarToneClass({
-                  bucket: item.bucket,
-                  dueTone: item.dueTone,
-                })}`}
+                className={`h-2 w-2 shrink-0 rounded-sm ${
+                  item.kind === 'type'
+                    ? timelineWorkTypeBarClass(item.workType)
+                    : timelineStatusDotClass({ bucket: item.bucket, dueTone: item.dueTone })
+                }`}
                 aria-hidden
               />
-              {t(item.labelKey)}
+              <span className="hidden xl:inline">{t(item.labelKey)}</span>
             </span>
           ))}
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            className={HUB_TL_ICON_BTN}
+            onClick={jumpToSchedule}
+            disabled={!canJumpToSchedule}
+            title={t('workspace.projectHubTimelineJumpSchedule')}
+            aria-label={t('workspace.projectHubTimelineJumpScheduleAria')}
+          >
+            <CalendarRange size={14} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className={HUB_TL_ICON_BTN}
+            onClick={centerToday}
+            title={t('workspace.projectHubTimelineToday')}
+            aria-label={t('workspace.projectHubTimelineTodayAria')}
+          >
+            <Crosshair size={14} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className={HUB_TL_ICON_BTN}
+            onClick={fitTimeline}
+            title={t('workspace.projectHubTimelineFit')}
+            aria-label={t('workspace.projectHubTimelineFitAria')}
+          >
+            <Maximize2 size={14} aria-hidden />
+          </button>
         </div>
       </div>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div className="flex shrink-0 flex-col border-r border-border" style={{ width: WORK_COL_PX }}>
-          <div
-            className="flex shrink-0 items-end border-b border-border/50 bg-muted/40 px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
-            style={{ height: HEADER_PX }}
-          >
+        <div className="flex shrink-0 flex-col border-r border-border bg-surface" style={{ width: WORK_COL_PX }}>
+          <div className={HUB_TL_WORK_HEAD} style={{ height: HEADER_PX }}>
             {t('workspace.projectHubTimelineWork')}
           </div>
           <div ref={leftRef} className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto" onScroll={syncFromLeft}>
@@ -849,66 +873,64 @@ export default function ProjectHubTimelinePanel({
               const pct = childWorkProgressPct(stats.done, stats.total);
               const hovered = hoveredRowId === node.id;
               const rangeItem = rangeForTimelineNode(node);
-              const dateSubline = rangeItem
-                ? `${formatHubDate(rangeItem.start, locale)} – ${formatHubDate(rangeItem.end, locale)}`
-                : null;
+              const statusLabel = t(STATUS_LABEL_KEYS[bucket] || STATUS_LABEL_KEYS.todo);
               return (
                 <div
                   key={node.id}
-                  className={`relative flex items-center gap-1 border-b border-border/35 px-2 ${nodeRowToneClass(index, hovered)}`}
-                  style={{ height: TIMELINE_ROW_PX, paddingLeft: 8 + depth * 16 }}
+                  className={`relative flex items-center gap-1 border-b border-border/50 px-1.5 transition-colors motion-reduce:transition-none ${nodeRowToneClass(index, hovered)}`}
+                  style={{ height: TIMELINE_ROW_PX, paddingLeft: 6 + depth * 10 }}
                   onMouseEnter={() => setHoveredRowId(node.id)}
                   onMouseLeave={() => setHoveredRowId((id) => (id === node.id ? null : id))}
                 >
                   {canExpand ? (
                     <button
                       type="button"
-                      className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       aria-expanded={expanded}
                       onClick={() => toggleExpand(node.id)}
                     >
-                      {expanded ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
+                      {expanded ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
                     </button>
                   ) : (
-                    <span className="w-4 shrink-0" aria-hidden />
+                    <span className="w-3.5 shrink-0" aria-hidden />
                   )}
                   <button
                     type="button"
-                    className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                    className="flex min-w-0 flex-1 items-center gap-1 text-left rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => setDetailIssue(raw)}
+                    title={
+                      rangeItem
+                        ? `${displayIssueKey(projectCode, entityId(raw))} · ${formatHubDate(rangeItem.start, locale)} – ${formatHubDate(rangeItem.end, locale)}`
+                        : undefined
+                    }
                   >
                     <ProjectHubIssueTypeBadge
                       type={node.workType}
                       variant="icon"
                       label={t(TYPE_LABEL_KEYS[node.workType] || TYPE_LABEL_KEYS.task)}
                     />
-                    <span className="min-w-0 flex-1">
-                      <span className={`block truncate text-xs font-medium leading-tight ${titleCls}`}>
-                        {displayIssueKey(projectCode, entityId(raw))} {node.title}
+                    <span className={`min-w-0 flex-1 truncate text-[11px] font-semibold leading-tight ${titleCls}`}>
+                      <span className="mr-1 font-mono text-[10px] font-bold text-primary">
+                        {displayIssueKey(projectCode, entityId(raw))}
                       </span>
-                      {dateSubline ? (
-                        <span className="mt-0.5 block truncate text-[10px] leading-tight text-muted-foreground">
-                          {dateSubline}
-                        </span>
-                      ) : (
-                        <span className="mt-0.5 inline-flex max-w-full truncate rounded border border-dashed border-border px-1 py-px text-[10px] font-medium leading-tight text-muted-foreground">
-                          {t('workspace.projectHubTimelineUnscheduled')}
-                        </span>
-                      )}
+                      {node.title}
                     </span>
+                    {!rangeItem ? (
+                      <span className="sr-only">{t('workspace.projectHubTimelineUnscheduled')}</span>
+                    ) : null}
                   </button>
                   <span
-                    className={`inline-flex shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${statusBucketPillClass(bucket)}`}
-                  >
-                    {t(STATUS_LABEL_KEYS[bucket] || STATUS_LABEL_KEYS.todo)}
-                  </span>
+                    className={`h-2 w-2 shrink-0 rounded-sm ${nodeStatusDot(node, lists)}`}
+                    title={statusLabel}
+                    aria-label={statusLabel}
+                  />
                   {assignee ? (
                     <UserAvatar name={assignee.name} avatar={assignee.avatar} userId={assignee.userId} size="xs" />
                   ) : null}
                   {node.workType === 'epic' && stats.total > 0 ? (
                     <span
-                      className="pointer-events-none absolute bottom-0 left-8 right-2 h-0.5 overflow-hidden rounded bg-muted"
-                      style={{ marginLeft: depth * 16 }}
+                      className="pointer-events-none absolute bottom-0 left-6 right-1.5 h-0.5 overflow-hidden rounded bg-muted"
+                      style={{ marginLeft: depth * 10 }}
                     >
                       <span
                         className={`block h-full ${childWorkProgressBarClass(stats)}`}
@@ -934,9 +956,7 @@ export default function ProjectHubTimelinePanel({
           >
             <div className="relative" style={{ width: Math.max(totalWidth, 1), minHeight: '100%' }}>
               <div
-                className={`sticky top-0 z-20 touch-none select-none border-b border-border/30 bg-surface ${
-                  headerDragging ? 'cursor-grabbing' : 'cursor-grab'
-                }`}
+                className={`${HUB_TL_GANTT_HEAD} ${headerDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
                 style={{ height: HEADER_PX }}
                 role="presentation"
                 title={t('workspace.projectHubTimelineHeaderDragHint')}
@@ -947,18 +967,18 @@ export default function ProjectHubTimelinePanel({
               >
                 {showWeeksHeader ? (
                   <>
-                    <div className="flex h-7 border-b border-border/25 text-[11px] font-semibold text-muted-foreground">
+                    <div className="flex h-[18px] border-b border-border text-[10px] font-bold uppercase tracking-wide text-foreground/80">
                       {groups.map((g) => (
                         <div
                           key={g.key}
-                          className="flex items-center border-r border-border/20 px-1.5"
+                          className="flex items-center border-r border-border/60 px-1.5"
                           style={{ width: g.widthPx }}
                         >
                           {groupHeaderLabel(g, locale)}
                         </div>
                       ))}
                     </div>
-                    <div className="flex h-7 text-[9px] text-muted-foreground">
+                    <div className="flex h-[22px] text-[9px] font-medium text-muted-foreground">
                       {columns.map((col) => {
                         const isToday = isSameLocalDay(col.start, today);
                         const isMajor = isMajorTimelineGridColumn(col);
@@ -1009,11 +1029,11 @@ export default function ProjectHubTimelinePanel({
                     </div>
                   </>
                 ) : (
-                  <div className="flex h-full text-xs font-semibold text-muted-foreground">
+                  <div className="flex h-full text-[11px] font-bold text-foreground/80">
                     {columns.map((col) => (
                       <div
                         key={col.key}
-                        className="flex items-center border-r border-border/20 px-2"
+                        className="flex items-center border-r border-border/50 px-2"
                         style={{ width: col.widthPx }}
                       >
                         {columnHeaderLabel(col, locale)}
@@ -1023,7 +1043,7 @@ export default function ProjectHubTimelinePanel({
                 )}
               </div>
 
-              <div className="relative bg-background" style={{ height: bodyH + 24 }}>
+              <div className="relative bg-gradient-to-b from-muted/40 to-surface" style={{ height: bodyH }}>
                 {scale === 'weeks'
                   ? columns.map((col, i) => {
                       const left = columnOffsets[i]?.left ?? 0;
@@ -1032,7 +1052,7 @@ export default function ProjectHubTimelinePanel({
                         return (
                           <div
                             key={`wknd-${col.key}`}
-                            className="pointer-events-none absolute top-0 bottom-0 bg-muted/10"
+                            className="pointer-events-none absolute top-0 bottom-0 bg-muted/40"
                             style={{ left, width: col.widthPx, ...WEEKEND_HATCH_STYLE }}
                           />
                         );
@@ -1041,7 +1061,7 @@ export default function ProjectHubTimelinePanel({
                         return (
                           <div
                             key={`today-tint-${col.key}`}
-                            className="pointer-events-none absolute top-0 bottom-0 bg-primary/5"
+                            className="pointer-events-none absolute top-0 bottom-0 bg-primary/15"
                             style={{ left, width: col.widthPx }}
                           />
                         );
@@ -1056,7 +1076,7 @@ export default function ProjectHubTimelinePanel({
                     <div
                       key={`grid-${col.key}`}
                       className={`pointer-events-none absolute top-0 bottom-0 border-l ${
-                        major ? 'border-border/30' : 'border-border/10'
+                        major ? 'border-border/60' : 'border-border/25'
                       }`}
                       style={{ left }}
                     />
@@ -1068,22 +1088,22 @@ export default function ProjectHubTimelinePanel({
                   return (
                     <div
                       key={entityId(sprint) || sprint.name}
-                      className="pointer-events-none absolute top-0 bottom-0 bg-success/10"
+                      className="pointer-events-none absolute top-0 bottom-0 bg-success/20"
                       style={{ left: place.left, width: place.width }}
                       title={String(sprint.name || '')}
                     >
-                      <div className="absolute inset-x-0 top-0 h-0.5 bg-success/60" />
+                      <div className="absolute inset-x-0 top-0 h-1 bg-success" />
                     </div>
                   );
                 })}
                 {todayX != null ? (
                   <div
-                    className="pointer-events-none absolute top-0 z-10 w-px bg-primary"
-                    style={{ left: todayX, height: bodyH + 24 }}
+                    className="pointer-events-none absolute top-0 z-10 w-0.5 bg-primary shadow-[0_0_8px_rgba(37,99,235,0.45)]"
+                    style={{ left: todayX, height: bodyH }}
                     aria-hidden
                   >
                     {overlappingSprints.length ? (
-                      <span className="absolute left-1 top-1 max-w-[12rem] truncate rounded bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
+                      <span className="absolute left-1 top-1 max-w-[12rem] truncate rounded bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground shadow-sm">
                         {overlappingSprints.map((s) => s.name).filter(Boolean).join(', ')}
                       </span>
                     ) : null}
@@ -1104,8 +1124,8 @@ export default function ProjectHubTimelinePanel({
                     return (
                       <div
                         key={`bar-${node.id}`}
-                        className={`absolute left-0 right-0 ${nodeRowToneClass(index, hovered)}`}
-                        style={{ top: 24 + index * TIMELINE_ROW_PX, height: TIMELINE_ROW_PX }}
+                        className={`absolute left-0 right-0 border-b border-border/30 ${nodeRowToneClass(index, hovered)}`}
+                        style={{ top: index * TIMELINE_ROW_PX, height: TIMELINE_ROW_PX }}
                         onMouseEnter={() => setHoveredRowId(node.id)}
                         onMouseLeave={() => setHoveredRowId((id) => (id === node.id ? null : id))}
                       />
@@ -1127,65 +1147,53 @@ export default function ProjectHubTimelinePanel({
                     epicStats && epicStats.total > 0
                       ? childWorkProgressPct(epicStats.done, epicStats.total)
                       : null;
-                  const labelText = `${issueKey} ${node.title || ''}`.trim();
+                  /** Trong bar chỉ key — title nằm tooltip; ngoài bar chỉ avatar (bớt nhiễu). */
+                  const innerLabel = issueKey;
                   return (
                     <div
                       key={`bar-${node.id}`}
-                      className={`absolute left-0 right-0 ${nodeRowToneClass(index, hovered)}`}
-                      style={{ top: 24 + index * TIMELINE_ROW_PX, height: TIMELINE_ROW_PX }}
+                      className={`absolute left-0 right-0 border-b border-border/30 ${nodeRowToneClass(index, hovered)}`}
+                      style={{ top: index * TIMELINE_ROW_PX, height: TIMELINE_ROW_PX }}
                       onMouseEnter={() => setHoveredRowId(node.id)}
                       onMouseLeave={() => setHoveredRowId((id) => (id === node.id ? null : id))}
                     >
                       <button
                         type="button"
-                        className={`absolute top-2.5 flex h-6 items-center overflow-hidden rounded-md ${nodeBarClass(node, lists)} ${nodeBarForegroundClass(node, lists)}`}
-                        style={{ left: place.left, width: place.width }}
+                        className={`absolute flex items-center overflow-hidden rounded-md shadow-md ring-1 ring-inset ring-white/25 transition-[filter,transform] motion-reduce:transition-none hover:brightness-110 hover:saturate-125 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${nodeBarClass(node, lists)} ${nodeBarForegroundClass(node, lists)}`}
+                        style={{
+                          left: place.left,
+                          width: place.width,
+                          top: BAR_TOP_PX,
+                          height: BAR_H_PX,
+                        }}
                         title={tooltip}
                         aria-label={tooltip}
                         onClick={() => setDetailIssue(raw)}
                       >
                         {epicPct != null ? (
                           <span
-                            className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-background/25"
+                            className="pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-background/30"
                             aria-hidden
                           >
                             <span
-                              className={`block h-full ${childWorkProgressBarClass(epicStats)}`}
+                              className="block h-full bg-primary-foreground/90"
                               style={{ width: `${epicPct}%` }}
                             />
                           </span>
                         ) : null}
                         {!labelOutside ? (
-                          <span className="relative z-[1] min-w-0 truncate px-1.5 text-left text-[10px] font-semibold leading-6">
-                            {labelText}
+                          <span
+                            className="relative z-[1] min-w-0 truncate px-2 text-left font-mono text-[10px] font-bold tracking-tight"
+                            style={{ lineHeight: `${BAR_H_PX}px` }}
+                          >
+                            {innerLabel}
                           </span>
                         ) : null}
                       </button>
-                      {labelOutside ? (
-                        <button
-                          type="button"
-                          className="absolute top-2.5 flex max-w-[10rem] items-center gap-1 truncate pl-1 text-left sm:max-w-[14rem]"
-                          style={{ left: place.left + place.width + 4 }}
-                          title={tooltip}
-                          aria-label={tooltip}
-                          onClick={() => setDetailIssue(raw)}
-                        >
-                          <span className="min-w-0 truncate text-[10px] font-medium text-foreground">
-                            {labelText}
-                          </span>
-                          {assignee ? (
-                            <UserAvatar
-                              name={assignee.name}
-                              avatar={assignee.avatar}
-                              userId={assignee.userId}
-                              size="xs"
-                            />
-                          ) : null}
-                        </button>
-                      ) : assignee ? (
+                      {assignee ? (
                         <span
-                          className="pointer-events-none absolute top-2.5 flex items-center"
-                          style={{ left: place.left + place.width + 4 }}
+                          className="pointer-events-none absolute flex items-center"
+                          style={{ left: place.left + place.width + 6, top: BAR_TOP_PX, height: BAR_H_PX }}
                         >
                           <UserAvatar
                             name={assignee.name}
@@ -1193,6 +1201,15 @@ export default function ProjectHubTimelinePanel({
                             userId={assignee.userId}
                             size="xs"
                           />
+                        </span>
+                      ) : labelOutside ? (
+                        <span
+                          className="pointer-events-none absolute flex items-center pl-1"
+                          style={{ left: place.left + place.width + 4, top: BAR_TOP_PX, height: BAR_H_PX }}
+                        >
+                          <span className="truncate font-mono text-[10px] font-semibold text-muted-foreground">
+                            {innerLabel}
+                          </span>
                         </span>
                       ) : null}
                     </div>
@@ -1215,49 +1232,51 @@ export default function ProjectHubTimelinePanel({
         </div>
       </div>
 
-      <div
-        className="flex shrink-0 flex-wrap items-center justify-center gap-1 border-t border-border bg-surface px-3 py-2"
-        role="group"
-        aria-label={t('workspace.projectHubTimelineScaleAria')}
-      >
-        <button
-          type="button"
-          className={iconBtn}
-          onClick={() => zoomTimelineStep(-1)}
-          aria-label={t('workspace.projectHubTimelineZoomOut')}
+      <div className="pointer-events-none absolute bottom-3 left-1/2 z-30 -translate-x-1/2">
+        <div
+          className="pointer-events-auto flex items-center gap-0.5 rounded-lg border border-border bg-surface px-1 py-0.5 shadow-lg ring-1 ring-primary/15"
+          role="group"
+          aria-label={t('workspace.projectHubTimelineScaleAria')}
         >
-          <Minus size={14} aria-hidden />
-        </button>
-        {TIMELINE_SCALES.map((id) => {
-          const active = scale === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={active}
-              onClick={() => setScale(id)}
-              className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                active
-                  ? 'border border-primary text-primary'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              }`}
-            >
-              {t(SCALE_LABEL_KEYS[id])}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          className={iconBtn}
-          onClick={() => zoomTimelineStep(1)}
-          aria-label={t('workspace.projectHubTimelineZoomIn')}
-        >
-          <Plus size={14} aria-hidden />
-        </button>
+          <button
+            type="button"
+            className={iconBtn}
+            onClick={() => zoomTimelineStep(-1)}
+            aria-label={t('workspace.projectHubTimelineZoomOut')}
+          >
+            <Minus size={14} aria-hidden />
+          </button>
+          {TIMELINE_SCALES.map((id) => {
+            const active = scale === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setScale(id)}
+                className={`rounded-md px-2.5 py-1 text-[11px] font-bold transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  active
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                }`}
+              >
+                {t(SCALE_LABEL_KEYS[id])}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            className={iconBtn}
+            onClick={() => zoomTimelineStep(1)}
+            aria-label={t('workspace.projectHubTimelineZoomIn')}
+          >
+            <Plus size={14} aria-hidden />
+          </button>
+        </div>
       </div>
 
       <WorkItemDetail
-        key={String(detailIssue?._id || detailIssue?.id || 'timeline-detail')}
+        key="timeline-work-item-detail"
         open={Boolean(detailIssue)}
         chrome="drawer"
         drawerLayout="overlay"

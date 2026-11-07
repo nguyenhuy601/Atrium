@@ -1,22 +1,19 @@
 import { Loader2 } from 'lucide-react';
+import { VH_MOTION_SPINNER } from '../../../../motion/classes';
+import MotionFadeIn from '../../../../motion/primitives/MotionFadeIn';
 import { useAppStrings } from '../../../../locales/appStrings';
 import { RELEASE_HANDOVER_CHECKLIST_IDS } from '../../../../utils/projectPhaseNav';
 import { AdminLoadErrorState } from '../../../../components/adminUsers/adminPanelStates';
 import usePhase4Handover from './usePhase4Handover';
 import Phase4SectionCard from './Phase4SectionCard';
 
+const ITEM_STAGGER = 0.045;
+
 const ITEM_ROLE = Object.freeze({
   release_notes: 'pm',
   deployment_verified: 'pm',
   acceptance_signed_off: 'po',
   handover_completed: 'po',
-});
-
-const ITEM_HINT_KEY = Object.freeze({
-  release_notes: 'workspace.phase4ReleaseNotesHint',
-  deployment_verified: 'workspace.phaseDeployVerifyHint',
-  acceptance_signed_off: 'workspace.phase4AcceptanceSignHint',
-  handover_completed: 'workspace.phase4HandoverCompleteHint',
 });
 
 /**
@@ -45,7 +42,7 @@ export default function Phase4HandoverChecklistPage({ projectId }) {
         className="flex items-center gap-2 p-4 text-sm text-muted-foreground"
         aria-busy="true"
       >
-        <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+        <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
         <span>{t('common.loading')}</span>
       </div>
     );
@@ -64,6 +61,7 @@ export default function Phase4HandoverChecklistPage({ projectId }) {
       <Phase4SectionCard
         title={t('workspace.phaseQaHandoverChecklistTitle')}
         description={t('workspace.phase4HandoverHint')}
+        delay={0}
         aside={
           <span className="text-[11px] tabular-nums text-muted-foreground">
             {t('workspace.phaseQaChecklistProgress', {
@@ -73,30 +71,31 @@ export default function Phase4HandoverChecklistPage({ projectId }) {
           </span>
         }
       >
-        <div
-          className="mb-3 h-1.5 overflow-hidden rounded-full bg-muted"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={checklistTotal}
-          aria-valuenow={checklistDone}
-        >
+        <MotionFadeIn delay={ITEM_STAGGER}>
           <div
-            className="h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none"
-            style={{
-              width: `${checklistTotal ? (checklistDone / checklistTotal) * 100 : 0}%`,
-            }}
-          />
-        </div>
+            className="mb-3 h-1.5 overflow-hidden rounded-full bg-muted"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={checklistTotal}
+            aria-valuenow={checklistDone}
+          >
+            <div
+              className="h-full rounded-full bg-primary transition-[width] motion-reduce:transition-none"
+              style={{
+                width: `${checklistTotal ? (checklistDone / checklistTotal) * 100 : 0}%`,
+              }}
+            />
+          </div>
+        </MotionFadeIn>
         <ul className="grid gap-2 sm:grid-cols-2">
-          {RELEASE_HANDOVER_CHECKLIST_IDS.map((id) => {
+          {RELEASE_HANDOVER_CHECKLIST_IDS.map((id, index) => {
             const isOn = Boolean(checklist[id]);
             const role = ITEM_ROLE[id];
             const deployLocked = id === 'deployment_verified' && !uatPassed;
             const allowed = role === 'po' ? canAccept : canPhase;
             const disabled = !allowed || busy || deployLocked;
-            const hintKey = ITEM_HINT_KEY[id];
             return (
-              <li key={id}>
+              <MotionFadeIn key={id} as="li" delay={0.08 + index * ITEM_STAGGER}>
                 <label
                   className={`flex items-start gap-2 rounded-xl border px-2.5 py-2.5 text-sm transition-colors motion-reduce:transition-none focus-within:ring-2 focus-within:ring-ring ${
                     isOn
@@ -129,13 +128,11 @@ export default function Phase4HandoverChecklistPage({ projectId }) {
                     <span className="font-semibold text-foreground">
                       {t(`workspace.phaseQaChecklist_${id}`)}
                     </span>
-                    <span className="mt-0.5 block text-[10px] text-muted-foreground">
-                      {role === 'po'
-                        ? t('workspace.phase4RolePo')
-                        : t('workspace.phase4RolePm')}
-                      {hintKey ? ` · ${t(hintKey)}` : ''}
-                      {deployLocked ? ` · ${t('workspace.phaseDeployVerifyNeedUat')}` : ''}
-                    </span>
+                    {deployLocked ? (
+                      <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                        {t('workspace.phaseDeployVerifyNeedUat')}
+                      </span>
+                    ) : null}
                   </span>
                   <span
                     className={`shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
@@ -144,10 +141,14 @@ export default function Phase4HandoverChecklistPage({ projectId }) {
                         : 'bg-muted text-muted-foreground'
                     }`}
                   >
-                    {isOn ? 'OK' : role === 'po' ? 'PO' : 'PM'}
+                    {isOn
+                      ? t('workspace.phase4ChecklistDoneBadge')
+                      : role === 'po'
+                        ? t('workspace.phase4RolePo')
+                        : t('workspace.phase4RolePm')}
                   </span>
                 </label>
-              </li>
+              </MotionFadeIn>
             );
           })}
         </ul>

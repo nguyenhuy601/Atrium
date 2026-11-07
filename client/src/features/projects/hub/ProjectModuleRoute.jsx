@@ -1,15 +1,18 @@
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { lazy, Suspense, useCallback, useEffect, useRef } from 'react';
+import { Suspense, useCallback, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
+import { VH_MOTION_SPINNER } from '../../../motion/classes';
 import toast from 'react-hot-toast';
 import ProjectHubPage from '../../../pages/Projects/ProjectHubPage';
+
 import SpaceCalendarModule from '../../spaceModules/SpaceCalendarModule';
 import SpaceDocumentsModule from '../../spaceModules/SpaceDocumentsModule';
 import SpaceProjectChatModule from '../../spaceModules/SpaceProjectChatModule';
 import ProjectMeetingsPanel from './ProjectMeetingsPanel';
 import Phase1Shell from '../phase1/Phase1Shell';
 import Phase4Shell from './phase4/Phase4Shell';
+import ProjectDeliveryPhaseOpsPage from './ProjectDeliveryPhaseOpsPage';
 import { isPhase4DeliveryPhase } from './phase4/phase4Ui';
 import { MODULE_TO_HUB_TAB, normalizeProjectModule } from '../../../utils/suiteNavConfig';
 import {
@@ -19,8 +22,9 @@ import {
   phaseHomeModule,
 } from '../../../utils/projectPhaseNav';
 import { resolveHubCapabilities } from './hubCaps';
+import { lazyWithRetry } from '../../../utils/lazyWithRetry';
 
-const ProjectClosureReportPage = lazy(() => import('./reports/ProjectClosureReportPage'));
+const ProjectClosureReportPage = lazyWithRetry(() => import('./reports/ProjectClosureReportPage'));
 import {
   ARTIFACT_KIND_BY_MODULE,
   PLANNING_KIND_BY_MODULE,
@@ -46,7 +50,7 @@ import {
   loadLinkedPackForAiNav,
 } from '../phase1/aiHitl/loadLinkedPackForAiNav';
 import {
-  canEnterProjectSettings,
+  canAccessProjectModule,
   isAiHitlCollabOpsModule,
   shouldDenyProjectEntry,
 } from './projectEntryGuard';
@@ -161,7 +165,7 @@ export default function ProjectModuleRoute() {
   if (projectPending && !projectRow) {
     return (
       <div className="flex min-h-[12rem] items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
         <span>{t('common.loading')}</span>
       </div>
     );
@@ -200,18 +204,17 @@ export default function ProjectModuleRoute() {
     return <ProjectRoleDeniedRedirect projectId={projectId} orgId={orgId} />;
   }
 
-  if (
-    projectRow &&
-    module === 'settings' &&
-    !canEnterProjectSettings(projectRow.capabilities)
-  ) {
-    return <Navigate to={buildProjectsModulePath(projectId, 'overview')} replace />;
+  // Thiếu quyền view module → không vào được (ẩn nav ở filterNavItemsByCapabilities).
+  // Có view: vào xem dữ liệu; edit/manage vẫn gate ở nút/API theo canEdit*/canManage*.
+  if (projectRow && !canAccessProjectModule(module, projectRow.capabilities)) {
+    const home = deliveryPhase ? phaseHomeModule(deliveryPhase) : 'overview';
+    return <Navigate to={buildProjectsModulePath(projectId, home)} replace />;
   }
 
   if (needsAiHitlGuard && packPending && linkedPack === undefined) {
     return (
       <div className="flex min-h-[12rem] items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
         <span>{t('common.loading')}</span>
       </div>
     );
@@ -263,7 +266,8 @@ export default function ProjectModuleRoute() {
       module === 'calendar' ||
       module === 'documents' ||
       module === 'members' ||
-      module === 'settings')
+      module === 'settings' ||
+      module === 'delivery-phase')
   ) {
     return <Phase1Shell module={module} />;
   }
@@ -275,12 +279,14 @@ export default function ProjectModuleRoute() {
   const hubTab = MODULE_TO_HUB_TAB[module] || null;
 
   let body = null;
-  if (module === 'reports') {
+  if (module === 'delivery-phase') {
+    body = <ProjectDeliveryPhaseOpsPage />;
+  } else if (module === 'reports') {
     body = (
       <Suspense
         fallback={
           <div className="flex min-h-[12rem] items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+            <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
             <span>{t('common.loading')}</span>
           </div>
         }

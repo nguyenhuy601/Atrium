@@ -10,7 +10,7 @@ import { resolveApiErrorMessage } from '../../../../utils/resolveApiErrorMessage
 import useProjectCapabilities from '../hooks/useProjectCapabilities';
 import { buildPhase1ModulePath } from '../nav/phase1NavConfig';
 import { isSrsDraftEmpty } from './srsEmptyAudit';
-import { kindChipClass, queueCardClass } from '../shared/phase1UiTokens';
+import { formatPhase1KindLabel, kindChipClass, queueCardClass } from '../shared/phase1UiTokens';
 
 function unwrap(res) {
   return res?.data?.data ?? res?.data ?? res;
@@ -303,7 +303,9 @@ export default function SrsPage({ projectId, readOnly = false }) {
                               className={`rounded-lg border p-3 ${queueCardClass('approved')}`}
                             >
                               <h3 className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                                <span className={kindChipClass(kind)}>{kind}</span>
+                                <span className={kindChipClass(kind)}>
+                                  {formatPhase1KindLabel(kind, t)}
+                                </span>
                                 <span className="text-muted-foreground">({rows.length})</span>
                               </h3>
                               <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto text-xs">
@@ -429,7 +431,9 @@ export default function SrsPage({ projectId, readOnly = false }) {
                   )}`}
                 >
                   <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-                    <span className={kindChipClass(kind)}>{kind}</span>
+                    <span className={kindChipClass(kind)}>
+                      {formatPhase1KindLabel(kind, t)}
+                    </span>
                     <span className="text-muted-foreground">({(rows || []).length})</span>
                   </h2>
                   <ul className="mt-2 space-y-1 text-sm">

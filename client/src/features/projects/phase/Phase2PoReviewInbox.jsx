@@ -170,7 +170,9 @@ export default function Phase2PoReviewInbox({
                   <td className="px-2 py-1.5">{row.estimateHours ?? '—'}</td>
                   <td className="px-2 py-1.5">{personLabel(row, unassigned)}</td>
                   <td className="px-2 py-1.5">{row.startDate || '—'}</td>
-                  <td className="px-2 py-1.5">{row.columnHint || 'Backlog'}</td>
+                  <td className="px-2 py-1.5">
+                    {row.columnHint || t('workspace.phase2StagingDefaultColumn')}
+                  </td>
                 </tr>
               ))}
             </tbody>

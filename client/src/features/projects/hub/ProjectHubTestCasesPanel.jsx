@@ -13,11 +13,11 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { AdminLoadErrorState } from '../../../components/adminUsers/adminPanelStates';
+import QueryStateView from '../../../components/Shared/QueryStateView';
 import { useAppStrings } from '../../../locales/appStrings';
 import { projectAPI } from '../../../services/api/projectAPI';
 import { resolveApiErrorMessage } from '../../../utils/resolveApiErrorMessage';
 import {
-  tcFilterChipClass,
   tcResultBadgeClass,
   tcResultKey,
   tcResultRowClass,
@@ -124,8 +124,8 @@ export default function ProjectHubTestCasesPanel({
   const muted = 'text-muted-foreground';
   const titleCls = 'text-foreground';
   const sectionShell =
-    'rounded-xl border border-[#D9D9D9] bg-white shadow-sm dark:border-slate-700 dark:bg-slate-950';
-  const sectionHead = 'border-b border-[#E8E8E8] bg-[#E8F4FC] px-3.5 py-2.5 dark:border-slate-700 dark:bg-slate-800/80';
+    'rounded-xl border border-border bg-surface shadow-sm';
+  const sectionHead = 'border-b border-border bg-muted/60 px-3.5 py-2.5';
 
   const listsById = useMemo(() => {
     const map = new Map();
@@ -555,69 +555,16 @@ export default function ProjectHubTestCasesPanel({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <h3 className={`flex items-center gap-2 text-sm font-bold ${titleCls}`}>
-                  <FlaskConical className="h-4 w-4 shrink-0 text-[#1677FF]" aria-hidden />
+                  <FlaskConical className="h-4 w-4 shrink-0 text-primary" aria-hidden />
                   {t('workspace.phaseQaTestCasesTitle')}
                 </h3>
-                <p className={`mt-1 text-[11px] leading-relaxed ${muted}`}>
-                  {t('workspace.phaseQaTestCasesHint')}
-                </p>
               </div>
-              <dl className="flex flex-wrap gap-2 text-[11px]">
-                {[
-                  {
-                    key: 'total',
-                    label: t('workspace.phaseQaStatTotal'),
-                    value: counts.total,
-                    tone: 'border-border bg-background',
-                  },
-                  {
-                    key: 'pass',
-                    label: t('workspace.phaseQaStatPass'),
-                    value: counts.pass,
-                    tone: tcResultRowClass('pass'),
-                  },
-                  {
-                    key: 'fail',
-                    label: t('workspace.phaseQaStatFail'),
-                    value: counts.fail,
-                    tone: tcResultRowClass('fail'),
-                  },
-                  {
-                    key: 'retest',
-                    label: t('workspace.phaseQaStatRetest'),
-                    value: counts.retest,
-                    tone:
-                      counts.retest > 0
-                        ? 'border-amber-400/50 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-950/40'
-                        : 'border-border bg-background',
-                  },
-                  {
-                    key: 'none',
-                    label: t('workspace.phaseQaStatNone'),
-                    value: counts.none,
-                    tone: tcResultRowClass('none'),
-                  },
-                ].map((stat) => (
-                  <div
-                    key={stat.key}
-                    className={`min-w-[4.25rem] rounded-lg border px-2.5 py-1.5 ${stat.tone}`}
-                  >
-                    <dt className={muted}>{stat.label}</dt>
-                    <dd className={`text-sm font-bold tabular-nums ${titleCls}`}>{stat.value}</dd>
-                  </div>
-                ))}
-              </dl>
             </div>
           </div>
         </section>
 
         {/* Focus card */}
         <section className={sectionShell}>
-          <div className={sectionHead}>
-            <h4 className={`text-xs font-semibold ${titleCls}`}>
-              {t('workspace.phaseQaSectionFocus')}
-            </h4>
-          </div>
           <div className="px-3.5 py-3">
             <label className="flex min-w-0 max-w-xl flex-col text-xs font-semibold text-muted-foreground">
               {t('workspace.phaseQaFocusCard')}
@@ -635,8 +582,7 @@ export default function ProjectHubTestCasesPanel({
               </select>
               {workItemOptions.length === 0 ? (
                 <span className={`mt-1 text-[11px] font-normal ${muted}`}>
-                  {t('workspace.phaseQaNoReadyCards')}
-                </span>
+                  {t('workspace.phaseQaNoReadyCards')}                </span>
               ) : null}
             </label>
           </div>
@@ -644,43 +590,32 @@ export default function ProjectHubTestCasesPanel({
 
         {/* Filters */}
         <section className={sectionShell}>
-          <div className={sectionHead}>
-            <h4 className={`text-xs font-semibold ${titleCls}`}>
+          <div className="px-3.5 py-3">
+            <label className="flex min-w-0 max-w-xs flex-col text-xs font-semibold text-muted-foreground">
               {t('workspace.phaseQaSectionStats')}
-            </h4>
-          </div>
-          <div
-            className="flex flex-wrap gap-1.5 px-3.5 py-3"
-            role="tablist"
-            aria-label={t('workspace.phaseQaFilterAria')}
-          >
-            {FILTERS.map((id) => {
-              const active = filter === id;
-              const count =
-                id === 'all'
-                  ? counts.total
-                  : id === 'pass'
-                    ? counts.pass
-                    : id === 'fail'
-                      ? counts.fail
-                      : counts.none;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => setFilter(id)}
-                  className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${tcFilterChipClass(
-                    id,
-                    { active }
-                  )}`}
-                >
-                  {t(`workspace.phaseQaFilter_${id}`)}
-                  <span className="ml-1 tabular-nums opacity-80">({count})</span>
-                </button>
-              );
-            })}
+              <select
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                aria-label={t('workspace.phaseQaFilterAria')}
+                className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-normal text-foreground outline-none focus:border-primary"
+              >
+                {FILTERS.map((id) => {
+                  const count =
+                    id === 'all'
+                      ? counts.total
+                      : id === 'pass'
+                        ? counts.pass
+                        : id === 'fail'
+                          ? counts.fail
+                          : counts.none;
+                  return (
+                    <option key={id} value={id}>
+                      {t(`workspace.phaseQaFilter_${id}`)} ({count})
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
           </div>
         </section>
 
@@ -705,7 +640,6 @@ export default function ProjectHubTestCasesPanel({
               ) : null}
             </div>
             <div className="px-3.5 py-3">
-              <p className={`mb-2 text-[11px] ${muted}`}>{t('workspace.phaseQaCatalogAttachHint')}</p>
               <ul className="divide-y divide-border/50 overflow-hidden rounded-lg border border-border/50">
                 {catalogAttachRows.map((row) => {
                   const id = rowId(row);
@@ -796,16 +730,12 @@ export default function ProjectHubTestCasesPanel({
                 <button
                   type="submit"
                   disabled={creating || !String(title || '').trim()}
-                  className="rounded-full bg-[#1677FF] px-3 py-2 text-xs font-semibold text-foreground disabled:opacity-50"
+                  className="rounded-full bg-primary px-3 py-2 text-xs font-semibold text-foreground disabled:opacity-50"
                 >
                   {creating ? t('common.loading') : t('workspace.phaseQaCreate')}
                 </button>
               </form>
-            ) : (
-              <p className={`px-3.5 py-2 text-[11px] ${muted}`}>
-                {t('workspace.phaseQaSectionCreateToggle')}
-              </p>
-            )}
+            ) : null}
           </section>
         ) : null}
 
@@ -818,13 +748,10 @@ export default function ProjectHubTestCasesPanel({
                 ({queueCardGroups.length} {t('workspace.phaseQaQueueCardUnit')} · {counts.total} TC)
               </span>
             </h4>
-            <p className={`mt-0.5 text-[11px] font-normal ${muted}`}>
-              {t('workspace.phaseQaQueueByCardHint')}
-            </p>
           </div>
           <div className="px-3.5 py-3">
             {loading && items.length === 0 ? (
-              <p className={`py-6 text-center text-sm ${muted}`}>{t('common.loading')}</p>
+              <QueryStateView loading loadingClassName="py-6" skeletonLines={4} />
             ) : workItemOptions.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
                 <FlaskConical className={`h-7 w-7 ${muted}`} aria-hidden />
@@ -930,7 +857,7 @@ export default function ProjectHubTestCasesPanel({
                                           </span>
                                         ) : null}
                                         <ChevronRight
-                                          className="h-3.5 w-3.5 shrink-0 text-[#1677FF]"
+                                          className="h-3.5 w-3.5 shrink-0 text-primary"
                                           aria-hidden
                                         />
                                       </button>
@@ -957,7 +884,7 @@ export default function ProjectHubTestCasesPanel({
                                       <button
                                         type="button"
                                         onClick={() => setDetailId(id)}
-                                        className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition hover:border-[#91CAFF] ${tcResultRowClass(
+                                        className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition hover:border-primary/40 ${tcResultRowClass(
                                           lastResult
                                         )}`}
                                       >
@@ -976,7 +903,7 @@ export default function ProjectHubTestCasesPanel({
                                           {badge.label}
                                         </span>
                                         <ChevronRight
-                                          className="h-3.5 w-3.5 shrink-0 text-[#1677FF]"
+                                          className="h-3.5 w-3.5 shrink-0 text-primary"
                                           aria-hidden
                                         />
                                       </button>

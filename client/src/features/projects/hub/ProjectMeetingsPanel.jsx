@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
+import { VH_MOTION_BTN, VH_MOTION_CARD, VH_MOTION_SPINNER } from '../../../motion/classes';
 import { meetingPlanningAPI } from '../../../services/api/meetingPlanningAPI';
 import { useAppStrings } from '../../../locales/appStrings';
 
@@ -68,7 +69,7 @@ export default function ProjectMeetingsPanel({ projectId }) {
   const events = listQ.data || [];
 
   return (
-    <section className="rounded-lg border border-border bg-card p-4 space-y-4">
+    <section className={`rounded-lg border border-border bg-card p-4 space-y-4 ${VH_MOTION_CARD}`}>
       <div>
         <h3 className="text-sm font-semibold">
           {t('workspace.projectMeetingsTitle')}
@@ -108,7 +109,7 @@ export default function ProjectMeetingsPanel({ projectId }) {
       </div>
       <button
         type="button"
-        className="text-xs px-3 py-1.5 rounded-md bg-primary text-primary-foreground disabled:opacity-50"
+        className={`text-xs px-3 py-1.5 rounded-md bg-primary text-primary-foreground disabled:opacity-50 ${VH_MOTION_BTN}`}
         disabled={!startAt || !endAt || createM.isPending}
         onClick={() => createM.mutate()}
       >
@@ -119,7 +120,7 @@ export default function ProjectMeetingsPanel({ projectId }) {
       <ul className="divide-y divide-border text-xs">
         {listQ.isLoading ? (
           <li className="flex items-center gap-2 py-2 text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            <Loader2 className={`h-3.5 w-3.5 ${VH_MOTION_SPINNER}`} aria-hidden />
             <span>{t('common.loading')}</span>
           </li>
         ) : events.length === 0 ? (

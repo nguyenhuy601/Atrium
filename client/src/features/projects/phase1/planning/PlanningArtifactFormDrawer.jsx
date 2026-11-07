@@ -166,7 +166,7 @@ export default function PlanningArtifactFormDrawer({
   );
 
   const footer = (
-    <div className="shrink-0 border-t border-border bg-[#FAFAFA] px-4 py-3 dark:bg-surface">
+    <div className="shrink-0 border-t border-border bg-muted/40 px-4 py-3 dark:bg-surface">
       {fieldError ? (
         <p className="mb-2 text-sm text-destructive" role="alert">
           {fieldError}
@@ -175,7 +175,7 @@ export default function PlanningArtifactFormDrawer({
       <div className="flex flex-wrap justify-end gap-2">
       <button
         type="button"
-        className="rounded-full border border-[#D9D9D9] bg-white px-4 py-1.5 text-sm text-[#595959] hover:bg-[#FAFAFA] disabled:opacity-50"
+        className="rounded-full border border-border bg-surface px-4 py-1.5 text-sm text-muted-foreground hover:bg-muted/40 disabled:opacity-50"
         onClick={onClose}
         disabled={busy || transitioning}
       >
@@ -184,7 +184,7 @@ export default function PlanningArtifactFormDrawer({
       {contentEditable ? (
         <button
           type="button"
-          className="rounded-full border border-[#1677FF] bg-white px-4 py-1.5 text-sm font-semibold text-[#1677FF] hover:bg-[#E6F4FF] disabled:opacity-50"
+          className="rounded-full border border-primary bg-surface px-4 py-1.5 text-sm font-semibold text-primary hover:bg-primary/10 disabled:opacity-50"
           disabled={!canSave}
           onClick={() => onSubmit?.(buildPlanningSubmitPayload(k, draft))}
         >
@@ -194,7 +194,7 @@ export default function PlanningArtifactFormDrawer({
       {isEdit && nextStatus && onTransition ? (
         <button
           type="button"
-          className="rounded-full bg-[#1677FF] px-4 py-1.5 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-[#0958D9] disabled:opacity-50"
+          className="rounded-full bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 disabled:opacity-50"
           disabled={busy || transitioning}
           onClick={() => onTransition(nextStatus)}
         >

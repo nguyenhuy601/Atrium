@@ -46,6 +46,7 @@ export const PROJECT_MODULE_KEYS = [
   'activity',
   'reports',
   'settings',
+  'delivery-phase',
   'customer-documents',
   'analysis-bg',
   'analysis-br',
@@ -128,6 +129,7 @@ export function normalizeProjectModule(raw) {
   if (lower === 'deployevidence' || lower === 'deploy-evidence') return 'deploy-evidence';
   if (lower === 'releasenotes' || lower === 'release-notes') return 'release-notes';
   if (lower === 'closure-report' || lower === 'closurereport') return 'reports';
+  if (lower === 'deliveryphase' || lower === 'delivery-phase') return 'delivery-phase';
   if (PROJECT_MODULE_KEYS.includes(lower)) return lower;
   if (lower.startsWith('planning-')) return lower;
   return 'overview';
@@ -328,6 +330,12 @@ export function getProjectsPostSelectNavItems(projectId, opts = {}) {
     item('activity', 'workspace.projectHubTabReport', 'activity', PROJECT_MENU_GROUPS.OPS),
     item('calendar', 'nav.calendar', 'calendar', PROJECT_MENU_GROUPS.COLLAB),
     item('documents', 'nav.documents', 'documents', PROJECT_MENU_GROUPS.COLLAB),
+    item(
+      'deliveryPhase',
+      PHASE_MODULE_LABEL_KEYS['delivery-phase'],
+      'delivery-phase',
+      PROJECT_MENU_GROUPS.OPS
+    ),
     item('settings', 'workspace.projectHubTabSettings', 'settings', PROJECT_MENU_GROUPS.OPS),
   ];
 

@@ -335,14 +335,6 @@ function collectOrgPickerStructureMetrics(branches = [], members = [], locale = 
   };
 }
 
-function membersFromPayload(payload) {
-  const body = unwrapData(payload);
-  if (Array.isArray(body?.data)) return body.data;
-  if (Array.isArray(body?.members)) return body.members;
-  if (Array.isArray(body)) return body;
-  return [];
-}
-
 function OrganizationsPage({
   landingDemo = false,
   suiteMode = null,
@@ -793,18 +785,17 @@ function OrganizationsPage({
           const orgId = orgRecordId(org);
           if (!orgId) return null;
           try {
-            const [structurePayload, memberPayload] = await Promise.all([
-              organizationAPI.getStructure(orgId, { view: 'nav' }).catch(() => null),
-              organizationAPI.getMembers(orgId).catch(() => null),
-            ]);
+            // Chỉ structure — không GET /members cả org (scope / N+1 tránh trên picker).
+            const structurePayload = await organizationAPI
+              .getStructure(orgId, { view: 'nav' })
+              .catch(() => null);
             const navNodes = unwrapData(structurePayload);
             const branches = Array.isArray(navNodes)
               ? navNodesToBranches(navNodes)
               : navNodes?.branches || [];
-            const members = membersFromPayload(memberPayload);
             return [
               orgId,
-              collectOrgPickerStructureMetrics(branches, members, locale),
+              collectOrgPickerStructureMetrics(branches, [], locale),
             ];
           } catch {
             return [orgId, {}];
@@ -1084,98 +1075,6 @@ function OrganizationsPage({
       notifyError(t('organizations.loadInvitesFail'));
     } finally {
       setLoadingInvitations(false);
-    }
-  };
-
-  const loadChatContacts = async (organizationIdArg = selectedOrganizationId) => {
-    setLoadingChatContacts(true);
-    try {
-      const [friendList, memberPayload] = await Promise.all([
-        queryClient.fetchQuery({
-          queryKey: queryKeys.friends.list('accepted'),
-          queryFn: () => fetchFriendsList('accepted'),
-          staleTime: STALE_TIME_FRIENDS_MS,
-        }),
-        organizationIdArg ? organizationAPI.getMembers(organizationIdArg) : Promise.resolve(null),
-      ]);
-      const rawFriendList = Array.isArray(friendList) ? friendList : [];
-      const friendContacts = rawFriendList
-        .map((item) => item.friendId || item)
-        .filter(Boolean)
-        .map((item) => ({
-          id: item._id || item.id,
-          name: item.displayName || item.name || item.username || t('organizations.userFallback'),
-          username: item.username || '',
-          role: item.role || '',
-          phone: item.phone || item.phoneNumber || item.mobile || '',
-          email: item.email || '',
-          avatar: item.avatar || null,
-          category: 'friend',
-        }))
-        .filter((item) => !!item.id);
-      const memberData = unwrapData(memberPayload);
-      const rawMemberList = Array.isArray(memberData?.data)
-        ? memberData.data
-        : Array.isArray(memberData)
-          ? memberData
-          : [];
-      const enriched = await enrichMembershipsWithProfiles(rawMemberList, {
-        fallback: t('organizations.userFallback'),
-        limit: 200,
-      });
-      setOrgMembers(
-        enriched.map((row) => {
-          const raw = row.raw && typeof row.raw === 'object' ? row.raw : {};
-          const nestedUser =
-            raw.user && typeof raw.user === 'object'
-              ? raw.user
-              : {
-                  _id: row.userId,
-                  id: row.userId,
-                  displayName: row.displayName,
-                  email: row.email,
-                  username: row.username,
-                  avatar: row.avatar,
-                };
-          return {
-            ...raw,
-            userId: row.userId,
-            displayName: row.displayName,
-            email: row.email,
-            username: row.username,
-            avatar: row.avatar,
-            role: row.role || raw.role || 'member',
-            user: nestedUser,
-          };
-        })
-      );
-      const memberContacts = enriched
-        .map((row) => {
-          const email = row.email || '';
-          const emailLocal = email.includes('@') ? email.split('@')[0] : '';
-          return {
-            id: row.userId,
-            name: row.displayName || row.username || emailLocal || t('organizations.userFallback'),
-            username: row.username || emailLocal || '',
-            role: row.role || '',
-            phone: '',
-            email,
-            avatar: row.avatar || null,
-            category: 'work',
-          };
-        })
-        .filter((item) => !!item.id);
-      const merged = new Map();
-      [...memberContacts, ...friendContacts].forEach((item) => {
-        const key = String(item.id);
-        if (!merged.has(key)) merged.set(key, item);
-      });
-      setChatContacts(Array.from(merged.values()));
-    } catch (error) {
-      setChatContacts([]);
-      setOrgMembers([]);
-    } finally {
-      setLoadingChatContacts(false);
     }
   };
 
@@ -3836,8 +3735,16 @@ function OrganizationsPage({
     setLoadingChatContacts(true);
     (async () => {
       try {
+        // Không có department scope → không kéo roster cả org (chỉ friends trên rail).
+        if (!membersDepartmentId) {
+          if (!cancelled) {
+            setOrgMembers([]);
+            setChatContacts(mapFriends);
+          }
+          return;
+        }
         const memberPayload = await organizationAPI.getMembers(selectedOrganizationId, {
-          ...(membersDepartmentId ? { departmentId: membersDepartmentId } : {}),
+          departmentId: membersDepartmentId,
         });
         if (cancelled) return;
         const memberData = unwrapData(memberPayload);

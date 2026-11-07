@@ -188,6 +188,9 @@ class AuthController {
       const uid = attemptedUserId || error?.attemptedUserId || null;
       const errorCode =
         error?.internalErrorCode || error?.errorCode || 'AUTH_LOGIN_FAILED';
+      // #region agent log
+      fetch('http://host.docker.internal:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'67bd6d'},body:JSON.stringify({sessionId:'67bd6d',runId:'pre-fix',hypothesisId:'D',location:'auth.controller.js:login:catch',message:'login_failed mapped',data:{errorCode,hasUid:Boolean(uid),hasEmailHash:Boolean(emailHash),errName:error?.name||null,redisLike:/redis|EAI_AGAIN|ENOTFOUND|ECONNREFUSED/i.test(String(error?.message||error?.code||'')),errMsg:String(error?.message||error).slice(0,160)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       void adminUserService.recordLoginEvent({
         userId: uid,
         emailHash: uid ? null : emailHash,

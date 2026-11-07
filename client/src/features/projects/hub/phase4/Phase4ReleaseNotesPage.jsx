@@ -1,4 +1,6 @@
 import { Loader2 } from 'lucide-react';
+import { VH_MOTION_SPINNER } from '../../../../motion/classes';
+import MotionFadeIn from '../../../../motion/primitives/MotionFadeIn';
 import { useAppStrings } from '../../../../locales/appStrings';
 import { AdminLoadErrorState } from '../../../../components/adminUsers/adminPanelStates';
 import usePhase4Handover from './usePhase4Handover';
@@ -27,7 +29,7 @@ export default function Phase4ReleaseNotesPage({ projectId }) {
         className="flex items-center gap-2 p-4 text-sm text-muted-foreground"
         aria-busy="true"
       >
-        <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+        <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
         <span>{t('common.loading')}</span>
       </div>
     );
@@ -48,6 +50,7 @@ export default function Phase4ReleaseNotesPage({ projectId }) {
       <Phase4SectionCard
         title={t('workspace.phaseNavReleaseNotes')}
         description={t('workspace.phase4ReleaseNotesHint')}
+        delay={0}
         aside={
           releaseLabel ? (
             <span className="rounded-md border border-border/60 px-2 py-0.5 text-[10px] font-semibold tabular-nums">
@@ -57,39 +60,45 @@ export default function Phase4ReleaseNotesPage({ projectId }) {
         }
       >
         {!canPhase ? (
-          <p className="mb-3 text-[11px] font-semibold text-warning">
-            {t('workspace.phaseHandoverChecklistPmOnly')}
-          </p>
+          <MotionFadeIn delay={0.04}>
+            <p className="mb-3 text-[11px] font-semibold text-warning">
+              {t('workspace.phaseHandoverChecklistPmOnly')}
+            </p>
+          </MotionFadeIn>
         ) : null}
 
-        <p className="mb-3 text-[11px] leading-relaxed text-muted-foreground">
-          {t('workspace.phase4ReleaseNotesBodyHint')}
-        </p>
+        <MotionFadeIn delay={0.06}>
+          <p className="mb-3 text-[11px] leading-relaxed text-muted-foreground">
+            {t('workspace.phase4ReleaseNotesBodyHint')}
+          </p>
+        </MotionFadeIn>
 
-        <label
-          className={`flex items-start gap-2 rounded-xl border px-3 py-3 text-sm focus-within:ring-2 focus-within:ring-ring ${
-            notesOn
-              ? 'border-success/40 bg-success/10'
-              : 'border-border/70 bg-muted/15'
-          }`}
-        >
-          <input
-            type="checkbox"
-            className="mt-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            checked={notesOn}
-            disabled={!canPhase || busy}
-            aria-busy={busy ? 'true' : undefined}
-            onChange={(e) => void setChecklistItem('release_notes', e.target.checked)}
-          />
-          <span>
-            <span className="font-semibold text-foreground">
-              {t('workspace.phaseQaChecklist_release_notes')}
+        <MotionFadeIn delay={0.1}>
+          <label
+            className={`flex items-start gap-2 rounded-xl border px-3 py-3 text-sm focus-within:ring-2 focus-within:ring-ring ${
+              notesOn
+                ? 'border-success/40 bg-success/10'
+                : 'border-border/70 bg-muted/15'
+            }`}
+          >
+            <input
+              type="checkbox"
+              className="mt-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              checked={notesOn}
+              disabled={!canPhase || busy}
+              aria-busy={busy ? 'true' : undefined}
+              onChange={(e) => void setChecklistItem('release_notes', e.target.checked)}
+            />
+            <span>
+              <span className="font-semibold text-foreground">
+                {t('workspace.phaseQaChecklist_release_notes')}
+              </span>
+              <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                {t('workspace.phase4RolePm')}
+              </span>
             </span>
-            <span className="mt-0.5 block text-[10px] text-muted-foreground">
-              {t('workspace.phase4RolePm')}
-            </span>
-          </span>
-        </label>
+          </label>
+        </MotionFadeIn>
       </Phase4SectionCard>
     </div>
   );

@@ -22,10 +22,16 @@ export const FIGMA_SHELL_ROOT = 'flex h-screen flex-col overflow-hidden bg-trans
 
 export const FIGMA_SHELL_BODY = 'flex min-h-0 flex-1 overflow-hidden';
 
-export const FIGMA_SHELL_MAIN = 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden';
+/** bg-background: tránh chớp trắng/trong suốt khi PageMotion fade (mode wait). */
+export const FIGMA_SHELL_MAIN =
+  'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background';
 
 export const FIGMA_TOP_HEADER =
   'relative z-[200] flex h-14 shrink-0 items-center gap-2 border-b border-border bg-surface px-3 shadow-xs sm:gap-3 sm:px-5';
+
+/** Trong dự án / module sâu — thấp hơn, ít branding. */
+export const FIGMA_TOP_HEADER_COMPACT =
+  'relative z-[200] flex h-11 shrink-0 items-center gap-2 border-b border-border bg-surface px-2.5 shadow-xs sm:gap-2 sm:px-4';
 
 export const FIGMA_SIDEBAR =
   'z-30 flex h-full shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-slow ease-enterprise lg:relative';
@@ -41,7 +47,7 @@ export const FIGMA_SIDEBAR_SUITE_STRIP =
   'flex min-h-[44px] shrink-0 items-center gap-1.5 border-b border-sidebar-border';
 
 export const FIGMA_SIDEBAR_SECTION_LABEL =
-  'px-3 pb-0.5 pt-2.5 text-[0.5875rem] font-bold uppercase tracking-[0.1em] text-white/20';
+  'px-3 pb-0.5 pt-2.5 text-[0.5875rem] font-bold uppercase tracking-[0.1em] text-white/40';
 
 export const FIGMA_SIDEBAR_NAV = 'flex flex-1 flex-col gap-px overflow-y-auto px-1.5 py-0.5';
 

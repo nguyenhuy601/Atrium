@@ -567,12 +567,16 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
       setDeptColleagueIds(null);
       return undefined;
     }
+    if (!directoryDepartmentId) {
+      setDeptColleagueIds(new Set());
+      return undefined;
+    }
     let cancelled = false;
     (async () => {
       try {
         const { colleagues } = await loadCompanyColleagues(directoryOrgId, currentUserId, {
           fallback: t('friendChat.friendDefault'),
-          ...(directoryDepartmentId ? { departmentId: directoryDepartmentId } : {}),
+          departmentId: directoryDepartmentId,
         });
         if (cancelled) return;
         setDeptColleagueIds(new Set((colleagues || []).map((c) => String(c.userId))));
@@ -830,13 +834,12 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     [t]
   );
 
-  /** Lấy snippet tin DM gần nhất với mỗi bạn (từ API /messages). */
+  /** Snippet tin DM gần nhất theo peer — GET /messages?lastByPeer=1 (không dump inbox). */
   const fetchLastDmActivity = useCallback(async () => {
     if (!currentUserId) return {};
     try {
-      const resp = await api.get('/messages', { params: { limit: 500, fields: 'summary' } });
-      const payload = resp?.data || resp;
-      const result = payload?.data || payload;
+      const resp = await dmMessageService.getLastByPeer();
+      const result = dmMessageService.unwrap(resp);
       const list = result?.messages || [];
       if (!Array.isArray(list)) return {};
       return buildDmSnippetMapFromMessages(list, currentUserId, t);

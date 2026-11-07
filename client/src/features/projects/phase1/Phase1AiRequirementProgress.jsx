@@ -32,28 +32,6 @@ const STEPS = [
   { step: 6, labelKey: 'requirements.phase1Step6', fallback: 'Approved SRS', substeps: [] },
 ];
 
-const SUBSTEP_FALLBACK = {
-  prepare: 'Nạp SRS pack',
-  parse: 'Parsing',
-  normalize: 'Chuẩn hóa',
-  extract: 'Bóc tách',
-  filter: 'Lọc dữ liệu',
-  quality: 'Kiểm tra chất lượng dữ liệu',
-  context_fetch: 'Truy vấn tri thức',
-  assemble_context: 'Ghép context package',
-  semantic: 'Semantic projection',
-  conflict: 'Phân tích conflict',
-  agent_understand: 'Agent understand',
-  plan: 'Plan',
-  validate: 'Validate quan hệ',
-  synthesis: 'Tổng hợp',
-  evidence: 'Evidence',
-  derive: 'Derive (đề xuất Analysis)',
-  observe: 'Observe',
-  evaluate_local: 'Evaluate local',
-  meta_gate: 'MetaGate (kiểm tra sẵn sàng)',
-};
-
 function labelOf(t, key, fallback) {
   const value = typeof t === 'function' ? t(key) : '';
   return value || fallback;
@@ -119,7 +97,7 @@ export default function Phase1AiRequirementProgress({ step = 0, substep = null, 
                 }
               >
                 {isCurrent ? '● ' : done ? '✓ ' : '○ '}
-                {labelOf(t, `requirements.phase1Substep_${id}`, SUBSTEP_FALLBACK[id] || id)}
+                {labelOf(t, `requirements.phase1Substep_${id}`, id)}
               </li>
             );
           })}

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import { ChevronDown } from 'lucide-react';
+import MotionPresence from '../../../motion/primitives/MotionPresence';
+import { motionPopover } from '../../../motion/overlayMotion';
+import { VH_MOTION_CARD, VH_MOTION_ROW } from '../../../motion/classes';
+import QueryStateView from '../../../components/Shared/QueryStateView';
 import toast from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStrings } from '../../../locales/appStrings';
@@ -839,7 +844,7 @@ export default function ProjectHubMembersPanel({
 
   const fieldCls =
     'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none transition-colors motion-reduce:transition-none focus:border-primary focus-visible:ring-2 focus-visible:ring-ring';
-  const cardCls = 'rounded-xl border border-border bg-surface';
+  const cardCls = `rounded-xl border border-border bg-surface ${VH_MOTION_CARD}`;
   const btnFocus =
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none';
   const activeTabMeta = memberTabs.find((tab) => tab.id === activeTab);
@@ -905,9 +910,6 @@ export default function ProjectHubMembersPanel({
             {t('workspace.projectHubTabMembers')}
           </h3>
           <p className={`mt-0.5 text-xs ${muted}`}>
-            {t('workspace.projectHubMembersHintPm')}
-          </p>
-          <p className={`mt-0.5 text-xs ${muted}`}>
             {loading && !rows.length
               ? '…'
               : t('workspace.projectHubMembersCount', { n: rows.length })}
@@ -926,10 +928,12 @@ export default function ProjectHubMembersPanel({
               <span className="truncate">{triggerLabel}</span>
               <ChevronDown size={16} className="shrink-0 text-muted-foreground" aria-hidden />
             </button>
-            {tabMenuOpen ? (
-              <div
+            <MotionPresence open={tabMenuOpen}>
+              <motion.div
+                key="members-tab-menu"
                 role="menu"
                 className="absolute right-0 z-30 mt-1 w-full rounded-lg border border-border bg-surface py-1 shadow-lg"
+                {...motionPopover}
               >
                 {memberTabs.map((tab) => {
                   const selected = tab.id === activeTab;
@@ -942,6 +946,7 @@ export default function ProjectHubMembersPanel({
                       onClick={() => selectMemberTab(tab.id)}
                       className={[
                         'flex w-full px-3 py-2 text-left text-sm',
+                        VH_MOTION_ROW,
                         selected
                           ? 'bg-primary/10 font-semibold text-foreground'
                           : 'text-foreground hover:bg-muted/40',
@@ -953,8 +958,8 @@ export default function ProjectHubMembersPanel({
                     </button>
                   );
                 })}
-              </div>
-            ) : null}
+              </motion.div>
+            </MotionPresence>
           </div>
         ) : null}
       </header>
@@ -983,9 +988,7 @@ export default function ProjectHubMembersPanel({
                 disabled={loading}
               />
             ) : loading && !rows.length ? (
-              <p className={`py-8 text-center text-sm ${muted}`} role="status">
-                {t('common.loading')}
-              </p>
+              <QueryStateView loading loadingClassName="px-3 py-8" skeletonLines={4} />
             ) : rows.length === 0 ? (
               <p
                 className={`rounded-lg border border-dashed border-border px-3 py-10 text-center text-sm ${muted}`}

@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { AdminLoadErrorState } from '../../../components/adminUsers/adminPanelStates';
+import QueryStateView from '../../../components/Shared/QueryStateView';
 import { queryKeys } from '../../../lib/queryKeys';
 import { useAppStrings } from '../../../locales/appStrings';
 import { projectAPI } from '../../../services/api/projectAPI';
@@ -345,9 +346,7 @@ export default function ProjectHubChangeRequestsPanel({
   const selectClass =
     'rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-foreground';
 
-  const emptyMessage = loading
-    ? t('common.loading')
-    : t('workspace.projectHubCrEmpty');
+  const emptyMessage = t('workspace.projectHubCrEmpty');
 
   const openCreate = () => {
     setFormMode('create');
@@ -451,11 +450,10 @@ export default function ProjectHubChangeRequestsPanel({
   if (loadError && items.length === 0 && !loading) {
     return (
       <div className="flex flex-1 flex-col">
-        <div className="flex flex-col gap-2 border-b border-border px-4 py-2 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h3 className="text-sm font-bold text-foreground">{t('workspace.projectHubTabChangeRequests')}</h3>
-            <p className="text-xs text-muted-foreground">{t('workspace.projectHubCrHint')}</p>
-          </div>
+        <div className="flex flex-col gap-2 border-b border-border px-4 py-2 sm:flex-row sm:items-center sm:justify-between">
+          <h3 className="text-sm font-bold text-foreground">
+            {t('workspace.projectHubTabChangeRequests')}
+          </h3>
           {createBtn}
         </div>
         <div className="flex flex-1 flex-col justify-center px-4 py-8">
@@ -479,11 +477,10 @@ export default function ProjectHubChangeRequestsPanel({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden" aria-busy={loading || undefined}>
-      <div className="flex flex-col gap-2 border-b border-border px-4 py-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h3 className="text-sm font-bold text-foreground">{t('workspace.projectHubTabChangeRequests')}</h3>
-          <p className="text-xs text-muted-foreground">{t('workspace.projectHubCrHint')}</p>
-        </div>
+      <div className="flex flex-col gap-2 border-b border-border px-4 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="text-sm font-bold text-foreground">
+          {t('workspace.projectHubTabChangeRequests')}
+        </h3>
         {createBtn}
       </div>
 
@@ -572,9 +569,13 @@ export default function ProjectHubChangeRequestsPanel({
           </div>
 
           {items.length === 0 ? (
-            <div className="px-4 py-12 text-center">
-              <p className="text-sm text-muted-foreground">{emptyMessage}</p>
-            </div>
+            loading ? (
+              <QueryStateView loading loadingClassName="px-4 py-8" skeletonLines={4} />
+            ) : (
+              <div className="px-4 py-12 text-center">
+                <p className="text-sm text-muted-foreground">{emptyMessage}</p>
+              </div>
+            )
           ) : (
             items.map((row) => {
               const id = String(row._id || row.id || '');

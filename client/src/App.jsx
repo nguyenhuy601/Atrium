@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import BrandPageLoader from './components/Shared/BrandPageLoader';
@@ -12,6 +12,7 @@ import LegacyPathRedirect from './components/Layout/LegacyPathRedirect';
 import LegacyAppPrefixRedirect from './components/Layout/LegacyAppPrefixRedirect';
 import CollaborateLegacyRedirect from './components/Layout/CollaborateLegacyRedirect';
 import RouteErrorBoundary from './components/Shared/RouteErrorBoundary';
+import { lazyWithRetry as lazy } from './utils/lazyWithRetry';
 
 /** Keep search when redirecting /projects/:projectId → overview. */
 function ProjectIdToOverviewRedirect() {
@@ -31,6 +32,10 @@ function LegacyProjectsNewRedirect({ toBase }) {
 }
 
 const LoginPage = lazy(() => import('./pages/Auth/LoginPage'));
+const MotionLabPage = import.meta.env.DEV
+  ? lazy(() => import('./pages/Dev/MotionLabPage'))
+  : null;
+
 const RegisterRedirect = lazy(() => import('./components/Auth/RegisterRedirect'));
 const VerifyEmailPage = lazy(() => import('./pages/Auth/VerifyEmailPage'));
 const AcceptCompanyInvitePage = lazy(() => import('./pages/Auth/AcceptCompanyInvitePage'));
@@ -76,7 +81,9 @@ function App() {
         <Routes>
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<LoginPage />} />
+        {MotionLabPage ? <Route path="/dev/motion-lab" element={<MotionLabPage />} /> : null}
         <Route path="/register" element={<RegisterRedirect />} />
+
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/verify-email-change" element={<VerifyEmailPage />} />
         <Route path="/accept-company-invite" element={<AcceptCompanyInvitePage />} />

@@ -190,7 +190,7 @@ export default function ImportSetFileLibrary({ projectId, importSets = [], canUp
             <ul className="grid gap-2 sm:grid-cols-2">
               {rows.map((row) => (
                 <li key={row.id}>
-                  <div className="flex h-full flex-col rounded-xl border border-[#E8E8E8] bg-[#FAFAFA] p-3 transition hover:border-[#91CAFF] hover:bg-[#E6F4FF]/40 dark:border-border dark:bg-surface">
+                  <div className="flex h-full flex-col rounded-xl border border-border bg-muted/40 p-3 transition hover:border-primary/40 hover:bg-primary/10/40 dark:border-border dark:bg-surface">
                     <button
                       type="button"
                       className="min-w-0 flex-1 text-left"
@@ -199,7 +199,7 @@ export default function ImportSetFileLibrary({ projectId, importSets = [], canUp
                       <div className="flex items-start gap-2">
                         <FileSpreadsheet
                           size={16}
-                          className="mt-0.5 shrink-0 text-[#1677FF]"
+                          className="mt-0.5 shrink-0 text-primary"
                           aria-hidden
                         />
                         <div className="min-w-0">
@@ -207,7 +207,7 @@ export default function ImportSetFileLibrary({ projectId, importSets = [], canUp
                             {row.filename}
                           </p>
                           <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
-                            <span className="rounded border border-border/70 bg-white px-1 py-px font-medium uppercase dark:bg-surface">
+                            <span className="rounded border border-border/70 bg-surface px-1 py-px font-medium uppercase dark:bg-surface">
                               {docClassLabel(row.docClass, t)}
                             </span>
                             <span>{formatBytes(row.sizeBytes)}</span>
@@ -219,7 +219,7 @@ export default function ImportSetFileLibrary({ projectId, importSets = [], canUp
                           </p>
                         </div>
                       </div>
-                      <span className="mt-2 inline-flex items-center gap-0.5 text-[11px] font-medium text-[#1677FF]">
+                      <span className="mt-2 inline-flex items-center gap-0.5 text-[11px] font-medium text-primary">
                         {t('workspace.phase1FileOpenDetail')}
                         <ChevronRight className="h-3.5 w-3.5" aria-hidden />
                       </span>
@@ -228,7 +228,7 @@ export default function ImportSetFileLibrary({ projectId, importSets = [], canUp
                       <button
                         type="button"
                         disabled={Boolean(busyId)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-[#D9D9D9] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#595959] hover:bg-[#FAFAFA] disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-2.5 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted/40 disabled:opacity-50"
                         onClick={() => void onDownload(row)}
                       >
                         <Download size={12} aria-hidden />

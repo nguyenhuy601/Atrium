@@ -115,12 +115,25 @@ class AuthService {
     await userAuth.save();
 
     const redis = getRedisClient();
+    // #region agent log
+    fetch('http://host.docker.internal:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'67bd6d'},body:JSON.stringify({sessionId:'67bd6d',runId:'pre-fix',hypothesisId:'A',location:'auth.service.js:issueSessionTokens',message:'before redis.setex',data:{hasRedisClient:Boolean(redis),redisStatus:redis?.status||null,userIdPresent:Boolean(userAuth?.userId)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (redis && userAuth.userId) {
-      await redis.setex(
-        `refresh_token:${userAuth.userId}`,
-        refreshTokenRedisTtlSeconds(),
-        hashRefreshToken(refreshToken)
-      );
+      try {
+        await redis.setex(
+          `refresh_token:${userAuth.userId}`,
+          refreshTokenRedisTtlSeconds(),
+          hashRefreshToken(refreshToken)
+        );
+        // #region agent log
+        fetch('http://host.docker.internal:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'67bd6d'},body:JSON.stringify({sessionId:'67bd6d',runId:'pre-fix',hypothesisId:'A',location:'auth.service.js:issueSessionTokens',message:'redis.setex ok',data:{redisStatus:redis?.status||null},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+      } catch (redisErr) {
+        // #region agent log
+        fetch('http://host.docker.internal:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'67bd6d'},body:JSON.stringify({sessionId:'67bd6d',runId:'pre-fix',hypothesisId:'A',location:'auth.service.js:issueSessionTokens',message:'redis.setex threw',data:{errName:redisErr?.name||null,errCode:redisErr?.code||null,errMsg:String(redisErr?.message||redisErr).slice(0,160),redisStatus:redis?.status||null},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        throw redisErr;
+      }
     }
 
     return {
@@ -399,8 +412,14 @@ class AuthService {
       // Đảm bảo UserProfile tồn tại (phòng bootstrap verify email lỗi trước đó)
       void bootstrapUserProfile(userAuth, userAuth.userId);
 
+      // #region agent log
+      fetch('http://host.docker.internal:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'67bd6d'},body:JSON.stringify({sessionId:'67bd6d',runId:'pre-fix',hypothesisId:'B',location:'auth.service.js:login',message:'credentials ok → issueSessionTokens',data:{userIdPresent:Boolean(userAuth?.userId),isActive:Boolean(userAuth?.isActive),isEmailVerified:Boolean(userAuth?.isEmailVerified),isLocked:Boolean(userAuth?.isLocked)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       return await this.issueSessionTokens(userAuth, plainEmail);
     } catch (error) {
+      // #region agent log
+      fetch('http://host.docker.internal:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'67bd6d'},body:JSON.stringify({sessionId:'67bd6d',runId:'pre-fix',hypothesisId:'C',location:'auth.service.js:login:catch',message:'login threw',data:{errName:error?.name||null,errCode:error?.code||error?.errorCode||null,internalErrorCode:error?.internalErrorCode||null,statusCode:error?.statusCode||null,errMsg:String(error?.message||error).slice(0,160)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       throw error;
     }
   }

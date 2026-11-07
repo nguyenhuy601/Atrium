@@ -4,6 +4,7 @@ import { useAppStrings } from '../locales/appStrings';
 import { resolveApiErrorMessage } from '../utils/resolveApiErrorMessage';
 import { taskAPI, unwrapTaskApiPayload } from '../services/api/taskAPI';
 import { meetingAPI } from '../services/api/meetingAPI';
+import { meetingPlanningAPI } from '../services/api/meetingPlanningAPI';
 import { queryKeys } from '../lib/queryKeys';
 import { STALE_TIME_CALENDAR_MS } from '../lib/queryClient';
 import {
@@ -115,16 +116,32 @@ export function useCalendarFeed(
 
       const [tRes, mRes] = await Promise.all([
         taskAPI.getTasks(filters),
-        meetingAPI.getMeetings({
-          startFrom: dueFrom,
-          startTo: dueTo,
-          ...(organizationId ? { organizationId } : {}),
-          ...(deptId ? { departmentId: deptId } : {}),
-        }),
+        pid
+          ? meetingPlanningAPI
+              .listEvents(pid)
+              .catch(() => null)
+          : meetingAPI.getMeetings({
+              startFrom: dueFrom,
+              startTo: dueTo,
+              ...(organizationId ? { organizationId } : {}),
+              ...(deptId ? { departmentId: deptId } : {}),
+            }),
       ]);
 
       const tasks = unwrapTasksPayload(tRes);
-      const meetings = pid ? [] : unwrapMeetingsPayload(mRes);
+      let meetings = [];
+      if (pid) {
+        const raw = unwrapTaskApiPayload(mRes) ?? mRes?.data?.data ?? mRes?.data ?? mRes;
+        meetings = Array.isArray(raw) ? raw : Array.isArray(raw?.events) ? raw.events : [];
+        const fromMs = range.from.getTime();
+        const toMs = range.to.getTime();
+        meetings = meetings.filter((ev) => {
+          const t0 = new Date(ev?.startAt || ev?.startTime || 0).getTime();
+          return Number.isFinite(t0) && t0 >= fromMs && t0 <= toMs;
+        });
+      } else {
+        meetings = unwrapMeetingsPayload(mRes);
+      }
 
       const mapped = [];
       const withEstimate = [];

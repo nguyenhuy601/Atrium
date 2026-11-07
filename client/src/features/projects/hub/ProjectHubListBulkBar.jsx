@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import { MousePointerClick, RefreshCcw, Trash2, X } from 'lucide-react';
-import { classifyListStatusBucket, listsForStatusSelect } from './projectHubUtils';
+import {
+  classifyListStatusBucket,
+  listsForStatusSelect,
+  localizeBoardListTitle,
+} from './projectHubUtils';
+import MotionPresence from '../../../motion/primitives/MotionPresence';
+import { motionPopoverUp } from '../../../motion/overlayMotion';
+import { VH_MOTION_BTN } from '../../../motion/classes';
 
 function statusOptionClass(bucket) {
   if (bucket === 'done') return 'bg-primary text-primary-foreground';
@@ -63,16 +71,16 @@ export default function ProjectHubListBulkBar({
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-14 z-30 flex justify-center px-3 sm:bottom-16">
       <div
-        className="pointer-events-auto relative flex max-w-full flex-wrap items-center gap-1 rounded-xl border border-border bg-surface px-2 py-1.5 text-foreground shadow-lg"
+        className="pointer-events-auto relative flex max-w-full flex-wrap items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-foreground shadow-lg"
         role="toolbar"
         aria-label={t('workspace.projectHubListBulkSelected', { n: selectedCount })}
       >
-        <span className="rounded-md bg-muted px-2 py-1 text-xs font-semibold text-foreground">
+        <span className="rounded-md bg-primary-subtle px-2 py-1 text-xs font-semibold text-foreground">
           {t('workspace.projectHubListBulkSelected', { n: selectedCount })}
         </span>
         <button
           type="button"
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-muted-foreground transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={`inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_BTN}`}
           onClick={onSelectAll}
         >
           <MousePointerClick size={14} aria-hidden />
@@ -83,7 +91,7 @@ export default function ProjectHubListBulkBar({
           <button
             type="button"
             disabled={busy || !canChangeStatus}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-muted-foreground transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            className={`inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${VH_MOTION_BTN}`}
             aria-expanded={statusOpen}
             aria-haspopup="dialog"
             aria-busy={busy || undefined}
@@ -95,71 +103,81 @@ export default function ProjectHubListBulkBar({
             <RefreshCcw size={14} aria-hidden />
             {t('workspace.projectHubListBulkChangeStatus')}
           </button>
-          {statusOpen ? (
-            <div
-              role="dialog"
-              className="absolute bottom-full left-1/2 z-40 mb-2 w-[min(18rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-border bg-surface p-3 shadow-lg"
-            >
-              <label className="mb-1.5 block text-xs font-semibold text-foreground">
-                {t('workspace.projectHubListBulkChangeStatus')}
-              </label>
-              <select
-                className="w-full rounded-md border border-primary bg-background px-2 py-1.5 text-sm text-foreground outline-none transition-colors motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-ring"
-                value={listId}
-                aria-invalid={missingStatus}
-                aria-required="true"
-                disabled={busy}
-                onChange={(e) => {
-                  setListId(e.target.value);
-                  setSubmitted(false);
-                }}
+          {/* Wrapper giữ -translate-x — không gắn trên motion node (nuốt y/scale) */}
+          <div className="absolute bottom-full left-1/2 z-40 mb-2 w-[min(18rem,calc(100vw-2rem))] -translate-x-1/2">
+            <MotionPresence open={statusOpen} initial>
+              <motion.div
+                key="bulk-status-dialog"
+                role="dialog"
+                className="origin-bottom rounded-xl border border-border bg-surface p-3 shadow-lg"
+                initial={motionPopoverUp.initial}
+                animate={motionPopoverUp.animate}
+                exit={motionPopoverUp.exit}
+                transition={motionPopoverUp.transition}
               >
-                <option value="">{t('workspace.projectHubListBulkStatusPh')}</option>
-                {listOptions.map((list) => {
-                  const id = String(list._id || list.id || '');
-                  const bucket = classifyListStatusBucket(list);
-                  return (
-                    <option key={id} value={id} className={statusOptionClass(bucket)}>
-                      {list.title || statusBucketLabel(bucket, t)}
-                    </option>
-                  );
-                })}
-              </select>
-              {missingStatus ? (
-                <p className="mt-1 text-[11px] font-semibold text-destructive" role="alert">
-                  {t('workspace.projectHubListBulkStatusRequired')}
-                </p>
-              ) : null}
-              <div className="mt-3 flex justify-end gap-2">
-                <button
-                  type="button"
-                  className="rounded-md border border-border px-2.5 py-1 text-xs font-semibold text-foreground transition-colors motion-reduce:transition-none hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => {
-                    setStatusOpen(false);
+                <label className="mb-1.5 block text-xs font-semibold text-foreground">
+                  {t('workspace.projectHubListBulkChangeStatus')}
+                </label>
+                <select
+                  className="w-full rounded-md border border-primary bg-background px-2 py-1.5 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  value={listId}
+                  aria-invalid={missingStatus}
+                  aria-required="true"
+                  disabled={busy}
+                  onChange={(e) => {
+                    setListId(e.target.value);
                     setSubmitted(false);
-                    setListId('');
                   }}
                 >
-                  {t('common.cancel')}
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || !listId}
-                  aria-busy={busy || undefined}
-                  className="rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                  onClick={submitStatus}
-                >
-                  {t('workspace.projectHubListBulkStatusSubmit')}
-                </button>
-              </div>
-            </div>
-          ) : null}
+                  <option value="">{t('workspace.projectHubListBulkStatusPh')}</option>
+                  {listOptions.map((list) => {
+                    const id = String(list._id || list.id || '');
+                    const bucket = classifyListStatusBucket(list);
+                    return (
+                      <option key={id} value={id} className={statusOptionClass(bucket)}>
+                        {localizeBoardListTitle(list, t) ||
+                          list.title ||
+                          statusBucketLabel(bucket, t)}
+                      </option>
+                    );
+                  })}
+                </select>
+                {missingStatus ? (
+                  <p className="mt-1 text-[11px] font-semibold text-destructive" role="alert">
+                    {t('workspace.projectHubListBulkStatusRequired')}
+                  </p>
+                ) : null}
+                <div className="mt-3 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className={`inline-flex h-8 items-center rounded-md border border-border px-2.5 text-xs font-semibold text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_BTN}`}
+                    onClick={() => {
+                      setStatusOpen(false);
+                      setSubmitted(false);
+                      setListId('');
+                    }}
+                  >
+                    {t('common.cancel')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !listId}
+                    aria-busy={busy || undefined}
+                    className={`inline-flex h-8 items-center rounded-md bg-primary px-2.5 text-xs font-semibold text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${VH_MOTION_BTN}`}
+                    onClick={submitStatus}
+                  >
+                    {t('workspace.projectHubListBulkStatusSubmit')}
+                  </button>
+                </div>
+              </motion.div>
+            </MotionPresence>
+          </div>
         </div>
         <button
           type="button"
           disabled={busy || !canDelete}
           aria-busy={busy || undefined}
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-muted-foreground transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          className={`inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${VH_MOTION_BTN}`}
           onClick={onDelete}
         >
           <Trash2 size={14} aria-hidden />
@@ -168,7 +186,7 @@ export default function ProjectHubListBulkBar({
         <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
         <button
           type="button"
-          className="rounded p-1 text-muted-foreground transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={`rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_BTN}`}
           aria-label={t('workspace.projectHubListBulkCloseAria')}
           onClick={onClear}
         >

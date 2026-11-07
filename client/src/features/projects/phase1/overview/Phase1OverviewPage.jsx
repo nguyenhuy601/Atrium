@@ -10,7 +10,6 @@ import {
   PLANNING_KIND_BY_MODULE,
 } from '../nav/phase1NavConfig';
 import { useNavigate } from 'react-router-dom';
-import Phase2GateBanner from '../../phase/Phase2GateBanner';
 import { gateStepClass } from '../shared/phase1UiTokens';
 import { modulePathForArtifactKind } from '../ra/artifactRelated';
 import {
@@ -124,13 +123,6 @@ export default function Phase1OverviewPage({ projectId, organizationId, delivery
 
   return (
     <div className="w-full space-y-5 p-3 sm:p-4">
-      <Phase2GateBanner
-        projectId={projectId}
-        organizationId={organizationId}
-        deliveryPhase={deliveryPhase}
-        canChangePhase={Boolean(capabilities.canChangeDeliveryPhase)}
-      />
-
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-base font-semibold tracking-tight">{t('workspace.phase1OverviewTitle')}</h1>
         {isLoading ? (
@@ -171,7 +163,7 @@ export default function Phase1OverviewPage({ projectId, organizationId, delivery
             {t('workspace.phase1ReadinessPlan')} <Mark ok={planReady} />
           </span>
           <span className="inline-flex items-center gap-1.5">
-            Phase 2 <Mark ok={Boolean(gaps?.readyForPhase2)} />
+            {t('workspace.phase1ReadinessPhase2')} <Mark ok={Boolean(gaps?.readyForPhase2)} />
           </span>
         </div>
 

@@ -1,8 +1,10 @@
 import { useId, useRef } from 'react';
-import { VH_MOTION_TAB_PANEL } from '../../motion/classes';
+import TabIndicator from '../../motion/primitives/TabIndicator';
+import TabPanelMotion from '../../motion/primitives/TabPanelMotion';
 
 /**
  * Tablist dùng chung cho hub admin (roving tabindex, Arrow/Home/End, cuộn ngang trên mobile).
+ * Indicator trượt (Motion layoutId) + panel fade khi đổi tab.
  * Trả null khi chỉ có ≤ 1 tab; `AdminHubTabPanel` tự bỏ role tabpanel trong trường hợp đó.
  */
 export function useAdminHubTabIds() {
@@ -11,6 +13,7 @@ export function useAdminHubTabIds() {
 
 export function AdminHubTablist({ idPrefix, label, tabs, activeTab, onSelect, className = '' }) {
   const tabRefs = useRef({});
+  const indicatorLayoutId = `vh-admin-tab-${idPrefix}`;
   if (tabs.length <= 1) return null;
 
   const focusTabAt = (index) => {
@@ -36,6 +39,7 @@ export function AdminHubTablist({ idPrefix, label, tabs, activeTab, onSelect, cl
       role="tablist"
       aria-label={label}
       onKeyDown={handleKeyDown}
+      data-testid="admin-hub-tablist"
     >
       {tabs.map((tab) => {
         const active = activeTab === tab.id;
@@ -53,14 +57,13 @@ export function AdminHubTablist({ idPrefix, label, tabs, activeTab, onSelect, cl
             tabIndex={active ? 0 : -1}
             onClick={() => onSelect(tab.id)}
             className={[
-              'shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium vh-motion-btn motion-reduce:transform-none',
+              'relative shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium vh-motion-btn motion-reduce:transform-none',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-              active
-                ? 'bg-primary text-primary-foreground shadow-sm'
-                : 'bg-muted text-muted-foreground hover:bg-primary-subtle hover:text-foreground',
+              active ? 'text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-primary-subtle hover:text-foreground',
             ].join(' ')}
           >
-            {tab.label}
+            {active ? <TabIndicator layoutId={indicatorLayoutId} /> : null}
+            <span className="relative z-[1]">{tab.label}</span>
           </button>
         );
       })}
@@ -77,9 +80,7 @@ export function AdminHubTabPanel({ idPrefix, tabs, activeTab, className, childre
       aria-labelledby={hasTablist ? `${idPrefix}-tab-${activeTab}` : undefined}
       className={className}
     >
-      <div key={activeTab} className={VH_MOTION_TAB_PANEL}>
-        {children}
-      </div>
+      <TabPanelMotion activeKey={activeTab}>{children}</TabPanelMotion>
     </div>
   );
 }

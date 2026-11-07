@@ -177,7 +177,7 @@ export default function Phase1DataGateReviewPanel({
         {labelOf(
           t,
           'requirements.phase1DataGateHint',
-          'Pass để chạy Semantic Fetch. Reject dừng lần chạy; bạn có thể sửa artifact rồi chạy lại.'
+          'Đạt để chạy truy vấn ngữ nghĩa. Từ chối dừng lần chạy; bạn có thể sửa hạng mục rồi chạy lại.'
         )}
       </p>
       <ul className="mt-3 grid grid-cols-2 gap-2 text-sm">
@@ -261,7 +261,7 @@ export default function Phase1DataGateReviewPanel({
             onClick={onReject}
             className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted/50 disabled:opacity-40"
           >
-            {labelOf(t, 'requirements.phase1DataGateReject', 'Reject — dừng')}
+            {labelOf(t, 'requirements.phase1DataGateReject', 'Từ chối — dừng')}
           </button>
           <button
             type="button"
@@ -269,7 +269,7 @@ export default function Phase1DataGateReviewPanel({
             onClick={onPass}
             className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-40"
           >
-            {labelOf(t, 'requirements.phase1DataGatePass', 'Pass — chạy tiếp')}
+            {labelOf(t, 'requirements.phase1DataGatePass', 'Đạt — chạy tiếp')}
           </button>
         </div>
       ) : null}

@@ -16,7 +16,7 @@ function unwrapMembers(payload) {
 
 /**
  * Đồng nghiệp cùng phòng ban (rule X — kể cả Owner/Admin/HR không có phòng → list trống).
- * Dùng getMembersWithRoles để luôn có placement department.
+ * Bắt buộc `departmentId` — không kéo roster cả org rồi lọc client.
  *
  * @param {string} orgId
  * @param {string} currentUserId
@@ -28,9 +28,13 @@ export async function loadCompanyColleagues(orgId, currentUserId, options = {}) 
   if (!oid) return { colleagues: [], emptyReason: 'none' };
 
   const optionDeptId = String(options.departmentId || '').trim();
+  if (!optionDeptId) {
+    return { colleagues: [], emptyReason: 'no_department' };
+  }
+
   const res = await organizationAPI.getMembersWithRoles(oid, {
     view: 'directory',
-    ...(optionDeptId ? { departmentId: optionDeptId } : {}),
+    departmentId: optionDeptId,
   });
   const raw = unwrapMembers(res).filter((m) => String(m?.status || 'active') === 'active');
   const enriched = await enrichMembershipsWithProfiles(raw, {
@@ -38,34 +42,19 @@ export async function loadCompanyColleagues(orgId, currentUserId, options = {}) 
   });
 
   const me = String(currentUserId || '').trim();
-  const myDeptIds = new Set();
-  if (optionDeptId) {
-    myDeptIds.add(optionDeptId);
-  }
-  for (const row of enriched) {
-    const uid = String(row.userId || memberUserId(row.raw) || '').trim();
-    if (!uid || uid !== me) continue;
-    const dept = memberDepartmentId(row);
-    if (dept) myDeptIds.add(dept);
-  }
-
-  if (myDeptIds.size === 0) {
-    return { colleagues: [], emptyReason: 'no_department' };
-  }
-
   const list = enriched
     .filter((row) => {
       const uid = String(row.userId || memberUserId(row.raw) || '').trim();
       if (!uid || uid === me) return false;
-      const dept = memberDepartmentId(row);
-      return dept && myDeptIds.has(dept);
+      const dept = memberDepartmentId(row) || optionDeptId;
+      return String(dept) === optionDeptId;
     })
     .map((row) => ({
       userId: String(row.userId),
       displayName: String(row.displayName || '').trim() || String(row.userId).slice(-6),
       email: String(row.email || '').trim(),
       avatar: row.avatar || '',
-      departmentId: memberDepartmentId(row),
+      departmentId: memberDepartmentId(row) || optionDeptId,
     }));
 
   list.sort((a, b) => a.displayName.localeCompare(b.displayName, 'vi'));

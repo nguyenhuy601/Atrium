@@ -166,7 +166,9 @@ export default {
       /* ─── Animations (Enterprise Motion SoT + legacy deprecated) ─── */
       animation: {
         'fade-in': 'vh-fade-in var(--vh-motion-base) var(--vh-motion-ease-out) forwards',
-        'fade-in-fast': 'vh-fade-in-fast var(--vh-motion-base) var(--vh-motion-ease-out) forwards',
+        'fade-in-fast': 'vh-fade-in-fast var(--vh-motion-slow) var(--vh-motion-ease-out) forwards',
+        'popover-in': 'vh-popover-in var(--vh-motion-slow) var(--vh-motion-ease-out) forwards',
+        'popover-out': 'vh-popover-out var(--vh-motion-slow) var(--vh-motion-ease-in) forwards',
         'fade-out': 'vh-fade-out var(--vh-motion-slow) var(--vh-motion-ease-in) forwards',
         'scale-in': 'vh-scale-in var(--vh-motion-slow) var(--vh-motion-ease-out) forwards',
         'scale-out': 'vh-scale-out var(--vh-motion-slow) var(--vh-motion-ease-in) forwards',
@@ -207,6 +209,14 @@ export default {
         'vh-fade-in-fast': {
           from: { opacity: '0' },
           to: { opacity: '1' },
+        },
+        'vh-popover-in': {
+          from: { opacity: '0', transform: 'translateY(-8px) scale(0.96)' },
+          to: { opacity: '1', transform: 'translateY(0) scale(1)' },
+        },
+        'vh-popover-out': {
+          from: { opacity: '1', transform: 'translateY(0) scale(1)' },
+          to: { opacity: '0', transform: 'translateY(-4px) scale(0.96)' },
         },
         'vh-fade-out': {
           from: { opacity: '1' },

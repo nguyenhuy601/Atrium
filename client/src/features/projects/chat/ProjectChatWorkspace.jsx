@@ -13,7 +13,10 @@ import ChatContextPicker from '../../../components/Chat/ChatContextPicker';
 import ChatContextPreview from '../../../components/Chat/ChatContextPreview';
 import ForwardChannelModal from '../../../components/Organization/ForwardChannelModal';
 import { ConfirmDialog } from '../../../components/Shared';
+import QueryStateView from '../../../components/Shared/QueryStateView';
+import { VH_MOTION_BTN } from '../../../motion/classes';
 import { AdminLoadErrorState } from '../../../components/adminUsers/adminPanelStates';
+
 import ProjectChannelMessageRow from './ProjectChannelMessageRow';
 import WorkItemDetail from '../hub/WorkItemDetail/WorkItemDetail';
 import { hydrateWorkItemDetailFromHub } from '../hub/WorkItemDetail/hydrateWorkItemDetailFromHub';
@@ -449,11 +452,8 @@ export default function ProjectChatWorkspace({
 
   if (shellLoading) {
     return (
-      <div
-        className="flex h-full items-center justify-center text-sm text-muted-foreground"
-        aria-busy="true"
-      >
-        {t('common.loading')}
+      <div className="flex h-full items-center justify-center px-6" aria-busy="true">
+        <QueryStateView loading loadingClassName="w-full max-w-sm space-y-3 py-10" skeletonLines={4} />
       </div>
     );
   }
@@ -481,6 +481,9 @@ export default function ProjectChatWorkspace({
           {projectIdFilter
             ? t('workspace.projectChatEmptyNoChannels')
             : t('workspace.projectChatEmptyNoProjects')}
+        </p>
+        <p className="max-w-sm text-xs text-muted-foreground">
+          {t('workspace.projectChatEmptyMembershipHint')}
         </p>
         {emptyCta}
       </div>
@@ -527,16 +530,14 @@ export default function ProjectChatWorkspace({
                     disabled={loadingOlder}
                     aria-busy={loadingOlder ? 'true' : undefined}
                     onClick={() => void loadOlderMessages()}
-                    className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:opacity-50 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className={`rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:opacity-50 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_BTN}`}
                   >
                     {loadingOlder ? t('friendChat.loadingOlder') : t('friendChat.loadOlder')}
                   </button>
                 </div>
               ) : null}
               {loadingMessages ? (
-                <p className="text-center text-xs text-muted-foreground" aria-busy="true">
-                  {t('orgPanel.loadingMsgs')}
-                </p>
+                <QueryStateView loading loadingClassName="space-y-2 py-6" skeletonLines={3} />
               ) : null}
               {messagesError && !loadingMessages ? (
                 <div className="flex flex-col items-center gap-2 py-4">
@@ -771,7 +772,7 @@ export default function ProjectChatWorkspace({
                         key: 'upload-file',
                         title: t('orgPanel.menuUploadFile'),
                         content: <Paperclip className="h-4 w-4" strokeWidth={2} />,
-                        className: 'w-9',
+                        className: `w-9 ${VH_MOTION_BTN}`,
                         disabled: channelReadOnly,
                         onClick: () => fileInputRef.current?.click(),
                       },
@@ -779,7 +780,7 @@ export default function ProjectChatWorkspace({
                         key: 'upload-image',
                         title: t('orgPanel.menuUploadImage'),
                         content: <ImageIcon className="h-4 w-4" strokeWidth={2} />,
-                        className: 'w-9',
+                        className: `w-9 ${VH_MOTION_BTN}`,
                         disabled: channelReadOnly,
                         onClick: () => imageInputRef.current?.click(),
                       },
@@ -787,7 +788,7 @@ export default function ProjectChatWorkspace({
                         key: 'emoji',
                         title: t('orgPanel.emojiTab'),
                         content: <Smile className="h-4 w-4" strokeWidth={2} />,
-                        className: 'w-9',
+                        className: `w-9 ${VH_MOTION_BTN}`,
                         disabled: channelReadOnly,
                         onClick: () => {
                           setEmojiPickerTab('emoji');
@@ -798,7 +799,7 @@ export default function ProjectChatWorkspace({
                         key: 'context',
                         content: '🔗',
                         title: t('orgPanel.menuContextCall'),
-                        className: 'w-9 text-base',
+                        className: `w-9 text-base ${VH_MOTION_BTN}`,
                         onClick: () => setContextPickerOpen((open) => !open),
                         disabled: channelReadOnly,
                       },

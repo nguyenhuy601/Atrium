@@ -12,6 +12,7 @@ import {
   classifyListStatusBucket,
   displayIssueKey,
   listsForStatusSelect,
+  localizeBoardListTitle,
   statusBucketPillClass,
 } from './projectHubUtils';
 import {
@@ -121,7 +122,7 @@ function AssigneeMark({ assignee, t }) {
 
 function StatusControl({ card, list, bucket, lists, t, canChangeStatus, disabled, onChangeStatus }) {
   const pillClass = statusBucketPillClass(bucket);
-  const label = list?.title || statusBucketLabel(bucket, t);
+  const label = localizeBoardListTitle(list, t) || list?.title || statusBucketLabel(bucket, t);
   const selectLists = listsForStatusSelect(lists, card?.listId || card?.list);
   if (canChangeStatus && selectLists.length > 0) {
     return (
@@ -135,7 +136,9 @@ function StatusControl({ card, list, bucket, lists, t, canChangeStatus, disabled
       >
         {selectLists.map((row) => (
           <option key={String(row._id || row.id)} value={String(row._id || row.id)}>
-            {row.title || statusBucketLabel(classifyListStatusBucket(row), t)}
+            {localizeBoardListTitle(row, t) ||
+              row.title ||
+              statusBucketLabel(classifyListStatusBucket(row), t)}
           </option>
         ))}
       </select>

@@ -45,11 +45,21 @@ async function fetchOrgChannelMessages({ roomId, organizationId, pageParam }) {
     // Chỉ trang đầu: kèm watermark peers để hiện Đã gửi / Đã xem.
     params.includeReadCursors = 1;
   }
-  const resp = await api.get('/messages', {
-    params,
-    skipPermissionDeniedToast: true,
-  });
-  return parseMessageListPage(resp);
+  try {
+    const resp = await api.get('/messages', {
+      params,
+      skipPermissionDeniedToast: true,
+    });
+    // #region agent log
+    fetch('http://127.0.0.1:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bbb8bb'},body:JSON.stringify({sessionId:'bbb8bb',runId:'pre-fix',hypothesisId:'B',location:'useOrgChannelMessages.js:fetchOk',message:'org channel messages OK',data:{roomId:String(roomId||''),organizationId:String(organizationId||''),hasPageParam:Boolean(pageParam)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    return parseMessageListPage(resp);
+  } catch (err) {
+    // #region agent log
+    fetch('http://127.0.0.1:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bbb8bb'},body:JSON.stringify({sessionId:'bbb8bb',runId:'pre-fix',hypothesisId:'B',location:'useOrgChannelMessages.js:fetchFail',message:'org channel messages FAIL',data:{roomId:String(roomId||''),organizationId:String(organizationId||''),status:err?.status||err?.response?.status||null,errorCode:err?.errorCode||err?.response?.data?.errorCode||err?.code||null,errMessage:String(err?.message||'').slice(0,200)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    throw err;
+  }
 }
 
 export function useOrgChannelMessages(roomId, organizationId, { enabled = true } = {}) {

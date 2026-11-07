@@ -59,6 +59,10 @@ export function resolveApiErrorMessage(errorLike, optsOrFallback = {}) {
     if (weak && weak !== 'errors.codes.AUTH_WEAK_PASSWORD') return weak;
   }
   if (String(messageUser).trim()) return String(messageUser).trim();
+  if (/^permission denied$/i.test(msg)) {
+    const denied = t('errors.forbidden');
+    if (denied && denied !== 'errors.forbidden') return denied;
+  }
   return msg || fallback;
 }
 

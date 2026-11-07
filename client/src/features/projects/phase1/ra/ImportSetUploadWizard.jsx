@@ -17,6 +17,19 @@ function unwrap(res) {
   return res?.data?.data ?? res?.data ?? res;
 }
 
+function formatImportPreviewIssue(issue, t) {
+  if (issue == null) return '';
+  if (typeof issue === 'string') return issue;
+  const message = String(issue.message || '').trim();
+  if (message) return message;
+  const code = String(issue.code || '').trim();
+  if (!code) return t('workspace.phase1ImportPreviewIssueGeneric');
+  const key = `workspace.phase1ImportIssue_${code}`;
+  const localized = t(key);
+  if (localized && localized !== key) return localized;
+  return t('workspace.phase1ImportPreviewIssueCode', { code });
+}
+
 async function downloadBlobAsFile(blobLike, fileName, failMsg) {
   const blob =
     blobLike instanceof Blob
@@ -441,7 +454,7 @@ export default function ImportSetUploadWizard({
           <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
             <p className="text-sm font-medium">{t('workspace.phase1ImportWizardConfirmHint')}</p>
             <p className="text-xs text-muted-foreground">
-              {preview.pendingFileName || 'Analysis.xlsx'} ·{' '}
+              {preview.pendingFileName || t('workspace.phase1ImportPreviewDefaultFile')} ·{' '}
               {t('workspace.phase1ImportPreviewMeta', {
                 sheets: Array.isArray(preview.sheets) ? preview.sheets.length : preview.sheetCount || '—',
                 issues: Array.isArray(preview.issues) ? preview.issues.length : 0,
@@ -450,7 +463,7 @@ export default function ImportSetUploadWizard({
             {Array.isArray(preview.issues) && preview.issues.length > 0 ? (
               <ul className="max-h-32 list-disc overflow-y-auto pl-4 text-[11px] text-amber-800 dark:text-amber-200">
                 {preview.issues.slice(0, 12).map((issue, idx) => (
-                  <li key={idx}>{String(issue.message || issue.code || issue)}</li>
+                  <li key={idx}>{formatImportPreviewIssue(issue, t)}</li>
                 ))}
               </ul>
             ) : (

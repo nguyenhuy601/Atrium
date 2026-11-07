@@ -11,7 +11,7 @@ export default function AllocationSegmentsEditor({
   /** Optional: peer projects for multi-project timeline hint */
   peerProjects = [],
 }) {
-  const muted = isDarkMode ? 'text-slate-400' : 'text-muted-foreground';
+  const muted = 'text-muted-foreground';
   const inputCls =
     'w-full rounded-lg border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary';
 

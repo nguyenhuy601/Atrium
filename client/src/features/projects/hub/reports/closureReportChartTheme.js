@@ -24,10 +24,11 @@ export function getClosureReportChartTheme() {
     foreground: readCssVar('--foreground', 'hsl(222 47% 11%)'),
     destructive: readCssVar('--destructive', 'hsl(0 72% 51%)'),
     secondary: readCssVar('--secondary', 'hsl(210 40% 96%)'),
-    chartDone: readCssVar('--primary', 'hsl(222 47% 31%)'),
-    chartIncomplete: readCssVar('--muted-foreground', 'hsl(215 16% 65%)'),
-    chartPlanned: 'hsl(215 20% 65%)',
-    chartActual: readCssVar('--primary', 'hsl(222 47% 31%)'),
+    // Tabler-like pair: primary blue + soft teal for done/actual contrast
+    chartDone: readCssVar('--primary', 'hsl(211 60% 45%)'),
+    chartIncomplete: readCssVar('--muted-foreground', 'hsl(215 16% 70%)'),
+    chartPlanned: 'hsl(160 45% 42%)',
+    chartActual: readCssVar('--primary', 'hsl(211 60% 45%)'),
     dimOpacity: 0.35,
   };
 }

@@ -8,9 +8,15 @@ function isFirebaseBillingOrPermissionError(err) {
   return (
     code === 403 ||
     msg.includes('billing account') ||
-    msg.includes('billing') && msg.includes('disabled') ||
+    (msg.includes('billing') && msg.includes('disabled')) ||
     msg.includes('permission') ||
-    msg.includes('forbidden')
+    msg.includes('forbidden') ||
+    // Service account / OAuth chết (dev hay gặp) — không phải 500 nội bộ
+    msg.includes('invalid_grant') ||
+    msg.includes('account not found') ||
+    msg.includes('invalid_rapt') ||
+    msg.includes('unauthorized_client') ||
+    (msg.includes('credential') && msg.includes('invalid'))
   );
 }
 

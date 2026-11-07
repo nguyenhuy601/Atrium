@@ -99,9 +99,6 @@ export default function PlanningOverviewPage({ projectId, organizationId }) {
           <h1 className="text-base font-semibold tracking-tight">
             {t('workspace.phaseNavPlanningOverview')}
           </h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {t('workspace.phase1PlanningOverviewHint')}
-          </p>
         </div>
         {isLoading ? (
           <span className="text-xs text-muted-foreground" aria-busy="true">
@@ -126,21 +123,7 @@ export default function PlanningOverviewPage({ projectId, organizationId }) {
         />
       </Phase1OverviewSection>
 
-      <Phase1OverviewSection
-        index={2}
-        title={t('workspace.phase1PlanningKindsTitle')}
-        action={
-          <button
-            type="button"
-            className="rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium hover:bg-muted"
-            onClick={() =>
-              navigate(buildPhase1ModulePath(projectId, 'planning/wbs', { organizationId }))
-            }
-          >
-            {t('workspace.phaseNavPlanningWbs')}
-          </button>
-        }
-      >
+      <Phase1OverviewSection index={2} title={t('workspace.phase1PlanningKindsTitle')}>
         <div className="flex flex-wrap gap-1.5">
           {KIND_ORDER.map((kind) => {
             const row = byKind[kind] || {};

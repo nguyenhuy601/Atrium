@@ -75,11 +75,16 @@ export function flattenOrgStructureTeams(structureSummary) {
   for (const branch of branches) {
     for (const division of branch?.divisions || []) {
       for (const department of division?.departments || []) {
+        const departmentId = unitId(department);
         for (const team of department?.teams || []) {
           const id = unitId(team);
           if (!id || seen.has(id)) continue;
           seen.add(id);
-          out.push(team);
+          out.push(
+            departmentId
+              ? { ...team, departmentId, department: departmentId }
+              : team
+          );
         }
       }
     }

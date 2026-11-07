@@ -31,7 +31,8 @@ export const FIGMA_MODAL_SIZES = {
 };
 
 export const FIGMA_TOAST_ROOT =
-  'fixed bottom-6 right-6 z-[300] flex max-w-sm items-center gap-3 rounded-xl border px-4 py-3 shadow-lg backdrop-blur-md vh-motion-respect motion-safe:animate-fade-in motion-reduce:animate-none';
+  'fixed bottom-6 right-6 z-[300] flex max-w-sm items-center gap-3 rounded-xl border px-4 py-3 shadow-lg backdrop-blur-md vh-motion-respect';
+
 
 export const FIGMA_TOAST_SUCCESS = 'border-emerald-500/30 bg-card text-foreground';
 

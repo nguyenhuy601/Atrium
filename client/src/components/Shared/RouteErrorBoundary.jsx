@@ -1,5 +1,11 @@
 import { Component } from 'react';
 import { useAppStrings } from '../../locales/appStrings';
+import {
+  clearChunkForceRefresh,
+  isChunkLoadError,
+  markChunkForceRefresh,
+  wasChunkForceRefreshedRecently,
+} from '../../utils/lazyWithRetry';
 
 class RouteErrorBoundaryInner extends Component {
   constructor(props) {
@@ -13,9 +19,14 @@ class RouteErrorBoundaryInner extends Component {
 
   componentDidCatch(error, info) {
     console.error('[RouteErrorBoundary]', error, info);
+    if (!isChunkLoadError(error)) return;
+    if (wasChunkForceRefreshedRecently()) return;
+    markChunkForceRefresh();
+    window.location.reload();
   }
 
   handleReload = () => {
+    clearChunkForceRefresh();
     window.location.reload();
   };
 

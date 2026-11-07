@@ -4,6 +4,11 @@
  */
 
 import { useEffect, useId, useMemo, useState } from 'react';
+import QueryStateView from '../../../components/Shared/QueryStateView';
+import MotionFadeIn from '../../../motion/primitives/MotionFadeIn';
+import MotionStagger from '../../../motion/primitives/MotionStagger';
+import useCountUp from './reports/useCountUp';
+import { REPORT_CARD_HEAD, REPORT_CARD_TITLE } from './reports/hubDashboardUi';
 import {
   listOverviewChartSegmentCards,
   overviewDonutAnnulusPath,
@@ -26,9 +31,17 @@ function HubChartLegend({
   t,
   activeKey = null,
   onSelect,
+  /** Giới hạn chiều cao + scroll khi nhiều dòng (assignee…). */
+  scrollable = false,
+  maxHeightClass = 'max-h-40',
 }) {
   return (
-    <ul className="min-w-0 w-full space-y-2" role="list">
+    <ul
+      className={`min-w-0 w-full space-y-1.5 ${
+        scrollable ? `scrollbar-overlay overflow-y-auto pr-0.5 ${maxHeightClass}` : ''
+      }`}
+      role="list"
+    >
       {items.map((seg) => {
         const label = hubBarLabel(seg, t);
         const value =
@@ -128,7 +141,7 @@ function OverviewChartDrilldown({
         </button>
       </div>
       {loading ? (
-        <p className={`text-xs ${muted}`}>{t('common.loading')}</p>
+        <QueryStateView loading loadingClassName="py-2" skeletonLines={3} />
       ) : items.length === 0 ? (
         <p className={`text-xs ${muted}`}>{t('workspace.projectHubOverviewDrilldownEmpty')}</p>
       ) : (
@@ -170,6 +183,10 @@ export function HubDonutChart({
   const tipKey = hoverKey || null;
   const tipSeg = hasWork ? segments.find((s) => s.key === tipKey) : null;
   const canSelect = typeof onSelectSegment === 'function';
+  const centerNumeric = Number(String(centerValue ?? total).replace(/[^\d.-]/g, ''));
+  const animatedCenter = useCountUp(hasWork && Number.isFinite(centerNumeric) ? centerNumeric : 0, {
+    durationMs: 900,
+  });
 
   useEffect(() => {
     if (!selectedKey) return undefined;
@@ -246,9 +263,11 @@ export function HubDonutChart({
       ? t('workspace.projectHubOverviewChartCount', { n: row.count })
       : t('workspace.projectHubOverviewChartPctOnly', { pct: row.pct });
 
+  const legendScrollable = segments.length > 5;
+
   return (
-    <div className="flex flex-col gap-3">
-      <div className="relative hidden sm:block">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <div className="relative hidden shrink-0 sm:block">
         <div className="relative mx-auto w-full max-w-[20rem]">
           <svg
             viewBox="0 0 200 160"
@@ -308,7 +327,7 @@ export function HubDonutChart({
               textAnchor="middle"
               className="pointer-events-none fill-foreground text-[16px] font-bold tabular-nums"
             >
-              {hasWork ? centerValue : '—'}
+              {hasWork ? animatedCenter : '—'}
             </text>
             {centerLabel ? (
               <text
@@ -327,7 +346,7 @@ export function HubDonutChart({
         </div>
       </div>
 
-      <div className="relative sm:hidden">
+      <div className="relative shrink-0 sm:hidden">
         <div className="relative mx-auto h-36 w-36">
           <svg
             viewBox="0 0 100 100"
@@ -346,7 +365,7 @@ export function HubDonutChart({
           </svg>
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-2 text-center">
             <span className={`text-xl font-bold tabular-nums leading-none ${titleCls}`}>
-              {hasWork ? centerValue : '—'}
+              {hasWork ? animatedCenter : '—'}
             </span>
             {centerLabel ? (
               <span className={`mt-1 text-[10px] font-semibold uppercase tracking-wide ${muted}`}>
@@ -368,6 +387,8 @@ export function HubDonutChart({
           titleCls={titleCls}
           t={t}
           activeKey={selectedKey}
+          scrollable={legendScrollable}
+          maxHeightClass="max-h-36 sm:max-h-40"
           onSelect={
             canSelect ? (key) => onSelectSegment(selectedKey === key ? null : key) : undefined
           }
@@ -393,25 +414,25 @@ function HubPriorityVerticalBars({
   const n = items.length;
   const maxCount = Math.max(...items.map((row) => Number(row.count) || 0), 1);
   const chartH = 100;
-  const gap = 10;
-  const barW = n <= 4 ? 28 : 22;
+  const gap = 14;
+  const barW = n <= 4 ? 32 : 24;
   const width = n * barW + Math.max(0, n - 1) * gap;
-  const padX = 8;
+  const padX = 12;
   const padTop = 16;
-  const padBottom = 28;
+  const padBottom = 42;
   const svgW = width + padX * 2;
   const svgH = chartH + padTop + padBottom;
   const stubH = 4;
 
   return (
-    <div className="flex flex-col gap-3">
-      <p className={`text-[10px] font-semibold uppercase tracking-wide ${muted}`}>
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <p className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${muted}`}>
         {t('workspace.projectHubOverviewPriorityAxis')}
       </p>
-      <div className="flex justify-center">
+      <div className="flex shrink-0 justify-center">
         <svg
           viewBox={`0 0 ${svgW} ${svgH}`}
-          className="h-40 w-full max-w-[15rem]"
+          className="h-44 w-full max-w-[17rem]"
           role="img"
           aria-label={t('workspace.projectHubOverviewPriorityBreakdown')}
         >
@@ -421,6 +442,7 @@ function HubPriorityVerticalBars({
             const x = padX + index * (barW + gap);
             const y = padTop + (chartH - h);
             const label = hubBarLabel(row, t);
+            const cx = x + barW / 2;
             const selected = selectedKey === row.key;
             const clickable = count > 0;
             return (
@@ -456,24 +478,26 @@ function HubPriorityVerticalBars({
                 />
                 <title>{`${label}: ${count}`}</title>
                 <text
-                  x={x + barW / 2}
+                  x={cx}
                   y={count > 0 ? Math.max(padTop + 12, y - 5) : padTop + chartH - stubH - 6}
                   textAnchor="middle"
                   className="fill-foreground text-[10px] font-semibold"
                 >
                   {count}
                 </text>
+                {/* Xoay nhãn — tránh cắt "Trung bình" / "Khẩn cấp" */}
                 <text
-                  x={x + barW / 2}
-                  y={padTop + chartH + 14}
-                  textAnchor="middle"
+                  x={cx}
+                  y={padTop + chartH + 12}
+                  textAnchor="end"
+                  transform={`rotate(-32 ${cx} ${padTop + chartH + 12})`}
                   className="fill-muted-foreground text-[8px] font-medium"
                 >
-                  {label.length > 8 ? `${label.slice(0, 7)}…` : label}
+                  {label}
                 </text>
                 <rect
                   x={x + 2}
-                  y={padTop + chartH + 18}
+                  y={padTop + chartH + 2}
                   width={barW - 4}
                   height="2"
                   rx="1"
@@ -491,9 +515,113 @@ function HubPriorityVerticalBars({
         titleCls={titleCls}
         t={t}
         activeKey={selectedKey}
+        scrollable={items.length > 5}
         onSelect={(key) => onSelectSegment?.(selectedKey === key ? null : key)}
       />
     </div>
+  );
+}
+
+/** Thanh xếp chồng theo % — bổ sung diversity cạnh donut. */
+function HubStackedStatusBar({
+  segments = [],
+  total = 0,
+  muted,
+  t,
+  selectedKey = null,
+  onSelectSegment,
+}) {
+  const hasWork = Number(total) > 0;
+  if (!hasWork) return null;
+  return (
+    <div className="mt-1 space-y-2">
+      <p className={`text-[10px] font-semibold uppercase tracking-wide ${muted}`}>
+        {t('workspace.projectHubOverviewStatusDonut')}
+      </p>
+      <div
+        className="flex h-3 overflow-hidden rounded-full bg-muted"
+        role="img"
+        aria-label={t('workspace.projectHubOverviewStatusDonut')}
+      >
+        {segments.map((seg) => {
+          const pct = Number(seg.pct) || 0;
+          if (!(pct > 0)) return null;
+          const selected = selectedKey === seg.key;
+          return (
+            <button
+              key={seg.key}
+              type="button"
+              title={`${hubBarLabel(seg, t)} · ${pct}%`}
+              onClick={() =>
+                onSelectSegment?.(selected ? null : seg.key)
+              }
+              className={`h-full transition-[width,opacity] duration-[var(--vh-motion-slow)] ease-[var(--vh-motion-ease)] motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                seg.barClass
+              } ${selectedKey && !selected ? 'opacity-40' : 'opacity-100'}`}
+              style={{ width: `${pct}%` }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Horizontal bars — loại hạng mục / assignee (đa dạng hơn donut). */
+function HubHorizontalBars({
+  items = [],
+  emptyLabel,
+  muted,
+  titleCls,
+  t,
+  valueMode = 'countPct',
+  selectedKey = null,
+  onSelectSegment,
+}) {
+  if (!items.length) {
+    return <p className={`text-sm ${muted}`}>{emptyLabel}</p>;
+  }
+  const maxCount = Math.max(...items.map((row) => Number(row.count) || 0), 1);
+
+  return (
+    <MotionStagger className="flex min-h-0 flex-1 flex-col gap-2.5">
+      {items.map((row) => {
+        const count = Number(row.count) || 0;
+        const widthPct = Math.max(count > 0 ? (count / maxCount) * 100 : 0, count > 0 ? 4 : 0);
+        const label = hubBarLabel(row, t);
+        const selected = selectedKey === row.key;
+        const clickable = count > 0;
+        const value =
+          valueMode === 'count'
+            ? t('workspace.projectHubOverviewChartCount', { n: count })
+            : t('workspace.projectHubOverviewChartCountPct', {
+                n: count,
+                pct: row.pct ?? 0,
+              });
+        return (
+          <button
+            key={row.key}
+            type="button"
+            disabled={!clickable}
+            onClick={() => clickable && onSelectSegment?.(selected ? null : row.key)}
+            className={`rounded-lg px-1 py-1 text-left transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              clickable ? 'hover:bg-muted/50' : 'cursor-default opacity-60'
+            } ${selected ? 'bg-muted/70 ring-1 ring-border' : ''}`}
+          >
+            <div className="mb-1 flex items-center justify-between gap-2 text-[11px]">
+              <span className={`truncate font-semibold ${titleCls}`}>{label}</span>
+              <span className={`shrink-0 tabular-nums ${muted}`}>{value}</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-muted">
+              <div
+                className={`h-full rounded-full transition-[width] duration-[var(--vh-motion-slow)] ease-[var(--vh-motion-ease)] motion-reduce:transition-none ${row.barClass || 'bg-primary'}`}
+                style={{ width: `${widthPct}%` }}
+              />
+            </div>
+          </button>
+        );
+      })}
+    </MotionStagger>
   );
 }
 
@@ -548,125 +676,165 @@ export function ProjectHubOverviewCharts({
   const drillFor = (chart) => (drill?.chart === chart ? drill : null);
   const drillLoading = Boolean(cardsLoading && drill);
 
+  const chartSectionCls = `${cardCls} flex h-full min-h-0 flex-col`;
+  const typeEmpty = t('workspace.projectHubOverviewChartEmpty');
+
   return (
     <div
-      className={`mt-3 grid gap-3 sm:grid-cols-2 ${
-        showAssigneeChart ? 'lg:grid-cols-3' : 'lg:grid-cols-2'
-      }`}
+      className="grid items-stretch gap-4 sm:grid-cols-2"
+      data-testid="overview-charts-grid"
     >
-      <section className={cardCls} aria-labelledby="overview-status-donut">
-        <h3
-          id="overview-status-donut"
-          className={`mb-3 text-xs font-semibold uppercase tracking-wide ${muted}`}
-        >
-          {t('workspace.projectHubOverviewStatusDonut')}
-        </h3>
-        <HubDonutChart
-          segments={charts.statusSegments}
-          total={charts.statusTotal}
-          centerValue={String(charts.statusTotal || 0)}
-          centerLabel={t('workspace.projectHubStatCards')}
-          ariaLabel={t('workspace.projectHubOverviewStatusDonutAria', {
-            n: charts.statusTotal || 0,
-          })}
-          emptyLabel={t('workspace.projectHubOverviewChartEmpty')}
-          legendValueMode="countPct"
-          muted={muted}
-          titleCls={titleCls}
-          t={t}
-          selectedKey={drillFor('status')?.key || null}
-          onSelectSegment={(key) => select('status', key, charts.statusSegments)}
-        />
-        {drillFor('status') ? (
-          <OverviewChartDrilldown
-            title={t('workspace.projectHubOverviewDrilldownTitle', {
-              label: drillFor('status').label,
+      <MotionFadeIn delay={0} className="h-full min-h-0">
+        <section className={chartSectionCls} aria-labelledby="overview-status-donut">
+          <header className={`${REPORT_CARD_HEAD} shrink-0`}>
+            <h3 id="overview-status-donut" className={REPORT_CARD_TITLE}>
+              {t('workspace.projectHubOverviewStatusDonut')}
+            </h3>
+          </header>
+          <HubDonutChart
+            segments={charts.statusSegments}
+            total={charts.statusTotal}
+            centerValue={String(charts.statusTotal || 0)}
+            centerLabel={t('workspace.projectHubStatCards')}
+            ariaLabel={t('workspace.projectHubOverviewStatusDonutAria', {
+              n: charts.statusTotal || 0,
             })}
-            items={drillItems}
-            loading={drillLoading}
+            emptyLabel={t('workspace.projectHubOverviewChartEmpty')}
+            legendValueMode="countPct"
             muted={muted}
             titleCls={titleCls}
             t={t}
-            onClose={() => setDrill(null)}
-            onOpenCard={onOpenCard}
+            selectedKey={drillFor('status')?.key || null}
+            onSelectSegment={(key) => select('status', key, charts.statusSegments)}
           />
-        ) : null}
-      </section>
+          <HubStackedStatusBar
+            segments={charts.statusSegments}
+            total={charts.statusTotal}
+            muted={muted}
+            t={t}
+            selectedKey={drillFor('status')?.key || null}
+            onSelectSegment={(key) => select('status', key, charts.statusSegments)}
+          />
+          {drillFor('status') ? (
+            <OverviewChartDrilldown
+              title={t('workspace.projectHubOverviewDrilldownTitle', {
+                label: drillFor('status').label,
+              })}
+              items={drillItems}
+              loading={drillLoading}
+              muted={muted}
+              titleCls={titleCls}
+              t={t}
+              onClose={() => setDrill(null)}
+              onOpenCard={onOpenCard}
+            />
+          ) : null}
+        </section>
+      </MotionFadeIn>
 
-      <section className={cardCls} aria-labelledby="overview-priority-breakdown">
-        <h3
-          id="overview-priority-breakdown"
-          className={`mb-3 text-xs font-semibold uppercase tracking-wide ${muted}`}
-        >
-          {t('workspace.projectHubOverviewPriorityBreakdown')}
-        </h3>
-        <HubPriorityVerticalBars
-          items={charts.prioritySegments}
-          emptyLabel={priorityEmpty}
-          muted={muted}
-          titleCls={titleCls}
-          t={t}
-          selectedKey={drillFor('priority')?.key || null}
-          onSelectSegment={(key) => select('priority', key, charts.prioritySegments)}
-        />
-        {drillFor('priority') ? (
-          <OverviewChartDrilldown
-            title={t('workspace.projectHubOverviewDrilldownTitle', {
-              label: drillFor('priority').label,
-            })}
-            items={drillItems}
-            loading={drillLoading}
+      <MotionFadeIn delay={0.05} className="h-full min-h-0">
+        <section className={chartSectionCls} aria-labelledby="overview-priority-breakdown">
+          <header className={`${REPORT_CARD_HEAD} shrink-0`}>
+            <h3 id="overview-priority-breakdown" className={REPORT_CARD_TITLE}>
+              {t('workspace.projectHubOverviewPriorityBreakdown')}
+            </h3>
+          </header>
+          <HubPriorityVerticalBars
+            items={charts.prioritySegments}
+            emptyLabel={priorityEmpty}
             muted={muted}
             titleCls={titleCls}
             t={t}
-            onClose={() => setDrill(null)}
-            onOpenCard={onOpenCard}
+            selectedKey={drillFor('priority')?.key || null}
+            onSelectSegment={(key) => select('priority', key, charts.prioritySegments)}
           />
-        ) : null}
-      </section>
+          {drillFor('priority') ? (
+            <OverviewChartDrilldown
+              title={t('workspace.projectHubOverviewDrilldownTitle', {
+                label: drillFor('priority').label,
+              })}
+              items={drillItems}
+              loading={drillLoading}
+              muted={muted}
+              titleCls={titleCls}
+              t={t}
+              onClose={() => setDrill(null)}
+              onOpenCard={onOpenCard}
+            />
+          ) : null}
+        </section>
+      </MotionFadeIn>
+
+      <MotionFadeIn delay={0.1} className="h-full min-h-0">
+        <section className={chartSectionCls} aria-labelledby="overview-type-breakdown">
+          <header className={`${REPORT_CARD_HEAD} shrink-0`}>
+            <h3 id="overview-type-breakdown" className={REPORT_CARD_TITLE}>
+              {t('workspace.projectHubOverviewTypeBreakdown')}
+            </h3>
+          </header>
+          <HubHorizontalBars
+            items={charts.typeSegments || []}
+            emptyLabel={typeEmpty}
+            muted={muted}
+            titleCls={titleCls}
+            t={t}
+            valueMode="countPct"
+            selectedKey={drillFor('type')?.key || null}
+            onSelectSegment={(key) => select('type', key, charts.typeSegments)}
+          />
+          {drillFor('type') ? (
+            <OverviewChartDrilldown
+              title={t('workspace.projectHubOverviewDrilldownTitle', {
+                label: drillFor('type').label,
+              })}
+              items={drillItems}
+              loading={drillLoading}
+              muted={muted}
+              titleCls={titleCls}
+              t={t}
+              onClose={() => setDrill(null)}
+              onOpenCard={onOpenCard}
+            />
+          ) : null}
+        </section>
+      </MotionFadeIn>
 
       {showAssigneeChart ? (
-      <section
-        className={cardCls}
-        aria-labelledby="overview-assignee-donut"
-      >
-        <h3
-          id="overview-assignee-donut"
-          className={`mb-3 text-xs font-semibold uppercase tracking-wide ${muted}`}
-        >
-          {t('workspace.projectHubOverviewAssigneeDonut')}
-        </h3>
-        <HubDonutChart
-          segments={charts.assigneeSegments}
-          total={charts.assigneeTotal}
-          centerValue={String(charts.assigneeTotal || 0)}
-          centerLabel={t('workspace.projectHubOverviewAssigneeOpen')}
-          ariaLabel={t('workspace.projectHubOverviewAssigneeAria', {
-            n: charts.assigneeTotal || 0,
-          })}
-          emptyLabel={t('workspace.projectHubOverviewAssigneeEmpty')}
-          legendValueMode="count"
-          muted={muted}
-          titleCls={titleCls}
-          t={t}
-          selectedKey={drillFor('assignee')?.key || null}
-          onSelectSegment={(key) => select('assignee', key, charts.assigneeSegments)}
-        />
-        {drillFor('assignee') ? (
-          <OverviewChartDrilldown
-            title={t('workspace.projectHubOverviewDrilldownTitle', {
-              label: drillFor('assignee').label,
-            })}
-            items={drillItems}
-            loading={drillLoading}
-            muted={muted}
-            titleCls={titleCls}
-            t={t}
-            onClose={() => setDrill(null)}
-            onOpenCard={onOpenCard}
-          />
-        ) : null}
-      </section>
+        <MotionFadeIn delay={0.14} className="h-full min-h-0">
+          <section className={chartSectionCls} aria-labelledby="overview-assignee-bars">
+            <header className={`${REPORT_CARD_HEAD} shrink-0`}>
+              <h3 id="overview-assignee-bars" className={REPORT_CARD_TITLE}>
+                {t('workspace.projectHubOverviewAssigneeDonut')}
+              </h3>
+            </header>
+            <div className="scrollbar-overlay max-h-64 min-h-0 overflow-y-auto overscroll-contain pr-0.5">
+              <HubHorizontalBars
+                items={charts.assigneeSegments || []}
+                emptyLabel={t('workspace.projectHubOverviewAssigneeEmpty')}
+                muted={muted}
+                titleCls={titleCls}
+                t={t}
+                valueMode="count"
+                selectedKey={drillFor('assignee')?.key || null}
+                onSelectSegment={(key) => select('assignee', key, charts.assigneeSegments)}
+              />
+            </div>
+            {drillFor('assignee') ? (
+              <OverviewChartDrilldown
+                title={t('workspace.projectHubOverviewDrilldownTitle', {
+                  label: drillFor('assignee').label,
+                })}
+                items={drillItems}
+                loading={drillLoading}
+                muted={muted}
+                titleCls={titleCls}
+                t={t}
+                onClose={() => setDrill(null)}
+                onOpenCard={onOpenCard}
+              />
+            ) : null}
+          </section>
+        </MotionFadeIn>
       ) : null}
     </div>
   );

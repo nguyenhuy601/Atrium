@@ -1,7 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect } from 'react';
+import { Suspense, useCallback, useEffect } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
+import { VH_MOTION_SPINNER } from '../../../../motion/classes';
 import { SpaceProvider, SPACE_KIND } from '../../../../context/SpaceContext';
 import { AdminLoadErrorState } from '../../../../components/adminUsers/adminPanelStates';
 import { fetchProjectHubProject, STALE_PROJECT_HUB_MS } from '../useProjectHubQueries';
@@ -26,7 +27,7 @@ import SpaceDocumentsModule from '../../../spaceModules/SpaceDocumentsModule';
 import SpaceProjectChatModule from '../../../spaceModules/SpaceProjectChatModule';
 import { isPhase4DeliveryPhase } from './phase4Ui';
 import {
-  canEnterProjectSettings,
+  canAccessProjectModule,
   shouldDenyProjectEntry,
 } from '../projectEntryGuard';
 import ProjectRoleDeniedRedirect from '../../ProjectRoleDeniedRedirect';
@@ -35,9 +36,11 @@ import Phase4OverviewPage from './Phase4OverviewPage';
 import Phase4HandoverChecklistPage from './Phase4HandoverChecklistPage';
 import Phase4DeployEvidencePage from './Phase4DeployEvidencePage';
 import Phase4ReleaseNotesPage from './Phase4ReleaseNotesPage';
+import ProjectDeliveryPhaseOpsPage from '../ProjectDeliveryPhaseOpsPage';
 import { resolveHubCapabilities } from '../hubCaps';
+import { lazyWithRetry } from '../../../../utils/lazyWithRetry';
 
-const ProjectClosureReportPage = lazy(() => import('../reports/ProjectClosureReportPage'));
+const ProjectClosureReportPage = lazyWithRetry(() => import('../reports/ProjectClosureReportPage'));
 
 /**
  * Phase 4 release_handover workspace — primary tabs + tra cứu (board/TC/CR).
@@ -99,7 +102,7 @@ export default function Phase4Shell({ module: moduleProp } = {}) {
         className="flex min-h-[12rem] items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
         aria-busy="true"
       >
-        <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+        <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
         <span>{t('common.loading')}</span>
       </div>
     );
@@ -138,11 +141,7 @@ export default function Phase4Shell({ module: moduleProp } = {}) {
     return <ProjectRoleDeniedRedirect projectId={projectId} orgId={orgId} />;
   }
 
-  if (
-    projectRow &&
-    module === 'settings' &&
-    !canEnterProjectSettings(projectRow.capabilities)
-  ) {
+  if (projectRow && !canAccessProjectModule(module, projectRow.capabilities)) {
     return <Navigate to={buildProjectsModulePath(projectId, 'overview')} replace />;
   }
 
@@ -179,7 +178,7 @@ export default function Phase4Shell({ module: moduleProp } = {}) {
       <Suspense
         fallback={
           <div className="flex min-h-[12rem] items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+            <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
             <span>{t('common.loading')}</span>
           </div>
         }
@@ -189,6 +188,8 @@ export default function Phase4Shell({ module: moduleProp } = {}) {
     );
   } else if (module === 'overview') {
     body = <Phase4OverviewPage projectId={projectId} />;
+  } else if (module === 'delivery-phase') {
+    body = <ProjectDeliveryPhaseOpsPage />;
   } else if (module === 'handover') {
     body = <Phase4HandoverChecklistPage projectId={projectId} />;
   } else if (module === 'deploy-evidence') {
@@ -216,7 +217,7 @@ export default function Phase4Shell({ module: moduleProp } = {}) {
 
   return (
     <SpaceProvider kind={SPACE_KIND.PROJECT} organizationId={orgId} projectId={projectId}>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto bg-surface">
         {body}
       </div>
     </SpaceProvider>

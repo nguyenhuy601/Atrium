@@ -64,15 +64,15 @@ export default function ProjectHubTcDetailModal({
 
   const headerTitle = (
     <span className="flex min-w-0 items-center gap-2.5">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#91CAFF] bg-white text-[#1677FF] shadow-sm dark:border-slate-600 dark:bg-slate-900">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-primary/40 bg-white text-primary shadow-sm ">
         <FlaskConical className="h-4 w-4" aria-hidden />
       </span>
       <span className="min-w-0">
-        <span className="block text-[11px] font-semibold uppercase tracking-wide text-[#1677FF]/90 dark:text-sky-300">
+        <span className="block text-[11px] font-semibold uppercase tracking-wide text-primary/90 ">
           {t('workspace.phaseQaDetailTitle')}
         </span>
         <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
-          <span className="rounded border border-[#91CAFF]/80 bg-white/90 px-1.5 py-px font-mono text-[11px] font-semibold text-[#1677FF] dark:border-slate-600 dark:bg-slate-900 dark:text-sky-300">
+          <span className="rounded border border-primary/40/80 bg-surface/90 px-1.5 py-px font-mono text-[11px] font-semibold text-primary  ">
             {tcCode}
           </span>
           <span className={`inline-flex items-center gap-1 ${tcResultBadgeClass(badgeKey)}`}>
@@ -88,7 +88,7 @@ export default function ProjectHubTcDetailModal({
     <div className="flex flex-wrap items-center justify-between gap-3">
       <button
         type="button"
-        className={`${btnBase} border border-[#D9D9D9] bg-white text-[#595959] hover:bg-[#FAFAFA]`}
+        className={`${btnBase} border border-border bg-surface text-muted-foreground hover:bg-muted`}
         onClick={onClose}
         disabled={busy}
       >
@@ -146,7 +146,7 @@ export default function ProjectHubTcDetailModal({
       size="sm"
       footer={footer}
       closable={!busy}
-      headerClassName="items-start border-[#C9DFF0] bg-[#E8F4FC] dark:border-slate-700 dark:bg-slate-800/80"
+      headerClassName="items-start border-primary/30 bg-primary/5 "
       titleClassName="min-w-0 flex-1 pr-2 text-base font-normal sm:text-base"
       bodyClassName="space-y-3 px-5 py-4"
       panelClassName="max-w-lg"
@@ -229,7 +229,7 @@ export default function ProjectHubTcDetailModal({
           role="status"
           className="flex gap-2.5 rounded-xl border border-sky-400/40 bg-sky-50 px-3 py-2.5 dark:border-sky-500/30 dark:bg-sky-950/40"
         >
-          <Bug className="mt-0.5 h-4 w-4 shrink-0 text-sky-700 dark:text-sky-300" aria-hidden />
+          <Bug className="mt-0.5 h-4 w-4 shrink-0 text-sky-700 " aria-hidden />
           <p className="text-[12px] leading-relaxed text-sky-950 dark:text-sky-100">
             {t('workspace.phaseQaBugOpenBody')}
           </p>

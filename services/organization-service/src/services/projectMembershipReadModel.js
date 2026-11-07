@@ -11,7 +11,27 @@ async function listProjectIdsForUser(userId, organizationId) {
   const row = await UserProjectMembership.findOne({ userId: uid, organizationId: oid })
     .select('projectIds')
     .lean();
-  return Array.isArray(row?.projectIds) ? row.projectIds.map(String) : [];
+  const cached = Array.isArray(row?.projectIds) ? row.projectIds.map(String).filter(Boolean) : [];
+  if (cached.length) return cached;
+
+  // Fallback S2S + backfill — tránh chat trống khi Rabbit MEMBER_CHANGED chưa sync.
+  try {
+    const { fetchUserProjectIdsInOrg } = require('../clients/projectMembership.client');
+    const remote = await fetchUserProjectIdsInOrg(oid, uid);
+    if (!remote.length) return [];
+    await UserProjectMembership.findOneAndUpdate(
+      { userId: uid, organizationId: oid },
+      {
+        $addToSet: { projectIds: { $each: remote } },
+        $set: { updatedAt: new Date() },
+        $setOnInsert: { userId: uid, organizationId: oid },
+      },
+      { upsert: true }
+    );
+    return remote;
+  } catch {
+    return [];
+  }
 }
 
 async function applyMemberChanged({ organizationId, projectId, userId, status }) {

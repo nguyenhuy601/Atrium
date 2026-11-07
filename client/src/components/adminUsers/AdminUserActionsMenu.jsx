@@ -7,6 +7,7 @@ import { memberUserId } from '../../utils/adminUserUtils';
 import { adminUserHubLink } from '../../utils/adminHubLinks';
 import { useAdminActionGate } from '../../hooks/useAdminActionGate';
 import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
+import MotionMenu from '../../motion/primitives/MotionMenu';
 
 const MENU_WIDTH = 220;
 const GAP = 4;
@@ -80,7 +81,9 @@ export default function AdminUserActionsMenu({
   const userId = memberUserId(member);
   const [open, setOpen] = useState(false);
   const [ready, setReady] = useState(false);
-  const [pos, setPos] = useState({ top: 0, left: 0, maxHeight: 320 });
+  /** Giữ portal trong lúc exit fade — không mount sẵn trên mọi hàng list. */
+  const [portalMounted, setPortalMounted] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0, maxHeight: 320, placement: 'below' });
   const btnRef = useRef(null);
   const menuRef = useRef(null);
   const scrollRef = useRef(null);
@@ -172,6 +175,7 @@ export default function AdminUserActionsMenu({
     const rect = btnRef.current.getBoundingClientRect();
     setPos(computeMenuPos(rect, MENU_HEIGHT_ESTIMATE));
     setReady(false);
+    setPortalMounted(true);
     setOpen(true);
   };
 
@@ -233,19 +237,25 @@ export default function AdminUserActionsMenu({
       >
         <MoreHorizontal className="h-4 w-4" aria-hidden />
       </button>
-      {open && typeof document !== 'undefined'
+      {portalMounted && typeof document !== 'undefined'
         ? createPortal(
-            <div
+            <MotionMenu
               ref={menuRef}
-              role="menu"
+              open={open}
+              menuKey="admin-user-actions-menu"
+              placement={pos.placement === 'above' ? 'up' : 'down'}
               aria-label={t('adminUsers.moreActions')}
               onKeyDown={handleMenuKeyDown}
-              className="fixed z-[10040] w-[220px] overflow-hidden rounded-xl border border-border bg-card shadow-xl motion-safe:animate-fade-in-fast"
+              onExitComplete={() => {
+                setPortalMounted(false);
+                setReady(false);
+              }}
+              className="fixed z-[10040] w-[220px] overflow-hidden rounded-xl border border-border bg-card shadow-xl"
               style={{
                 top: pos.top,
                 left: pos.left,
                 maxHeight: pos.maxHeight,
-                visibility: ready ? 'visible' : 'hidden',
+                /* Đo layout lần đầu: ẩn hit-test, vẫn chạy fade enter (tránh visibility cắt animation). */
                 pointerEvents: ready ? 'auto' : 'none',
               }}
             >
@@ -365,7 +375,7 @@ export default function AdminUserActionsMenu({
                 </>
               )}
               </div>
-            </div>,
+            </MotionMenu>,
             document.body
           )
         : null}

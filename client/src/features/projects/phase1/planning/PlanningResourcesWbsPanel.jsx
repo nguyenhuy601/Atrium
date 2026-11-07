@@ -7,6 +7,7 @@ import { planningAPI } from '../../../../services/api/planningAPI';
 import { useAppStrings } from '../../../../locales/appStrings';
 import { buildPhase1ModulePath } from '../nav/phase1NavConfig';
 import { getStructured, isWbsLeaf } from './staffingPipelineModel';
+import { formatPhase1StatusLabel } from '../shared/phase1UiTokens';
 
 function unwrap(res) {
   return res?.data?.data ?? res?.data ?? res;
@@ -134,11 +135,17 @@ export default function PlanningResourcesWbsPanel({ projectId }) {
             <h3 className="text-base font-semibold text-foreground">{selected.title || '—'}</h3>
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="rounded-xl border border-border px-2.5 py-2">
-                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Status</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{selected.status || 'draft'}</p>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {t('workspace.phase1StaffingFieldStatus')}
+                </p>
+                <p className="mt-1 text-sm font-medium text-foreground">
+                  {formatPhase1StatusLabel(selected.status || 'draft', t)}
+                </p>
               </div>
               <div className="rounded-xl border border-border px-2.5 py-2">
-                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Effort</p>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {t('workspace.phase1StaffingFieldEffort')}
+                </p>
                 <p className="mt-1 text-sm font-medium text-foreground">
                   {getStructured(selected).effortHours ?? '—'}h
                 </p>
@@ -153,7 +160,9 @@ export default function PlanningResourcesWbsPanel({ projectId }) {
               </p>
             </div>
             <div className="rounded-xl border border-border px-2.5 py-2">
-              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Role / skill</p>
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                {t('workspace.phase1StaffingFieldRoleSkill')}
+              </p>
               <p className="mt-1 text-sm text-foreground">
                 {String(getStructured(selected).roleKey || '—')}
                 {getStructured(selected).skillKeys?.length

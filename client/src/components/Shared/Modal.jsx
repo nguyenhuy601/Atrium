@@ -1,9 +1,15 @@
-import { useEffect, useId, useRef } from 'react';
+import { useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { motion } from 'motion/react';
 import { X } from 'lucide-react';
 import { useAppStrings } from '../../locales/appStrings';
-import useMotionPresence from '../../motion/useMotionPresence';
-import { VH_MOTION_OVERLAY_MS } from '../../motion/tokens';
+import MotionPresence from '../../motion/primitives/MotionPresence';
+import {
+  motionBackdrop,
+  motionModalPanel,
+  motionOverlayShell,
+} from '../../motion/overlayMotion';
+import useOverlayScrollLock from '../../motion/useOverlayScrollLock';
 import useModalA11y from './useModalA11y';
 import {
   FIGMA_MODAL_BACKDROP,
@@ -39,9 +45,7 @@ function resolveOverlayClass(layerClassName = '') {
 }
 
 /**
- * Shared modal — portal to document.body so shell nav (z-1200) / page siblings
- * cannot paint over the overlay (stacking context of ThreeFrameLayout center).
- * Enter/exit via Enterprise Motion presence (CSS); a11y follows logical isOpen.
+ * Shared modal — portal + Motion enter/exit. A11y theo logical isOpen.
  */
 const Modal = ({
   isOpen,
@@ -49,7 +53,6 @@ const Modal = ({
   title,
   children,
   size = 'md',
-  /** Optional classes; z-* ≥ 10050 overrides default overlay z. */
   layerClassName = '',
   closable = true,
   fill = false,
@@ -62,9 +65,7 @@ const Modal = ({
   const { t } = useAppStrings();
   const panelRef = useRef(null);
   const titleId = useId();
-  const { mounted, phase } = useMotionPresence(isOpen, {
-    durationMs: VH_MOTION_OVERLAY_MS,
-  });
+  const { release } = useOverlayScrollLock(isOpen);
 
   useModalA11y({
     isOpen,
@@ -74,16 +75,6 @@ const Modal = ({
     isBusy: !closable,
   });
 
-  useEffect(() => {
-    if (!mounted || typeof document === 'undefined') return undefined;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [mounted]);
-
-  if (!mounted) return null;
   if (typeof document === 'undefined') return null;
 
   const sizeClass = fill
@@ -100,51 +91,54 @@ const Modal = ({
   const titleClass = `${FIGMA_MODAL_TITLE} ${titleClassName}`.trim();
   const canDismiss = closable && isOpen;
 
-  const tree = (
-    <div
-      className={overlayClass}
-      data-motion-phase={phase || 'enter'}
-      onClick={canDismiss ? onClose : undefined}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={title ? titleId : undefined}
-    >
-      <div className={FIGMA_MODAL_BACKDROP} aria-hidden />
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className={`${panelClass} outline-none`}
-        onClick={(e) => e.stopPropagation()}
+  return createPortal(
+    <MotionPresence open={isOpen} initial onExitComplete={release}>
+      <motion.div
+        key="vh-modal"
+        className={`${overlayClass} vh-motion-respect`}
+        {...motionOverlayShell}
+        onClick={canDismiss ? onClose : undefined}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
       >
-        <div className={headerClass}>
-          <h2 id={titleId} className={titleClass}>
-            {title}
-          </h2>
-          {closable ? (
-            <button
-              type="button"
-              onClick={onClose}
-              className={FIGMA_MODAL_CLOSE_BTN}
-              aria-label={t('common.close')}
-              disabled={!isOpen}
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          ) : (
-            <span className="h-8 w-8 shrink-0" aria-hidden />
-          )}
-        </div>
-        <div className={bodyClass}>{children}</div>
-        {footer ? (
-          <div className="shrink-0 border-t border-border px-3 py-2.5 sm:px-4 sm:py-3">
-            {footer}
+        <motion.div className={FIGMA_MODAL_BACKDROP} aria-hidden {...motionBackdrop} />
+        <motion.div
+          ref={panelRef}
+          tabIndex={-1}
+          className={`${panelClass} origin-center outline-none`}
+          onClick={(e) => e.stopPropagation()}
+          {...motionModalPanel}
+        >
+          <div className={headerClass}>
+            <h2 id={titleId} className={titleClass}>
+              {title}
+            </h2>
+            {closable ? (
+              <button
+                type="button"
+                onClick={onClose}
+                className={FIGMA_MODAL_CLOSE_BTN}
+                aria-label={t('common.close')}
+                disabled={!isOpen}
+              >
+                <X className="h-4 w-4" aria-hidden />
+              </button>
+            ) : (
+              <span className="h-8 w-8 shrink-0" aria-hidden />
+            )}
           </div>
-        ) : null}
-      </div>
-    </div>
+          <div className={bodyClass}>{children}</div>
+          {footer ? (
+            <div className="shrink-0 border-t border-border px-3 py-2.5 sm:px-4 sm:py-3">
+              {footer}
+            </div>
+          ) : null}
+        </motion.div>
+      </motion.div>
+    </MotionPresence>,
+    document.body
   );
-
-  return createPortal(tree, document.body);
 };
 
 export default Modal;

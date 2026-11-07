@@ -7,7 +7,9 @@ import {
   Search,
   Settings2,
 } from 'lucide-react';
+import { useAppStrings } from '../../../../locales/appStrings';
 import { PHASE1_TABLE_COLORS as C } from './phase1TableColors';
+import { formatPhase1KindLabel, kindChipClass } from './phase1UiTokens';
 
 const FOCUS_BTN =
   'transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
@@ -27,18 +29,28 @@ export function Phase1DataTableToolbar({
   onPrimary,
   extraActions,
 }) {
+  const { t } = useAppStrings();
+  const kindLabel = kind ? formatPhase1KindLabel(kind, t) : '';
+  const titleText = String(title || '').trim();
+  // Avoid "Kiến trúc Kiến trúc" when page title already equals the kind label.
+  const showKindChip =
+    Boolean(kindLabel) &&
+    kindLabel.localeCompare(titleText, undefined, { sensitivity: 'accent' }) !== 0;
   return (
     <div
       className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5 ${C.toolbar}`}
     >
       <div className="min-w-0">
         <h1 className="flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground sm:text-[15px]">
-          {kind ? (
-            <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-md bg-primary/10 px-2 font-mono text-[11px] font-bold text-primary">
-              {kind}
+          {showKindChip ? (
+            <span
+              className={`${kindChipClass(kind)} px-2 py-0.5 text-[11px] font-semibold`}
+              title={String(kind || '')}
+            >
+              {kindLabel}
             </span>
           ) : null}
-          <span className="truncate">{title}</span>
+          <span className="truncate">{titleText || kindLabel}</span>
         </h1>
         {subtitle ? (
           <p className="mt-0.5 text-[11px] text-muted-foreground">{subtitle}</p>
@@ -148,6 +160,7 @@ export function Phase1TablePagination({
   pageLabel,
   disabled = false,
 }) {
+  const { t } = useAppStrings();
   const canPrev = !disabled && page > 1;
   const canNext = !disabled && page < pageCount;
 
@@ -159,7 +172,7 @@ export function Phase1TablePagination({
           type="button"
           className={`inline-flex h-7 w-7 items-center justify-center rounded border border-border bg-muted text-foreground disabled:opacity-35 ${FOCUS_BTN}`}
           disabled={!canPrev}
-          aria-label="prev"
+          aria-label={t('workspace.phase1TablePrevPage')}
           onClick={() => onPageChange?.(page - 1)}
         >
           <ChevronLeft className="h-3.5 w-3.5" />
@@ -168,7 +181,7 @@ export function Phase1TablePagination({
           type="button"
           className={`inline-flex h-7 w-7 items-center justify-center rounded border border-border bg-muted text-foreground disabled:opacity-35 ${FOCUS_BTN}`}
           disabled={!canNext}
-          aria-label="next"
+          aria-label={t('workspace.phase1TableNextPage')}
           onClick={() => onPageChange?.(page + 1)}
         >
           <ChevronRight className="h-3.5 w-3.5" />

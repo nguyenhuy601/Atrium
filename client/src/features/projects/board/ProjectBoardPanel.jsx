@@ -31,12 +31,13 @@ import {
 } from '../hub/phase3HubUiTokens';
 import { planningStatusToListId } from '../hub/planningBoardStatus';
 import { entityRelId } from '../hub/projectHubBacklogStats';
-import { isCardInSprint, statusSelectBucket } from '../hub/projectHubUtils';
+import { isCardInSprint, localizeBoardListTitle, statusSelectBucket } from '../hub/projectHubUtils';
 import { visibleCreateTypes } from '../hub/projectWorkTypes';
 import { useProjectWorkTypes } from '../hub/useProjectWorkTypes';
 import TaskBoardCardActionsMenu from './TaskBoardCardActionsMenu';
 import TaskBoardListActionsMenu from './TaskBoardListActionsMenu';
 import { labelById, parseCardLabelIds } from './taskBoardCardLabels';
+import { VH_MOTION_BTN, VH_MOTION_CARD } from '../../../motion/classes';
 
 const LIST_WIDTH = 'w-[272px]';
 const LANE_LABEL_WIDTH = 'w-[140px] min-w-[140px]';
@@ -327,7 +328,7 @@ function KanbanListColumn({
             {...listeners}
             {...attributes}
             className={`shrink-0 cursor-grab rounded p-0.5 active:cursor-grabbing ${
-              isDarkMode ? 'text-slate-500 hover:bg-white/10' : 'text-slate-400 hover:bg-slate-200'
+              'text-muted-foreground hover:bg-muted'
             }`}
             aria-label={t('taskBoard.dragListAria')}
             onClick={(e) => e.stopPropagation()}
@@ -335,10 +336,12 @@ function KanbanListColumn({
             <GripVertical className="h-4 w-4" />
           </button>
         ) : null}
-        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{repairUtf8Mojibake(list.title)}</h3>
+        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold">
+          {localizeBoardListTitle(list, t)}
+        </h3>
         <span
           className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
-            isDarkMode ? 'bg-white/10 text-slate-300' : 'bg-slate-200/80 text-slate-600'
+            'bg-muted text-muted-foreground'
           }`}
           title={t('taskBoard.columnCardCount', { count: cardSortableIds.length })}
           aria-label={t('taskBoard.columnCardCount', { count: cardSortableIds.length })}
@@ -347,7 +350,7 @@ function KanbanListColumn({
         </span>
         {list.isWatching || list.watcherCount > 0 ? (
           <span
-            className={`flex items-center gap-0.5 text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}
+            className={`flex items-center gap-0.5 text-[10px] ${'text-muted-foreground'}`}
             title={t('taskBoard.watchersTitle')}
           >
             <Eye className="h-3 w-3" />
@@ -360,7 +363,7 @@ function KanbanListColumn({
             e.stopPropagation();
             onMenuClick(e);
           }}
-          className={`rounded p-1 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-slate-200'}`}
+          className={`rounded p-1 ${isDarkMode ? 'hover:bg-surface/10' : 'hover:bg-muted'}`}
           aria-label={t('taskBoard.listActionsAria')}
         >
           <MoreHorizontal className="h-4 w-4" />
@@ -413,7 +416,7 @@ function KanbanSortableCard({
         onKeyDown={(e) => {
           if (e.key === 'Enter') onOpenDetail(card);
         }}
-        className={`group relative cursor-grab rounded-lg border px-2 py-2 text-xs transition-[box-shadow,border-color] hover:shadow-md active:cursor-grabbing ${cardShell} ${typeTint} ${readyCls} ${
+        className={`${VH_MOTION_CARD} group relative cursor-grab rounded-lg border px-2 py-2 text-xs transition-[box-shadow,border-color] hover:shadow-md active:cursor-grabbing ${cardShell} ${typeTint} ${readyCls} ${
           isCelebratingDone ? DONE_ARRIVE_CLASS : ''
         } ${isWorkflowDone && !isCelebratingDone ? 'border-[color:color-mix(in_srgb,var(--success)_35%,transparent)]' : ''}`}
         data-workflow-done={isWorkflowDone ? 'true' : undefined}
@@ -897,12 +900,12 @@ export default function TaskBoardWorkspacePanel({
   }, [newListTitle, submittingList, listMap.length, onAddList]);
 
   const listColumnShell = isDarkMode
-    ? 'bg-[#22272b]/95 border-white/10 text-slate-100'
-    : 'bg-slate-100/95 border-slate-200 text-slate-900';
+    ? 'bg-surface/95 border-border text-foreground'
+    : 'bg-muted/95 border-border text-foreground';
 
   const cardShell = isDarkMode
-    ? 'bg-[#2b3038] border-white/10 text-slate-100 shadow-sm'
-    : 'bg-white border-slate-200 text-slate-900 shadow-sm';
+    ? 'bg-surface border-border text-foreground shadow-sm'
+    : 'bg-surface border-border text-foreground shadow-sm';
 
   const boardsForMove = accessibleBoards.length ? accessibleBoards : boards;
 
@@ -1375,7 +1378,7 @@ export default function TaskBoardWorkspacePanel({
             {isDone ? (
               <CheckCircle2 className="h-4 w-4 text-success" />
             ) : (
-              <Circle className={`h-4 w-4 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} />
+              <Circle className={`h-4 w-4 ${'text-muted-foreground'}`} />
             )}
           </button>
           <div className="min-w-0 flex-1 pr-5">
@@ -1394,7 +1397,7 @@ export default function TaskBoardWorkspacePanel({
                 })}
               </div>
             ) : null}
-            <div className={`font-semibold ${isDone ? 'text-slate-400 line-through' : ''}`}>{card.title}</div>
+            <div className={`font-semibold ${isDone ? 'text-muted-foreground line-through' : ''}`}>{card.title}</div>
             {awaitingApproval ? (
               <span
                 className={`mt-1 inline-block rounded px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ${
@@ -1452,7 +1455,7 @@ export default function TaskBoardWorkspacePanel({
             ))}
             {overflowAssigneeCount > 0 ? (
               <span
-                className={`text-[10px] font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}
+                className={`text-[10px] font-semibold ${'text-muted-foreground'}`}
                 title={t('taskBoard.moreAssignees', { n: overflowAssigneeCount })}
               >
                 +{overflowAssigneeCount}
@@ -1467,7 +1470,7 @@ export default function TaskBoardWorkspacePanel({
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => onOpenMenu(card, e)}
           className={`absolute right-1.5 top-1.5 rounded p-1 opacity-0 transition-opacity group-hover:opacity-100 ${
-            isDarkMode ? 'hover:bg-white/15' : 'hover:bg-slate-200'
+            isDarkMode ? 'hover:bg-surface/15' : 'hover:bg-muted'
           }`}
         >
           <Pencil className="h-3.5 w-3.5" />
@@ -1516,7 +1519,7 @@ export default function TaskBoardWorkspacePanel({
       {loadingBoards && !selectedBoardId ? (
         <div
           className={`m-4 rounded-xl p-4 text-sm ${
-            isDarkMode ? 'bg-white/5 text-slate-300' : 'bg-white text-slate-600'
+            isDarkMode ? 'bg-surface/5 text-muted-foreground' : 'bg-surface text-muted-foreground'
           }`}
         >
           {t('common.loading')}
@@ -1524,7 +1527,7 @@ export default function TaskBoardWorkspacePanel({
       ) : !loadingBoards && boards.length === 0 ? (
         <div
           className={`m-4 rounded-xl border border-dashed p-4 text-sm ${
-            isDarkMode ? 'border-white/10 text-slate-400' : 'border-slate-300 text-slate-600'
+            'border-border text-muted-foreground'
           }`}
         >
           <p>{t('taskBoard.boardEmptyHint')}</p>
@@ -1532,13 +1535,13 @@ export default function TaskBoardWorkspacePanel({
       ) : !selectedBoardId ? (
         <div
           className={`m-4 rounded-xl border border-dashed p-4 text-sm ${
-            isDarkMode ? 'border-white/10 text-slate-400' : 'border-slate-300 text-slate-600'
+            'border-border text-muted-foreground'
           }`}
         >
           {t('taskBoard.boardSelectHint')}
         </div>
       ) : loadingBoardDetail ? (
-        <div className={`m-4 rounded-xl p-4 text-sm ${isDarkMode ? 'bg-white/5 text-slate-300' : 'bg-white text-slate-600'}`}>
+        <div className={`m-4 rounded-xl p-4 text-sm ${isDarkMode ? 'bg-surface/5 text-muted-foreground' : 'bg-surface text-muted-foreground'}`}>
           {t('common.loading')}
         </div>
       ) : (
@@ -1546,7 +1549,7 @@ export default function TaskBoardWorkspacePanel({
           {activeBoardMeta ? (
             <div
               className={`shrink-0 border-b px-4 py-3 ${
-                isDarkMode ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-white/80'
+                'border-border bg-surface/80'
               }`}
             >
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
@@ -1555,7 +1558,7 @@ export default function TaskBoardWorkspacePanel({
                   <div className="flex flex-wrap items-center gap-2">
                     <h2
                       className={`truncate text-base font-semibold ${
-                        isDarkMode ? 'text-white' : 'text-slate-900'
+                        isDarkMode ? 'text-white' : 'text-foreground'
                       }`}
                     >
                       {activeBoardMeta.title}
@@ -1573,7 +1576,7 @@ export default function TaskBoardWorkspacePanel({
                   {activeBoardMeta.description ? (
                     <p
                       className={`mt-1 line-clamp-2 text-xs ${
-                        isDarkMode ? 'text-slate-400' : 'text-slate-600'
+                        'text-muted-foreground'
                       }`}
                     >
                       {activeBoardMeta.description}
@@ -1585,7 +1588,7 @@ export default function TaskBoardWorkspacePanel({
                   >
                     <span
                       className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${
-                        isDarkMode ? 'bg-white/10 text-slate-200' : 'bg-slate-100 text-slate-700'
+                        'bg-muted text-foreground'
                       }`}
                     >
                       {t('taskBoard.boardSummaryTotal', { n: boardSummary.total })}
@@ -1604,8 +1607,8 @@ export default function TaskBoardWorkspacePanel({
                             ? 'bg-rose-500/25 text-rose-200'
                             : 'bg-rose-100 text-rose-800'
                           : isDarkMode
-                            ? 'bg-white/10 text-slate-400'
-                            : 'bg-slate-100 text-slate-500'
+                            ? 'bg-muted text-muted-foreground'
+                            : 'bg-muted text-muted-foreground'
                       }`}
                     >
                       {t('taskBoard.boardSummaryOverdue', { n: boardSummary.overdue })}
@@ -1617,8 +1620,8 @@ export default function TaskBoardWorkspacePanel({
                             ? 'bg-amber-500/20 text-amber-200'
                             : 'bg-amber-50 text-amber-800'
                           : isDarkMode
-                            ? 'bg-white/10 text-slate-400'
-                            : 'bg-slate-100 text-slate-500'
+                            ? 'bg-muted text-muted-foreground'
+                            : 'bg-muted text-muted-foreground'
                       }`}
                     >
                       {t('taskBoard.boardSummaryReview', { n: boardSummary.inReview })}
@@ -1632,17 +1635,17 @@ export default function TaskBoardWorkspacePanel({
                   {boardSearchOpen ? (
                     <div
                       className={`flex min-w-0 flex-1 items-center gap-1 rounded-lg border px-2 py-1 sm:flex-none ${
-                        isDarkMode ? 'border-white/15 bg-black/20' : 'border-slate-200 bg-white'
+                        'border-border bg-surface'
                       }`}
                     >
-                      <Search size={14} className={isDarkMode ? 'text-slate-400' : 'text-slate-500'} />
+                      <Search size={14} className={'text-muted-foreground'} />
                       <input
                         ref={boardSearchInputRef}
                         value={boardSearchQuery}
                         onChange={(e) => setBoardSearchQuery(e.target.value)}
                         placeholder={t('taskBoard.searchCardsPh')}
                         className={`min-w-0 flex-1 bg-transparent text-xs outline-none sm:w-[200px] sm:flex-none ${
-                          isDarkMode ? 'text-white placeholder:text-slate-500' : 'text-slate-900 placeholder:text-slate-400'
+                          'text-foreground placeholder:text-muted-foreground'
                         }`}
                       />
                       <button
@@ -1652,7 +1655,7 @@ export default function TaskBoardWorkspacePanel({
                           setBoardSearchQuery('');
                           setBoardSearchOpen(false);
                         }}
-                        className={`rounded p-0.5 ${isDarkMode ? 'text-slate-400 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-100'}`}
+                        className={`rounded p-0.5 ${VH_MOTION_BTN} ${'text-muted-foreground hover:bg-muted'}`}
                       >
                         <X size={14} />
                       </button>
@@ -1665,10 +1668,10 @@ export default function TaskBoardWorkspacePanel({
                         setBoardSearchOpen(true);
                         requestAnimationFrame(() => boardSearchInputRef.current?.focus());
                       }}
-                      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border ${
+                      className={`${VH_MOTION_BTN} inline-flex h-8 w-8 items-center justify-center rounded-lg border ${
                         isDarkMode
-                          ? 'border-white/15 text-slate-300 hover:bg-white/10'
-                          : 'border-slate-200 text-slate-600 hover:bg-slate-100'
+                          ? 'border-white/15 text-muted-foreground hover:bg-surface/10'
+                          : 'border-border text-muted-foreground hover:bg-muted'
                       }`}
                     >
                       <Search size={14} />
@@ -1679,12 +1682,12 @@ export default function TaskBoardWorkspacePanel({
                       type="button"
                       title={t('taskBoard.myTasksOnlyHint')}
                       onClick={() => setShowMyTasksOnly((prev) => !prev)}
-                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                      className={`${VH_MOTION_BTN} rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
                         showMyTasksOnly
                           ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
                           : isDarkMode
-                            ? 'border-white/15 text-slate-300 hover:bg-white/10'
-                            : 'border-slate-200 text-slate-700 hover:bg-slate-100'
+                            ? 'border-white/15 text-muted-foreground hover:bg-surface/10'
+                            : 'border-border text-foreground hover:bg-muted'
                       }`}
                     >
                       {t('taskBoard.myTasksOnly')}
@@ -1695,12 +1698,12 @@ export default function TaskBoardWorkspacePanel({
                       type="button"
                       title={t('taskBoard.swimlaneToggleHint')}
                       onClick={() => setSwimlaneView((prev) => !prev)}
-                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                      className={`${VH_MOTION_BTN} rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
                         swimlaneView
                           ? 'border-cyan-400 bg-cyan-500/20 text-cyan-100'
                           : isDarkMode
-                            ? 'border-white/15 text-slate-300 hover:bg-white/10'
-                            : 'border-slate-200 text-slate-700 hover:bg-slate-100'
+                            ? 'border-white/15 text-muted-foreground hover:bg-surface/10'
+                            : 'border-border text-foreground hover:bg-muted'
                       }`}
                     >
                       {t('taskBoard.swimlaneToggle')}
@@ -1742,7 +1745,7 @@ export default function TaskBoardWorkspacePanel({
           ) : null}
         {showSprintFilterEmpty ? (
           <p
-            className={`px-3 pb-1 text-xs ${isDarkMode ? 'text-slate-400' : 'text-muted-foreground'}`}
+            className={`px-3 pb-1 text-xs ${'text-muted-foreground'}`}
             role="status"
           >
             {t('taskBoard.emptySprintFilter')}
@@ -1766,14 +1769,14 @@ export default function TaskBoardWorkspacePanel({
             >
             <div className="min-h-[min(520px,calc(100vh-220px))] min-w-max">
               <p
-                className={`mb-2 text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}
+                className={`mb-2 text-[11px] ${'text-muted-foreground'}`}
               >
                 {t('taskBoard.swimlaneToggleHint')}
               </p>
               <div className="flex items-end gap-2 border-b pb-2 mb-2 border-white/10">
                 <div
                   className={`${LANE_LABEL_WIDTH} shrink-0 px-1 text-[10px] font-bold uppercase tracking-wide ${
-                    isDarkMode ? 'text-slate-500' : 'text-slate-500'
+                    'text-muted-foreground'
                   }`}
                 >
                   {t('taskBoard.swimlaneTeamCol')}
@@ -1787,10 +1790,10 @@ export default function TaskBoardWorkspacePanel({
                     className={`${LIST_WIDTH} shrink-0 truncate px-2 text-sm font-semibold`}
                   >
                     <span className="inline-flex max-w-full items-center gap-1.5">
-                      <span className="truncate">{repairUtf8Mojibake(list.title)}</span>
+                      <span className="truncate">{localizeBoardListTitle(list, t)}</span>
                       <span
                         className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
-                          isDarkMode ? 'bg-white/10 text-slate-300' : 'bg-slate-200/80 text-slate-600'
+                          'bg-muted text-muted-foreground'
                         }`}
                         title={t('taskBoard.columnCardCount', { count: colCount })}
                       >
@@ -1807,8 +1810,8 @@ export default function TaskBoardWorkspacePanel({
                     <div
                       className={`${LANE_LABEL_WIDTH} shrink-0 rounded-lg border px-2 py-2 text-xs font-semibold ${
                         isDarkMode
-                          ? 'border-white/10 bg-white/[0.04] text-slate-200'
-                          : 'border-slate-200 bg-slate-50 text-slate-800'
+                          ? 'border-border bg-muted/40 text-foreground'
+                          : 'border-border bg-muted/50 text-foreground'
                       }`}
                     >
                       {lane.label}
@@ -1844,8 +1847,8 @@ export default function TaskBoardWorkspacePanel({
                                   placeholder={t('taskBoard.cardTitlePh')}
                                   className={`w-full resize-none rounded-lg border px-2 py-1.5 text-xs outline-none ${
                                     isDarkMode
-                                      ? 'border-white/15 bg-[#1a1d26] text-white'
-                                      : 'border-slate-200 bg-white text-slate-900'
+                                      ? 'border-border bg-surface text-foreground'
+                                      : 'border-border bg-surface text-foreground'
                                   }`}
                                   autoFocus
                                 />
@@ -1854,8 +1857,8 @@ export default function TaskBoardWorkspacePanel({
                                     <select
                                       className={`rounded-md border px-1.5 py-1 text-[11px] ${
                                         isDarkMode
-                                          ? 'border-white/15 bg-[#1a1d26] text-white'
-                                          : 'border-slate-200 bg-white text-slate-900'
+                                          ? 'border-border bg-surface text-foreground'
+                                          : 'border-border bg-surface text-foreground'
                                       }`}
                                       value={cardIssueTypeByList[cellKey] || allowedIssueTypes[0]}
                                       onChange={(e) =>
@@ -1895,7 +1898,7 @@ export default function TaskBoardWorkspacePanel({
                                         [cellKey]: false,
                                       }));
                                     }}
-                                    className="rounded-md bg-[#5865F2] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                                    className="rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
                                   >
                                     {t('taskBoard.addCard')}
                                   </button>
@@ -1903,8 +1906,8 @@ export default function TaskBoardWorkspacePanel({
                                     type="button"
                                     className={`rounded-md p-1 ${
                                       isDarkMode
-                                        ? 'text-slate-400 hover:bg-white/10'
-                                        : 'text-slate-500 hover:bg-slate-200'
+                                        ? 'text-muted-foreground hover:bg-surface/10'
+                                        : 'text-muted-foreground hover:bg-muted'
                                     }`}
                                     onClick={() => {
                                       setCardComposerOpen((prev) => ({
@@ -1927,8 +1930,8 @@ export default function TaskBoardWorkspacePanel({
                                 }
                                 className={`flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs font-medium transition-colors ${
                                   isDarkMode
-                                    ? 'text-slate-300 hover:bg-white/10'
-                                    : 'text-slate-600 hover:bg-slate-200/80'
+                                    ? 'text-muted-foreground hover:bg-surface/10'
+                                    : 'text-muted-foreground hover:bg-muted/80'
                                 }`}
                               >
                                 <Plus className="h-3.5 w-3.5" />
@@ -2038,8 +2041,8 @@ export default function TaskBoardWorkspacePanel({
                           placeholder={t('taskBoard.cardTitlePh')}
                           className={`w-full resize-none rounded-lg border px-2 py-1.5 text-xs outline-none ${
                             isDarkMode
-                              ? 'border-white/15 bg-[#1a1d26] text-white'
-                              : 'border-slate-200 bg-white text-slate-900'
+                              ? 'border-border bg-surface text-foreground'
+                              : 'border-border bg-surface text-foreground'
                           }`}
                           autoFocus
                         />
@@ -2048,8 +2051,8 @@ export default function TaskBoardWorkspacePanel({
                             <select
                               className={`rounded-md border px-1.5 py-1 text-[11px] ${
                                 isDarkMode
-                                  ? 'border-white/15 bg-[#1a1d26] text-white'
-                                  : 'border-slate-200 bg-white text-slate-900'
+                                  ? 'border-border bg-surface text-foreground'
+                                  : 'border-border bg-surface text-foreground'
                               }`}
                               value={cardIssueTypeByList[listKey] || allowedIssueTypes[0]}
                               onChange={(e) =>
@@ -2083,14 +2086,14 @@ export default function TaskBoardWorkspacePanel({
                               setCardDraftByList((prev) => ({ ...prev, [listKey]: '' }));
                               setCardComposerOpen((prev) => ({ ...prev, [listKey]: false }));
                             }}
-                            className="rounded-md bg-[#5865F2] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                            className="rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
                           >
                             {t('taskBoard.addCard')}
                           </button>
                           <button
                             type="button"
                             className={`rounded-md p-1 ${
-                              isDarkMode ? 'text-slate-400 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-200'
+                              'text-muted-foreground hover:bg-muted'
                             }`}
                             onClick={() => {
                               setCardComposerOpen((prev) => ({ ...prev, [listKey]: false }));
@@ -2108,8 +2111,8 @@ export default function TaskBoardWorkspacePanel({
                         onClick={() => setCardComposerOpen((prev) => ({ ...prev, [listKey]: true }))}
                         className={`flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs font-medium transition-colors ${
                           isDarkMode
-                            ? 'text-slate-300 hover:bg-white/10'
-                            : 'text-slate-600 hover:bg-slate-200/80'
+                            ? 'text-muted-foreground hover:bg-surface/10'
+                            : 'text-muted-foreground hover:bg-muted/80'
                         }`}
                       >
                         <Plus className="h-3.5 w-3.5" />
@@ -2145,8 +2148,8 @@ export default function TaskBoardWorkspacePanel({
                     placeholder={t('taskBoard.listNamePh')}
                     className={`w-full rounded-lg border px-2.5 py-2 text-sm outline-none ${
                       isDarkMode
-                        ? 'border-white/15 bg-[#1a1d26] text-white placeholder:text-slate-500'
-                        : 'border-slate-200 bg-white text-slate-900'
+                        ? 'border-border bg-surface text-foreground placeholder:text-muted-foreground'
+                        : 'border-border bg-surface text-foreground'
                     }`}
                     autoFocus
                     disabled={submittingList}
@@ -2155,7 +2158,7 @@ export default function TaskBoardWorkspacePanel({
                     <div className="mt-2">
                       <div
                         className={`mb-1 text-[10px] font-semibold uppercase tracking-wide ${
-                          isDarkMode ? 'text-slate-500' : 'text-slate-500'
+                          'text-muted-foreground'
                         }`}
                       >
                         {t('taskBoard.teamListSuggestions')}
@@ -2169,8 +2172,8 @@ export default function TaskBoardWorkspacePanel({
                             onClick={() => setNewListTitle(item.title)}
                             className={`rounded-md px-2 py-1 text-[11px] font-medium ${
                               isDarkMode
-                                ? 'bg-white/10 text-slate-200 hover:bg-white/15'
-                                : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                                ? 'bg-muted text-foreground hover:bg-muted/80'
+                                : 'bg-muted text-foreground hover:bg-muted/80'
                             }`}
                           >
                             {item.title}
@@ -2184,7 +2187,7 @@ export default function TaskBoardWorkspacePanel({
                       type="button"
                       disabled={!newListTitle.trim() || submittingList}
                       onClick={handleSubmitNewList}
-                      className="rounded-md bg-[#5865F2] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                      className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
                     >
                       {submittingList ? t('taskBoard.addingList') : t('taskBoard.addList')}
                     </button>
@@ -2196,7 +2199,7 @@ export default function TaskBoardWorkspacePanel({
                         setNewListTitle('');
                       }}
                       className={`rounded-md p-1.5 ${
-                        isDarkMode ? 'text-slate-400 hover:bg-white/10' : 'text-slate-500 hover:bg-slate-200'
+                        'text-muted-foreground hover:bg-muted'
                       }`}
                       aria-label={t('taskBoard.cancelAria')}
                     >
@@ -2210,8 +2213,8 @@ export default function TaskBoardWorkspacePanel({
                   onClick={() => setAddingListOpen(true)}
                   className={`flex h-10 w-full items-center gap-2 rounded-xl px-3 text-sm font-medium transition-all duration-300 ease-out hover:brightness-110 ${
                     isDarkMode
-                      ? 'bg-white/15 text-slate-200 hover:bg-white/20'
-                      : 'bg-slate-200/90 text-slate-700 hover:bg-slate-300/90'
+                      ? 'bg-muted text-foreground hover:bg-muted/80'
+                      : 'bg-muted text-foreground hover:bg-muted/80'
                   }`}
                 >
                   <Plus className="h-4 w-4 shrink-0" />
@@ -2283,7 +2286,7 @@ export default function TaskBoardWorkspacePanel({
       />
 
       <WorkItemDetail
-        key={String(detailCard?._id || detailCard?.id || 'board-detail')}
+        key="board-work-item-detail"
         open={Boolean(detailCard)}
         chrome="modal"
         isDarkMode={isDarkMode}

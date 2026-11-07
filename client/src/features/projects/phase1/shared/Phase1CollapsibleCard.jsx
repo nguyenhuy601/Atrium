@@ -2,6 +2,7 @@
  * Shared Phase 1 collapsible section card (Approval hubs, Resource, etc.).
  */
 import { useState } from 'react';
+import { useAppStrings } from '../../../../locales/appStrings';
 
 export default function Phase1CollapsibleCard({
   title,
@@ -11,6 +12,7 @@ export default function Phase1CollapsibleCard({
   headerAside = null,
   children,
 }) {
+  const { t } = useAppStrings();
   const [open, setOpen] = useState(defaultOpen);
   return (
     <section
@@ -34,7 +36,7 @@ export default function Phase1CollapsibleCard({
           className="shrink-0 rounded border border-border/60 px-1.5 py-0.5 text-xs text-muted-foreground"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          aria-label={open ? 'collapse' : 'expand'}
+          aria-label={open ? t('nav.collapseSidebar') : t('nav.expandSidebar')}
         >
           {open ? '▾' : '▸'}
         </button>

@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+import MotionPresence from '../../../motion/primitives/MotionPresence';
+import { motionPopover, motionPopoverUp } from '../../../motion/overlayMotion';
+import { VH_MOTION_BTN, VH_MOTION_FIELD, VH_MOTION_ROW } from '../../../motion/classes';
 import ProjectHubIssueTypeBadge from './ProjectHubIssueTypeBadge';
 import { isBoardCreateType, isPlanningCreateType } from './projectWorkTypes';
 
@@ -30,6 +34,7 @@ export default function ProjectHubInlineCreateBar({
   menuPlacement = 'down',
   placeholderKey = '',
   onCreate,
+  onDismiss = null,
   onManageTypes = null,
   t,
 }) {
@@ -41,6 +46,8 @@ export default function ProjectHubInlineCreateBar({
   const [issueType, setIssueType] = useState(types[0] || 'story');
   const [title, setTitle] = useState('');
   const menuRef = useRef(null);
+  /** Parent đã mount/unmount bar — Escape/đóng không tự hiện nút "+ Tạo" nội bộ. */
+  const parentControlsOpen = Boolean(initialOpen && onDismiss);
 
   useEffect(() => {
     if (initialOpen) setOpen(true);
@@ -49,6 +56,13 @@ export default function ProjectHubInlineCreateBar({
   useEffect(() => {
     if (!types.includes(issueType) && types[0]) setIssueType(types[0]);
   }, [types, issueType]);
+
+  const dismiss = () => {
+    setTitle('');
+    setMenuOpen(false);
+    setOpen(false);
+    onDismiss?.();
+  };
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -86,12 +100,13 @@ export default function ProjectHubInlineCreateBar({
   };
 
   if (!open) {
+    if (parentControlsOpen) return null;
     return (
       <button
         type="button"
         disabled={busy}
         onClick={() => setOpen(true)}
-        className="mt-1 rounded-md px-1.5 py-1 text-left text-xs font-semibold text-muted-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        className={`mt-1 rounded-md px-1.5 py-1 text-left text-xs font-semibold text-muted-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${VH_MOTION_BTN}`}
       >
         {t('workspace.projectHubBacklogCreate')}
       </button>
@@ -104,10 +119,10 @@ export default function ProjectHubInlineCreateBar({
         <p className="text-xs text-muted-foreground">{t('workspace.projectHubPlanNoBoardForStory')}</p>
       ) : (
         <>
-          <div ref={menuRef} className="relative shrink-0">
+          <div ref={menuRef} className={`relative shrink-0 ${menuOpen ? 'z-20' : ''}`}>
             <button
               type="button"
-              className="inline-flex items-center gap-1 rounded-md border border-primary/60 px-1.5 py-1 transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={`inline-flex items-center gap-1 rounded-md border border-primary/60 px-1.5 py-1 transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_BTN}`}
               aria-haspopup="listbox"
               aria-expanded={menuOpen}
               aria-label={t('workspace.projectHubBacklogTypeMenuAria')}
@@ -124,12 +139,17 @@ export default function ProjectHubInlineCreateBar({
                 <ChevronDown size={12} className="text-muted-foreground" aria-hidden />
               )}
             </button>
-            {menuOpen ? (
-              <ul
+            <MotionPresence open={menuOpen} initial>
+              <motion.ul
+                key="inline-create-type-menu"
                 role="listbox"
                 className={`absolute z-40 min-w-[11rem] rounded-lg border border-border bg-surface py-1 shadow-lg ${
-                  openUp ? 'bottom-full mb-1' : 'top-full mt-1'
+                  openUp ? 'bottom-full mb-1 origin-bottom' : 'top-full mt-1 origin-top'
                 }`}
+                initial={(openUp ? motionPopoverUp : motionPopover).initial}
+                animate={(openUp ? motionPopoverUp : motionPopover).animate}
+                exit={(openUp ? motionPopoverUp : motionPopover).exit}
+                transition={(openUp ? motionPopoverUp : motionPopover).transition}
               >
                 {types.map((tp) => {
                   const selected = tp === activeType;
@@ -137,7 +157,7 @@ export default function ProjectHubInlineCreateBar({
                     <li key={tp} role="option" aria-selected={selected}>
                       <button
                         type="button"
-                        className={`relative flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm hover:bg-muted ${
+                        className={`relative flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm hover:bg-muted ${VH_MOTION_ROW} ${
                           selected ? 'bg-muted/80' : ''
                         }`}
                         onClick={() => {
@@ -164,7 +184,7 @@ export default function ProjectHubInlineCreateBar({
                     <li>
                       <button
                         type="button"
-                        className="w-full px-2.5 py-1.5 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                        className={`w-full px-2.5 py-1.5 text-left text-sm text-muted-foreground hover:bg-muted hover:text-foreground ${VH_MOTION_ROW}`}
                         onClick={() => {
                           setMenuOpen(false);
                           onManageTypes();
@@ -175,11 +195,11 @@ export default function ProjectHubInlineCreateBar({
                     </li>
                   </>
                 ) : null}
-              </ul>
-            ) : null}
+              </motion.ul>
+            </MotionPresence>
           </div>
           <input
-            className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none transition-colors motion-reduce:transition-none focus:border-primary focus-visible:ring-2 focus-visible:ring-ring"
+            className={`min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none transition-colors motion-reduce:transition-none focus:border-primary focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_FIELD}`}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={placeholder}
@@ -190,9 +210,8 @@ export default function ProjectHubInlineCreateBar({
                 submit();
               }
               if (e.key === 'Escape') {
-                setOpen(false);
-                setTitle('');
-                setMenuOpen(false);
+                e.preventDefault();
+                dismiss();
               }
             }}
           />
@@ -201,7 +220,7 @@ export default function ProjectHubInlineCreateBar({
             disabled={!canSubmit}
             aria-busy={busy || undefined}
             onClick={submit}
-            className="rounded-md bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            className={`rounded-md bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${VH_MOTION_BTN}`}
           >
             {t('workspace.projectHubPlanAdd')}
           </button>

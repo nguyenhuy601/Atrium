@@ -30,7 +30,7 @@ import { statusBadgeClass, statusRowTintClass, formatPhase1StatusLabel } from '.
 const SECTION_SHELL =
   'overflow-hidden rounded-xl border border-border bg-surface shadow-sm';
 const SECTION_HEAD =
-  'border-b border-[#E8E8E8] bg-[#E8F4FC] px-3.5 py-2.5 dark:border-border dark:bg-surface';
+  'border-b border-border bg-primary/5 px-3.5 py-2.5 dark:border-border dark:bg-surface';
 
 function unwrap(res) {
   return res?.data?.data ?? res?.data ?? res;
@@ -90,13 +90,13 @@ function SetGateProgress({ set, t }) {
           key={s.key}
           className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-semibold ${
             s.done
-              ? 'border-[#91CAFF] bg-[#E6F4FF] text-[#1677FF]'
-              : 'border-[#E8E8E8] bg-[#FAFAFA] text-muted-foreground'
+              ? 'border-primary/40 bg-primary/10 text-primary'
+              : 'border-border bg-muted/40 text-muted-foreground'
           }`}
         >
           <span
             className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] ${
-              s.done ? 'bg-[#1677FF] text-primary-foreground' : 'bg-[#E8E8E8] text-[#8C8C8C]'
+              s.done ? 'bg-primary text-primary-foreground' : 'bg-[#E8E8E8] text-[#8C8C8C]'
             }`}
           >
             {s.done ? <CheckCircle2 size={12} aria-hidden /> : idx + 1}
@@ -126,9 +126,9 @@ function canApproveImportSetGate(nextGate, capabilities) {
 
 function FileMetaRow({ label, filename, missingLabel }) {
   return (
-    <div className="rounded-lg border border-[#E8E8E8] bg-white px-3 py-2 dark:border-border dark:bg-surface">
+    <div className="rounded-lg border border-border bg-surface px-3 py-2 dark:border-border dark:bg-surface">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-[#8C8C8C]">{label}</p>
-      <p className="mt-0.5 break-words text-xs font-medium text-[#262626] dark:text-muted-foreground">
+      <p className="mt-0.5 break-words text-xs font-medium text-foreground dark:text-muted-foreground">
         {filename || missingLabel}
       </p>
     </div>
@@ -159,10 +159,10 @@ function ImportSetDetail({
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#F5F5F5] dark:bg-surface">
       {/* Header */}
-      <div className="shrink-0 border-b border-[#C9DFF0] bg-[#E8F4FC] px-3.5 py-3 dark:border-border dark:bg-surface">
+      <div className="shrink-0 border-b border-primary/30 bg-primary/5 px-3.5 py-3 dark:border-border dark:bg-surface">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-[#1677FF]">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-primary">
               {t('workspace.phase1ImportSetDetailTitle')}
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
@@ -184,7 +184,7 @@ function ImportSetDetail({
           {onClose ? (
             <button
               type="button"
-              className="shrink-0 rounded-lg border border-[#D9D9D9] bg-white px-2.5 py-1 text-xs font-medium text-[#595959] hover:bg-[#FAFAFA]"
+              className="shrink-0 rounded-lg border border-border bg-surface px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted/40"
               onClick={onClose}
             >
               {t('common.close')}
@@ -195,9 +195,9 @@ function ImportSetDetail({
 
       <div className="scrollbar-overlay min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {/* Files */}
-        <section className="overflow-hidden rounded-xl border border-[#D9D9D9] bg-white shadow-sm dark:border-border dark:bg-surface">
-          <div className="border-b border-[#E8E8E8] bg-[#E8F4FC] px-3 py-2 dark:border-border dark:bg-surface">
-            <h3 className="text-xs font-semibold text-[#262626] dark:text-primary-foreground">
+        <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-sm dark:border-border dark:bg-surface">
+          <div className="border-b border-border bg-primary/5 px-3 py-2 dark:border-border dark:bg-surface">
+            <h3 className="text-xs font-semibold text-foreground dark:text-primary-foreground">
               {t('workspace.phase1ImportSetFilesSection')}
             </h3>
           </div>
@@ -228,7 +228,7 @@ function ImportSetDetail({
                 <button
                   type="button"
                   disabled={trashPending}
-                  className="inline-flex items-center gap-1 rounded-lg border border-destructive/40 bg-white px-2.5 py-1.5 text-xs font-semibold text-destructive disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded-lg border border-destructive/40 bg-surface px-2.5 py-1.5 text-xs font-semibold text-destructive disabled:opacity-50"
                   onClick={() => onTrash(set.id)}
                 >
                   <Trash2 size={14} aria-hidden />
@@ -241,9 +241,9 @@ function ImportSetDetail({
 
         {/* Gate progress + actions */}
         {isPending ? (
-          <section className="overflow-hidden rounded-xl border border-[#D9D9D9] bg-white shadow-sm dark:border-border dark:bg-surface">
-            <div className="border-b border-[#E8E8E8] bg-[#E8F4FC] px-3 py-2 dark:border-border dark:bg-surface">
-              <h3 className="text-xs font-semibold text-[#262626] dark:text-primary-foreground">
+          <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-sm dark:border-border dark:bg-surface">
+            <div className="border-b border-border bg-primary/5 px-3 py-2 dark:border-border dark:bg-surface">
+              <h3 className="text-xs font-semibold text-foreground dark:text-primary-foreground">
                 {t('workspace.phase1SetGateProgress')}
               </h3>
             </div>
@@ -253,11 +253,11 @@ function ImportSetDetail({
                 {t('workspace.phase1ImportStagedShort')}
               </p>
               {canGate && nextGate && onGateTransition ? (
-                <div className="flex flex-wrap gap-2 border-t border-[#E8E8E8] pt-3 dark:border-border">
+                <div className="flex flex-wrap gap-2 border-t border-border pt-3 dark:border-border">
                   <button
                     type="button"
                     disabled={gatePending || rejectDialogOpen}
-                    className="rounded-lg bg-[#1677FF] px-3.5 py-2 text-xs font-semibold text-primary-foreground hover:bg-[#0958D9] disabled:opacity-50"
+                    className="rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                     onClick={() => onGateTransition(set.id, nextGate)}
                   >
                     {t(approveLabelKey(nextGate))}
@@ -277,7 +277,7 @@ function ImportSetDetail({
         ) : null}
 
         {isTrash ? (
-          <section className="overflow-hidden rounded-xl border border-[#D9D9D9] bg-white p-3 shadow-sm dark:border-border dark:bg-surface">
+          <section className="overflow-hidden rounded-xl border border-border bg-surface p-3 shadow-sm dark:border-border dark:bg-surface">
             <p className="text-[11px] text-muted-foreground">
               {set.trashedAt ? new Date(set.trashedAt).toLocaleString() : '—'}
               {set.retentionDaysLeft != null
@@ -289,12 +289,12 @@ function ImportSetDetail({
       </div>
 
       {canMutate ? (
-        <div className="flex flex-wrap gap-2 border-t border-[#E8E8E8] bg-white px-3.5 py-2.5 dark:border-border dark:bg-surface">
+        <div className="flex flex-wrap gap-2 border-t border-border bg-surface px-3.5 py-2.5 dark:border-border dark:bg-surface">
           {isTrash ? (
             <button
               type="button"
               disabled={restorePending}
-              className="inline-flex items-center gap-1 rounded-lg border border-[#D9D9D9] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#595959] disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-semibold text-muted-foreground disabled:opacity-50"
               onClick={() => onRestore(set.id)}
             >
               <RotateCcw size={14} aria-hidden />
@@ -559,7 +559,7 @@ export default function CustomerRequirementsPage({ projectId, organizationId, re
         <div className={SECTION_HEAD}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <h1 className="text-sm font-bold text-[#262626] dark:text-primary-foreground">
+              <h1 className="text-sm font-bold text-foreground dark:text-primary-foreground">
                 {t('workspace.phaseNavCustomerDocuments')}
               </h1>
               <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-muted-foreground">
@@ -572,7 +572,7 @@ export default function CustomerRequirementsPage({ projectId, organizationId, re
                   <button
                     type="button"
                     disabled={busy}
-                    className="inline-flex items-center gap-1 rounded-lg border border-[#D9D9D9] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[#595959] disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground disabled:opacity-50"
                     onClick={() => onDownloadTemplate('raw', 'Customer_Requirement_Raw.xlsx')}
                   >
                     <Download size={12} aria-hidden />
@@ -581,7 +581,7 @@ export default function CustomerRequirementsPage({ projectId, organizationId, re
                   <button
                     type="button"
                     disabled={busy}
-                    className="inline-flex items-center gap-1 rounded-lg border border-[#D9D9D9] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[#595959] disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground disabled:opacity-50"
                     onClick={() =>
                       onDownloadTemplate('analysis', 'Requirement_Analysis.xlsx')
                     }
@@ -596,7 +596,7 @@ export default function CustomerRequirementsPage({ projectId, organizationId, re
                   <button
                     type="button"
                     disabled={busy}
-                    className="inline-flex items-center gap-1 rounded-lg bg-[#1677FF] px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1.5 text-[11px] font-semibold text-primary-foreground disabled:opacity-50"
                     onClick={() => setWizardOpen(true)}
                   >
                     <Upload size={12} aria-hidden />
@@ -634,13 +634,13 @@ export default function CustomerRequirementsPage({ projectId, organizationId, re
       <Phase1CollapsibleCard
         title={
           <span className="inline-flex items-center gap-1.5">
-            <HelpCircle size={14} className="text-[#1677FF]" aria-hidden />
+            <HelpCircle size={14} className="text-primary" aria-hidden />
             {t('workspace.phase1CustomerDocsHelpTitle')}
           </span>
         }
         summary={t('workspace.phase1CustomerDocsHelpSummary')}
         defaultOpen={false}
-        toneClass="border-[#D9D9D9] bg-white shadow-sm dark:border-border dark:bg-surface"
+        toneClass="border-border bg-surface shadow-sm dark:border-border dark:bg-surface"
       >
         <ul className="list-disc space-y-1.5 pl-4 text-[11px] leading-relaxed text-muted-foreground">
           <li>{t('workspace.phase1CustomerDocsHint')}</li>
@@ -682,7 +682,7 @@ export default function CustomerRequirementsPage({ projectId, organizationId, re
               <button
                 type="button"
                 disabled={preview.errorCount > 0 || confirmMut.isPending || !preview.sessionId}
-                className="rounded-lg bg-[#1677FF] px-2.5 py-1 text-xs font-semibold text-primary-foreground disabled:opacity-50"
+                className="rounded-lg bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground disabled:opacity-50"
                 onClick={() => confirmMut.mutate()}
               >
                 {t('workspace.phase1ConfirmImport')}
@@ -699,16 +699,16 @@ export default function CustomerRequirementsPage({ projectId, organizationId, re
       {/* Import Set queue */}
       <section className={`${SECTION_SHELL} flex min-h-0 flex-1 flex-col`}>
         <div className={`${SECTION_HEAD} flex flex-wrap items-center justify-between gap-2`}>
-          <h2 className="flex items-center gap-2 text-xs font-semibold text-[#262626] dark:text-primary-foreground">
-            <FileStack size={14} className="text-[#1677FF]" aria-hidden />
+          <h2 className="flex items-center gap-2 text-xs font-semibold text-foreground dark:text-primary-foreground">
+            <FileStack size={14} className="text-primary" aria-hidden />
             {t('workspace.phase1SectionImportSets')}
           </h2>
-          <div className="flex gap-1 rounded-lg border border-[#C9DFF0] bg-white p-0.5 dark:border-border dark:bg-surface">
+          <div className="flex gap-1 rounded-lg border border-primary/30 bg-surface p-0.5 dark:border-border dark:bg-surface">
             <button
               type="button"
               className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
                 listFilter === 'live'
-                  ? 'bg-[#1677FF] text-primary-foreground'
+                  ? 'bg-primary text-primary-foreground'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
               onClick={() => {
@@ -722,7 +722,7 @@ export default function CustomerRequirementsPage({ projectId, organizationId, re
               type="button"
               className={`rounded-md px-2.5 py-1 text-[11px] font-semibold ${
                 listFilter === 'trash'
-                  ? 'bg-[#1677FF] text-primary-foreground'
+                  ? 'bg-primary text-primary-foreground'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
               onClick={() => {
@@ -769,8 +769,8 @@ export default function CustomerRequirementsPage({ projectId, organizationId, re
                       type="button"
                       className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
                         selected
-                          ? 'border-[#1677FF] bg-[#E6F4FF] shadow-sm'
-                          : 'border-[#E8E8E8] bg-[#FAFAFA] hover:border-[#91CAFF] hover:bg-[#E6F4FF]/40'
+                          ? 'border-primary bg-primary/10 shadow-sm'
+                          : 'border-border bg-muted/40 hover:border-primary/40 hover:bg-primary/10/40'
                       } ${statusRowTintClass(s.status)}`}
                       onClick={() => setSelectedSetId(s.id)}
                     >
@@ -801,7 +801,7 @@ export default function CustomerRequirementsPage({ projectId, organizationId, re
                         ) : null}
                       </div>
                       <ChevronRight
-                        className={`h-4 w-4 shrink-0 ${selected ? 'text-[#1677FF]' : 'text-muted-foreground'}`}
+                        className={`h-4 w-4 shrink-0 ${selected ? 'text-primary' : 'text-muted-foreground'}`}
                         aria-hidden
                       />
                     </button>

@@ -6,6 +6,7 @@ import {
   listViewportNeedsMoreRoots,
   nextRootLimit,
 } from '../projectHubListLazy';
+import QueryStateView from '../../../../components/Shared/QueryStateView';
 import {
   EvidenceList,
   FollowUpResultsList,
@@ -217,7 +218,9 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
           {scanSummary}
         </p>
       ) : null}
-      {loading ? <p className="text-xs text-muted-foreground">…</p> : null}
+      {loading && issueTotal === 0 ? (
+        <QueryStateView loading loadingClassName="py-3" skeletonLines={3} />
+      ) : null}
 
       <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-2">
         <div className="flex min-h-0 flex-col gap-2 overflow-hidden rounded-md border border-border p-2">
@@ -247,12 +250,27 @@ export default function ProjectHubExecutionControlPanel({ projectId, listActive 
                       }`}
                       onClick={() => openIssue(String(iss._id))}
                     >
-                      <span className="font-medium">{iss.kind}</span>
+                      <span className="font-medium">
+                        {(() => {
+                          const kindKey = `workspace.executionControlEvType_${String(iss.kind || '').trim()}`;
+                          const kindLabel = t(kindKey);
+                          return kindLabel !== kindKey ? kindLabel : iss.kind;
+                        })()}
+                      </span>
                       <span className="mx-1 text-muted-foreground">·</span>
-                      <span>{iss.status}</span>
+                      <span>
+                        {(() => {
+                          const st = String(iss.status || '').trim().toLowerCase();
+                          const stKey = `workspace.executionControlStatus_${st}`;
+                          const stLabel = t(stKey);
+                          return stLabel !== stKey ? stLabel : iss.status;
+                        })()}
+                      </span>
                       <div className="truncate text-muted-foreground">{iss.title}</div>
                       {iss.needsData ? (
-                        <span className="text-[10px] text-amber-700">NEEDS_DATA</span>
+                        <span className="text-[10px] text-amber-700">
+                          {t('workspace.executionControlEvType_NEEDS_DATA')}
+                        </span>
                       ) : null}
                       {iss.impactStatus && iss.impactStatus !== 'FULL' ? (
                         <span className="ml-1 text-[10px] text-amber-700">{iss.impactStatus}</span>

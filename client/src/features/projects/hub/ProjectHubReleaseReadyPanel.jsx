@@ -47,7 +47,7 @@ export default function ProjectHubReleaseReadyPanel({
   const [uatNote, setUatNote] = useState('');
   const [cardOpen, setCardOpen] = useState(false);
 
-  const muted = isDarkMode ? 'text-slate-400' : 'text-muted-foreground';
+  const muted = 'text-muted-foreground';
   const titleCls = isDarkMode ? 'text-white' : 'text-foreground';
 
   const refreshHubAfterGate = useCallback(
@@ -176,7 +176,7 @@ export default function ProjectHubReleaseReadyPanel({
           <p className={`text-[11px] leading-relaxed ${muted}`}>
             {t('workspace.phaseReleaseReadyHint')}
           </p>
-          <div className="rounded-xl border border-[#C9DFF0] bg-[#E8F4FC]/60 px-3 py-2 text-[11px] dark:border-slate-600 dark:bg-slate-800/50">
+          <div className="rounded-xl border border-primary/30 bg-primary/5/60 px-3 py-2 text-[11px] ">
             <p className={`font-semibold ${titleCls}`}>{t('workspace.phaseReleaseReadyRolesTitle')}</p>
             <p className={`mt-0.5 ${muted}`}>{t('workspace.phaseReleaseReadyRolesBody')}</p>
           </div>

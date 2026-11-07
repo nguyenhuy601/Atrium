@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
+import { VH_MOTION_SPINNER } from '../../../motion/classes';
 import { SpaceProvider, SPACE_KIND } from '../../../context/SpaceContext';
 import { useShellLayout } from '../../../context/ShellLayoutContext';
 import { fetchProjectHubProject, STALE_PROJECT_HUB_MS } from '../hub/useProjectHubQueries';
@@ -44,6 +45,7 @@ import SpaceCalendarModule from '../../spaceModules/SpaceCalendarModule';
 import SpaceDocumentsModule from '../../spaceModules/SpaceDocumentsModule';
 import SpaceProjectChatModule from '../../spaceModules/SpaceProjectChatModule';
 import ProjectHubPage from '../../../pages/Projects/ProjectHubPage';
+import ProjectDeliveryPhaseOpsPage from '../hub/ProjectDeliveryPhaseOpsPage';
 import AiHitlWorkspacePage from './aiHitl/AiHitlWorkspacePage';
 import {
   isAiHitlIncomplete,
@@ -55,7 +57,7 @@ import {
   loadLinkedPackForAiNav,
 } from './aiHitl/loadLinkedPackForAiNav';
 import {
-  canEnterProjectSettings,
+  canAccessProjectModule,
   isAiHitlCollabOpsModule,
   normalizeProjectCapabilities,
   shouldDenyProjectEntry,
@@ -165,7 +167,7 @@ export default function Phase1Shell({
   if (leavingAfterPromote || (projectPending && !projectRow)) {
     return (
       <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
         <span>{t('common.loading')}</span>
       </div>
     );
@@ -206,7 +208,7 @@ export default function Phase1Shell({
   if (needsAiHitlGuard && packPending && linkedPack === undefined) {
     return (
       <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
         <span>{t('common.loading')}</span>
       </div>
     );
@@ -227,7 +229,7 @@ export default function Phase1Shell({
     return <Navigate to={hitlPath} replace />;
   }
 
-  if (projectRow && module === 'settings' && !canEnterProjectSettings(caps)) {
+  if (projectRow && !canAccessProjectModule(module, caps)) {
     return <Navigate to={buildPhase1ModulePath(projectId, 'overview', { organizationId: orgId })} replace />;
   }
 
@@ -335,6 +337,8 @@ export default function Phase1Shell({
     body = <SpaceCalendarModule />;
   } else if (module === 'documents') {
     body = <SpaceDocumentsModule />;
+  } else if (module === 'delivery-phase') {
+    body = <ProjectDeliveryPhaseOpsPage />;
   } else if (module === 'members' || module === 'settings') {
     body = (
       <ProjectHubPage
@@ -358,7 +362,7 @@ export default function Phase1Shell({
   return (
     <SpaceProvider kind={SPACE_KIND.PROJECT} organizationId={orgId} projectId={projectId}>
       <div
-        className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden ${
+        className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-surface ${
           module === 'ai-hitl' ? 'overflow-hidden' : 'overflow-y-auto'
         }`}
       >

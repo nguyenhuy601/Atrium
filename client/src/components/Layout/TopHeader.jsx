@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo } from 'react';
+import { motion } from 'motion/react';
 import {
-  Languages,
-  LayoutDashboard,
-  Loader2,
   MessageCircle,
   PanelLeft,
   Shield,
@@ -11,28 +9,16 @@ import {
   ClipboardList,
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import toast from 'react-hot-toast';
-import { useAuth } from '../../context/AuthContext';
-import { useLocale } from '../../context/LocaleContext';
-import { useTheme } from '../../context/ThemeContext';
 import { useWorkspaceSuite, SUITE } from '../../context/WorkspaceSuiteContext';
 import { useAppStrings } from '../../locales/appStrings';
-import { getUserDisplayName } from '../../utils/helpers';
-import UserAvatar from '../Shared/UserAvatar';
 import { FIGMA_TOP_HEADER } from './figmaShellClasses';
-import ShellCommandPalette from './ShellCommandPalette';
+import { getDefaultPathForSuite } from '../../utils/suitePathUtils';
 import { useShellLayout } from '../../context/ShellLayoutContext';
 import useCompanyAdminAccess from '../../hooks/useCompanyAdminAccess';
-import {
-  fetchProjectHubProject,
-  STALE_PROJECT_HUB_MS,
-} from '../../features/projects/hub/useProjectHubQueries';
-import { queryKeys } from '../../lib/queryKeys';
-import {
-  projectIdFromPathname,
-  resolveDeliveryRoleBadges,
-} from './profileDeliveryRoleBadge';
+import MotionPresence from '../../motion/primitives/MotionPresence';
+import { VH_MOTION_BTN, VH_MOTION_SPINNER } from '../../motion/classes';
+import { motionTransitionFast } from '../../motion/transitions';
+import ShellAccountMenu from './ShellAccountMenu';
 
 function getSuiteMeta(t, adminSuiteNav) {
   const adminLabel = adminSuiteNav?.labelKey
@@ -102,247 +88,98 @@ function getSuiteMeta(t, adminSuiteNav) {
   };
 }
 
+/**
+ * Suite TopHeader — Atrium brand + suite label + account.
+ * Hidden entirely inside a project by SuiteShellLayout (identity lives in sidebar).
+ */
 export default function TopHeader() {
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const profileRef = useRef(null);
-  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const { locale, toggleLocale } = useLocale();
-  const { isDarkMode, toggleTheme } = useTheme();
   const { t } = useAppStrings();
   const { openMobileNav, mobileNavOpen, headerLoadingLabel, hideHeaderLoading } = useShellLayout();
   const { currentSuite } = useWorkspaceSuite();
   const { adminSuiteNav } = useCompanyAdminAccess();
   const headerLoading = headerLoadingLabel != null;
 
-  const projectId = useMemo(
-    () => projectIdFromPathname(location.pathname),
-    [location.pathname]
-  );
-
   useEffect(() => {
     hideHeaderLoading();
   }, [location.pathname, hideHeaderLoading]);
-  const { data: hubProject } = useQuery({
-    queryKey: queryKeys.projectHub.project(projectId),
-    queryFn: () => fetchProjectHubProject(projectId),
-    enabled: Boolean(projectId),
-    staleTime: STALE_PROJECT_HUB_MS,
-    refetchOnMount: false,
-  });
-  const roleBadges = useMemo(
-    () =>
-      resolveDeliveryRoleBadges(
-        hubProject?.capabilities?.viewerProjectRoleKeys || hubProject?.viewerProjectRoleKeys
-      ),
-    [hubProject]
-  );
 
   const SUITE_META = useMemo(() => getSuiteMeta(t, adminSuiteNav), [t, adminSuiteNav]);
   const activeMeta = SUITE_META[currentSuite] || SUITE_META[SUITE.COMMUNICATE];
-  const displayName = getUserDisplayName(user);
-  const profileUserId = user?.userId || user?.id || user?._id || null;
-  const profileAvatar = user?.avatar || user?.avatarUrl || null;
-  const profileAvatarBust = user?.avatarCacheKey || profileAvatar || undefined;
-
-  useEffect(() => {
-    const handleClick = (e) => {
-      if (profileRef.current && !profileRef.current.contains(e.target)) {
-        setShowProfileMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
-
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } catch {
-      // ignore
-    }
-    // Toast đăng xuất chỉ trong AuthContext.logout — tránh 2 thông báo
-    navigate('/login');
-  };
-
   const suiteLabel = activeMeta.shortLabel;
 
-  const handleLocaleToggle = () => {
-    toggleLocale();
-    toast.success(locale === 'vi' ? t('header.localeToastEn') : t('header.localeToastVi'));
+  const goSuiteHome = () => {
+    navigate(getDefaultPathForSuite(currentSuite) || '/');
   };
 
   return (
-    <>
-      <header className={FIGMA_TOP_HEADER}>
-        <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={openMobileNav}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 lg:hidden"
-            aria-label={t('nav.openMenu')}
-            aria-expanded={mobileNavOpen}
-            aria-controls="atrium-mobile-nav"
-          >
-            <PanelLeft size={18} strokeWidth={2} />
-          </button>
-          <div
-            className="flex h-[30px] w-[30px] items-center justify-center rounded-lg shadow-md"
-            style={{ background: 'linear-gradient(135deg, #2563EB 0%, #3B82F6 100%)' }}
-          >
-            <Zap size={15} fill="white" className="text-white" />
-          </div>
-          <div>
-            <div className="text-[0.9375rem] font-bold leading-tight tracking-tight text-foreground">
-              Atrium
-            </div>
-            <div className="flex items-center gap-0.5">
-              <div
-                className="h-[5px] w-[5px] shrink-0 rounded-full"
-                style={{ background: activeMeta.color }}
-              />
-              <span
-                className="text-[0.5625rem] font-bold uppercase tracking-wider"
-                style={{ color: activeMeta.color }}
-              >
-                {suiteLabel}
-              </span>
-            </div>
-          </div>
-        </div>
+    <header className={FIGMA_TOP_HEADER}>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
+        <button
+          type="button"
+          onClick={openMobileNav}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 lg:hidden"
+          aria-label={t('nav.openMenu')}
+          aria-expanded={mobileNavOpen}
+          aria-controls="atrium-mobile-nav"
+        >
+          <PanelLeft size={18} strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          onClick={goSuiteHome}
+          className={`flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_BTN}`}
+          style={{ background: 'linear-gradient(135deg, #2563EB 0%, #3B82F6 100%)' }}
+          aria-label="Atrium"
+          title="Atrium"
+        >
+          <Zap size={15} fill="white" className="text-white" />
+        </button>
 
-        <div className="flex min-w-0 flex-1 items-center justify-center px-2">
-          {headerLoading ? (
+        <div className="min-w-0">
+          <div className="truncate text-[0.9375rem] font-bold leading-tight tracking-tight text-foreground">
+            Atrium
+          </div>
+          <div className="flex items-center gap-0.5">
             <div
-              role="status"
-              aria-live="polite"
-              aria-busy="true"
-              className="inline-flex max-w-full items-center gap-2 rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground shadow-md"
+              className="h-[5px] w-[5px] shrink-0 rounded-full"
+              style={{ background: activeMeta.color }}
+            />
+            <span
+              className="text-[0.5625rem] font-bold uppercase tracking-wider"
+              style={{ color: activeMeta.color }}
             >
-              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" aria-hidden />
-              <span className="truncate">
-                {headerLoadingLabel || t('common.loading')}
-              </span>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
-          <div className="relative" ref={profileRef}>
-            <button
-              type="button"
-              onClick={() => setShowProfileMenu((v) => !v)}
-              aria-expanded={showProfileMenu}
-              aria-label={t('nav.profileAccount')}
-              className="flex items-center gap-1.5 rounded-lg p-1 transition"
-              style={{ background: showProfileMenu ? 'var(--muted)' : 'transparent' }}
-            >
-              <UserAvatar
-                avatar={profileAvatar}
-                userId={profileUserId}
-                name={displayName || user?.email || 'U'}
-                size="xs"
-                cacheBust={profileAvatarBust}
-                ringClassName="shadow-md"
-              />
-            </button>
-
-            {showProfileMenu && (
-              <div className="absolute right-0 top-[calc(100%+6px)] z-[100] w-[240px] animate-scale-in overflow-hidden rounded-xl border border-border bg-surface shadow-xl">
-                <div className="border-b border-border px-3.5 py-3">
-                  <div className="flex items-center gap-2.5">
-                    <UserAvatar
-                      avatar={profileAvatar}
-                      userId={profileUserId}
-                      name={displayName || user?.email || 'U'}
-                      size="sm"
-                      cacheBust={profileAvatarBust}
-                    />
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-foreground">{displayName}</div>
-                      <div className="truncate text-[0.6875rem] text-muted-foreground">{user?.email}</div>
-                      {roleBadges.length ? (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {roleBadges.map((b) => (
-                            <span
-                              key={b.key}
-                              className={`inline-flex items-center rounded px-1.5 py-0.5 text-[0.625rem] font-bold tracking-wide ${b.className}`}
-                            >
-                              {b.short}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-                <div className="p-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowProfileMenu(false);
-                      navigate('/me/settings');
-                    }}
-                    className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-[0.8125rem] text-foreground transition hover:bg-muted"
-                  >
-                    <User size={14} className="shrink-0 text-muted-foreground" aria-hidden />
-                    {t('nav.myProfile')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowProfileMenu(false);
-                      navigate('/me/dashboard');
-                    }}
-                    className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-[0.8125rem] text-foreground transition hover:bg-muted"
-                  >
-                    <LayoutDashboard size={14} className="shrink-0 text-muted-foreground" aria-hidden />
-                    {t('nav.overview')}
-                  </button>
-                  <div className="my-0.5 h-px bg-border" aria-hidden />
-                  <button
-                    type="button"
-                    onClick={handleLocaleToggle}
-                    className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-[0.8125rem] text-foreground transition hover:bg-muted"
-                    aria-label={t('nav.ariaLang')}
-                  >
-                    <Languages size={14} className="shrink-0 text-muted-foreground" aria-hidden />
-                    <span className="flex-1 text-left">
-                      {locale === 'vi' ? t('header.switchLocaleEn') : t('header.switchLocaleVi')}
-                    </span>
-                    <span className="rounded bg-muted px-1.5 py-0.5 text-[0.6875rem] font-bold tracking-wide text-muted-foreground">
-                      {({ en: 'EN', vi: 'VI' }[locale] || 'VI')}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={toggleTheme}
-                    className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-[0.8125rem] text-foreground transition hover:bg-muted"
-                  >
-                    <span className="shrink-0 text-sm leading-none" aria-hidden>
-                      {isDarkMode ? '☀️' : '🌙'}
-                    </span>
-                    {isDarkMode ? t('nav.themeLight') : t('nav.themeDark')}
-                  </button>
-                  <div className="my-0.5 h-px bg-border" aria-hidden />
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-[0.8125rem] text-error transition hover:bg-error/10"
-                  >
-                    <span className="shrink-0 text-sm leading-none" aria-hidden>
-                      ↩
-                    </span>
-                    {t('nav.logout')}
-                  </button>
-                </div>
-              </div>
-            )}
+              {suiteLabel}
+            </span>
           </div>
         </div>
-      </header>
-      <ShellCommandPalette />
-    </>
+
+        <MotionPresence open={headerLoading}>
+          <motion.div
+            key="header-loading"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+            data-testid="shell-header-loading"
+            className="ml-1 hidden max-w-[12rem] items-center gap-2 rounded-lg border border-border bg-card px-2 py-1 text-[11px] font-medium text-foreground shadow-sm sm:inline-flex"
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={motionTransitionFast}
+          >
+            <span
+              aria-hidden
+              className={`inline-block h-3 w-3 shrink-0 rounded-full border-2 border-primary border-t-transparent ${VH_MOTION_SPINNER}`}
+            />
+            <span className="truncate">{headerLoadingLabel || t('common.loading')}</span>
+          </motion.div>
+        </MotionPresence>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
+        <ShellAccountMenu variant="surface" menuPlacement="below" />
+      </div>
+    </header>
   );
 }

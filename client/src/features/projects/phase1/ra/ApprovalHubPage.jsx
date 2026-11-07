@@ -18,6 +18,24 @@ function unwrap(res) {
   return res?.data?.data ?? res?.data ?? res;
 }
 
+function artifactQueueDisplayKey(item, t) {
+  const external = String(item?.externalKey || '').trim();
+  if (external) return external;
+  const id = String(item?.id || item?._id || '').trim();
+  if (!id) return '—';
+  const tail = id.length > 10 ? `${id.slice(0, 8)}…` : id;
+  return t('workspace.phase1InternalIdShort', { id: tail });
+}
+
+function importSetDisplayKey(set, t) {
+  const label = String(set?.label || set?.name || '').trim();
+  if (label) return label;
+  const id = String(set?.id || '').trim();
+  if (!id) return '—';
+  const tail = id.length > 10 ? `${id.slice(0, 8)}…` : id;
+  return t('workspace.phase1InternalIdShort', { id: tail });
+}
+
 const ANALYSIS_KIND_ORDER = Object.freeze([
   'BG',
   'BR',
@@ -263,7 +281,7 @@ export default function ApprovalHubPage({ projectId, readOnly = false }) {
                 className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 text-sm"
               >
                 <div className="min-w-0">
-                  <span className="font-mono text-[11px]">{set.id?.slice(0, 8)}</span>
+                  <span className="font-mono text-[11px]">{importSetDisplayKey(set, t)}</span>
                   <p className="truncate text-[11px] text-muted-foreground">
                     Raw: {set.rawDocument?.filename || '—'} · Analysis:{' '}
                     {set.analysisDocument?.filename || '—'}
@@ -396,7 +414,7 @@ export default function ApprovalHubPage({ projectId, readOnly = false }) {
                           </span>
                         ) : null}
                         <span className="font-mono text-[11px] font-semibold text-primary underline-offset-2 hover:underline">
-                          {item.externalKey || id.slice(0, 8)}
+                          {artifactQueueDisplayKey(item, t)}
                         </span>
                       </div>
                       <p className="truncate text-[11px] text-muted-foreground">

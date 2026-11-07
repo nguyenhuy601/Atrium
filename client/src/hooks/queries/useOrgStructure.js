@@ -11,8 +11,18 @@ const unwrap = (payload) => {
 };
 
 export async function fetchOrgStructure(orgId, { view = 'full', includeInactive = false } = {}) {
-  const payload = await organizationAPI.getStructure(orgId, { view, includeInactive });
-  return unwrap(payload);
+  try {
+    const payload = await organizationAPI.getStructure(orgId, { view, includeInactive });
+    // #region agent log
+    fetch('http://127.0.0.1:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bbb8bb'},body:JSON.stringify({sessionId:'bbb8bb',runId:'pre-fix',hypothesisId:'C',location:'useOrgStructure.js:ok',message:'org structure OK',data:{orgId:String(orgId||''),view:String(view||'full')},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    return unwrap(payload);
+  } catch (err) {
+    // #region agent log
+    fetch('http://127.0.0.1:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bbb8bb'},body:JSON.stringify({sessionId:'bbb8bb',runId:'pre-fix',hypothesisId:'C',location:'useOrgStructure.js:fail',message:'org structure FAIL',data:{orgId:String(orgId||''),view:String(view||'full'),status:err?.status||err?.response?.status||null,errorCode:err?.errorCode||err?.response?.data?.errorCode||err?.code||null,errMessage:String(err?.message||'').slice(0,200)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    throw err;
+  }
 }
 
 /**

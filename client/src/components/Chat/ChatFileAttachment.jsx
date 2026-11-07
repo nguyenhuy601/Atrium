@@ -41,13 +41,26 @@ function resolveStoragePathFromFileMeta(fileMeta) {
 }
 
 async function fetchStorageObjectBlob(storagePath) {
-  const payload = await apiClient.get('/messages/storage/object', {
-    params: { storagePath },
-    responseType: 'blob',
-  });
-  if (payload instanceof Blob) return payload;
-  if (payload?.data instanceof Blob) return payload.data;
-  throw new Error('Invalid storage object response');
+  // #region agent log
+  fetch('http://127.0.0.1:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bbb8bb'},body:JSON.stringify({sessionId:'bbb8bb',runId:'post-fix',hypothesisId:'F',location:'ChatFileAttachment.jsx:fetchStorageObjectBlob',message:'fetch storage object',data:{storagePath:String(storagePath||'').slice(0,120)},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  try {
+    const payload = await apiClient.get('/messages/storage/object', {
+      params: { storagePath },
+      responseType: 'blob',
+      // 404 orphan temp/* (Firebase SA chết) — UI fallback card, không spam toast.
+      skipGlobalErrorHandling: true,
+      skipNotFoundToast: true,
+    });
+    if (payload instanceof Blob) return payload;
+    if (payload?.data instanceof Blob) return payload.data;
+    throw new Error('Invalid storage object response');
+  } catch (err) {
+    // #region agent log
+    fetch('http://127.0.0.1:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bbb8bb'},body:JSON.stringify({sessionId:'bbb8bb',runId:'post-fix',hypothesisId:'F',location:'ChatFileAttachment.jsx:fetchStorageObjectBlobFail',message:'fetch storage object fail',data:{storagePath:String(storagePath||'').slice(0,120),status:err?.status||err?.response?.status||null,errorCode:err?.errorCode||err?.response?.data?.errorCode||null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    throw err;
+  }
 }
 
 function escapeHtml(text) {

@@ -3,10 +3,7 @@
  * Keep in sync with services/project-service/src/constants/projectDeliveryPhase.js
  */
 
-import {
-  canEnterProjectSettings,
-  normalizeProjectCapabilities,
-} from '../features/projects/projectCapabilities.js';
+import { canAccessProjectModule } from '../features/projects/projectCapabilities.js';
 
 export const DELIVERY_PHASES = Object.freeze([
   'requirement_analysis',
@@ -19,8 +16,8 @@ export const DELIVERY_PHASES = Object.freeze([
 export const DEFAULT_DELIVERY_PHASE_EXISTING = 'development';
 
 /**
- * Chat / calendar / documents / members — always available in project suite.
- * settings: phase-allowed here; nav/hub chỉ hiện khi có settings:view|update|project:roles.
+ * Chat / calendar / documents / members / settings — collab/ops suite modules.
+ * Nav + route vẫn gate theo canAccessProjectModule (view perm); không còn “luôn hiện”.
  */
 export const PROJECT_COLLAB_OPS_MODULES = Object.freeze([
   'chat',
@@ -28,6 +25,7 @@ export const PROJECT_COLLAB_OPS_MODULES = Object.freeze([
   'documents',
   'settings',
   'members',
+  'delivery-phase',
 ]);
 
 const COLLAB_MIN = PROJECT_COLLAB_OPS_MODULES;
@@ -48,6 +46,7 @@ export const DEVELOPMENT_MODULES = Object.freeze([
   'settings',
   'calendar',
   'documents',
+  'delivery-phase',
 ]);
 
 export const PLANNING_SUBMODULES = Object.freeze([
@@ -201,6 +200,7 @@ export const PHASE_MODULE_LABEL_KEYS = Object.freeze({
   'deploy-evidence': 'workspace.phaseNavDeployEvidence',
   acceptance: 'workspace.phaseNavAcceptance',
   'release-notes': 'workspace.phaseNavReleaseNotes',
+  'delivery-phase': 'workspace.phaseNavDeliveryPhase',
 });
 
 /** Modules that still fall back to placeholder if Phase1Shell not used */
@@ -310,57 +310,24 @@ export function isAnalysisViewModule(moduleKey) {
 }
 
 /**
- * Lock (do not drop) analysis/planning nav when view caps are false.
- * Caps come from BE permission keys on Project Role docs, not org Permission packs.
- * When capabilities is null/undefined, treat as {} (fail-closed: hide settings, lock analysis/planning).
- * Fail-closed when capabilities object is present: items stay visible but locked.
- * Settings: drop unless settings:view | settings:update | project:roles (capability flags).
+ * Legacy keys — phase UI may still set lockHintKey for delivery-phase locks (not capability).
+ * Capability thiếu view: drop hẳn khỏi nav (không soft-lock).
  */
 export const PHASE1_ANALYSIS_CAP_LOCK_HINT_KEY = 'workspace.phase1AnalysisCapLockedHint';
 export const PHASE1_PLANNING_CAP_LOCK_HINT_KEY = 'workspace.phase1PlanningCapLockedHint';
 
+/**
+ * Drop nav items khi thiếu quyền view của module.
+ * capabilities null/undefined → {} fail-closed (ẩn hầu hết trừ khi canAccess cho phép).
+ */
 export function filterNavItemsByCapabilities(items, capabilities) {
-  const caps = normalizeProjectCapabilities(capabilities);
-  const canViewAnalysis = Boolean(caps.canViewAnalysis);
-  const canViewPlanning = Boolean(caps.canViewPlanning);
-  const enterSettings = canEnterProjectSettings(caps);
-  const perms = Array.isArray(caps.permissions) ? caps.permissions : [];
-  const canViewReport =
-    Boolean(caps.canViewReport) || perms.includes('report:view');
   const list = Array.isArray(items) ? items : [];
-  return list
-    .filter((item) => {
-      const mod = String(item.module || item.key || '')
-        .trim()
-        .toLowerCase();
-      if (mod === 'settings' && !enterSettings) return false;
-      if (mod === 'reports' && !canViewReport) return false;
-      return true;
-    })
-    .map((item) => {
-      const mod = String(item.module || item.key || '')
-        .trim()
-        .toLowerCase();
-      let next = item;
-      if (isAnalysisViewModule(mod) && !canViewAnalysis) {
-        next = {
-          ...next,
-          locked: true,
-          lockHintKey: next.lockHintKey || PHASE1_ANALYSIS_CAP_LOCK_HINT_KEY,
-        };
-      }
-      if (isPlanningViewModule(mod) && !canViewPlanning) {
-        next = {
-          ...next,
-          locked: true,
-          // Prefer existing phase-lock hint when already locked by delivery phase.
-          lockHintKey: next.locked && next.lockHintKey
-            ? next.lockHintKey
-            : PHASE1_PLANNING_CAP_LOCK_HINT_KEY,
-        };
-      }
-      return next;
-    });
+  return list.filter((item) => {
+    const mod = String(item.module || item.key || '')
+      .trim()
+      .toLowerCase();
+    return canAccessProjectModule(mod, capabilities);
+  });
 }
 
 export function isPhase1DeliveryPhase(deliveryPhase) {

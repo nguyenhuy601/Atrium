@@ -365,7 +365,10 @@ async function createProject({
     teamId: project.teamId,
     scopeType: project.scopeType,
     scopeId: project.scopeId,
-    title: DEFAULT_BOARD_TITLE,
+    title: resolveBoardTitle({
+      projectCode: project.projectCode || project.key || project.code,
+      projectTitle: project.title,
+    }),
     background: project.background,
     createdBy: userId,
     isActive: true,
@@ -1341,7 +1344,10 @@ async function attachProjectCapabilities(payload, userId, projectId, opts = {}) 
     ...payload,
     capabilities: {
       ...resolved.capabilities,
-      permissions: roleUnionPerms,
+      // SoT hub gate = effective perms (information level + VIEW_ONLY orphan fallback).
+      permissions: Array.isArray(resolved.permissions)
+        ? resolved.permissions
+        : roleUnionPerms,
       canManagePlanning: matrixHas('planning:artifact_edit'),
       canManageMembers: unionHas('members:manage'),
       canViewMembers: bypass || unionHas('members:view'),
@@ -2062,7 +2068,11 @@ async function createBoardInProject({
     teamId: project.teamId,
     scopeType: project.scopeType,
     scopeId: project.scopeId,
-    title: String(title || DEFAULT_BOARD_TITLE).trim() || DEFAULT_BOARD_TITLE,
+    title: resolveBoardTitle({
+      title,
+      projectCode: project.projectCode || project.key || project.code,
+      projectTitle: project.title,
+    }),
     background: String(background || project.background || '').trim(),
     createdBy: userId,
     isActive: true,

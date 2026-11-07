@@ -14,6 +14,7 @@ import {
   adminSecondaryBtnClass,
 } from '../../components/adminUsers/adminUserPanelUi';
 import { VH_MOTION_BTN } from '../../motion/classes';
+import MotionMenu from '../../motion/primitives/MotionMenu';
 import { useCompanyAdminContext } from '../../pages/Admin/CompanyAdminLayout';
 import { organizationAPI } from '../../services/api/organizationAPI';
 import { orgRbacAPI } from '../../services/api/orgRbacAPI';
@@ -580,13 +581,14 @@ export default function UsersListPanel({ orgId }) {
                   </span>
                 ) : null}
               </button>
-              {filtersOpen ? (
-                <div
-                  id="users-list-filters"
-                  role="dialog"
-                  aria-label={t('adminUsers.filters')}
-                  className="absolute right-0 z-20 mt-2 w-[min(calc(100vw-2rem),20rem)] space-y-2 rounded-xl border border-border bg-card p-3 shadow-lg motion-safe:animate-fade-in-fast"
-                >
+              <MotionMenu
+                open={filtersOpen}
+                menuKey="users-list-filters"
+                role="dialog"
+                id="users-list-filters"
+                aria-label={t('adminUsers.filters')}
+                className="absolute right-0 z-20 mt-2 w-[min(calc(100vw-2rem),20rem)] space-y-2 rounded-xl border border-border bg-card p-3 shadow-lg"
+              >
                   <select
                     value={roleFilter}
                     onChange={(e) => setRoleFilter(e.target.value)}
@@ -658,8 +660,7 @@ export default function UsersListPanel({ orgId }) {
                       {t('adminUsers.filtersClear')}
                     </button>
                   ) : null}
-                </div>
-              ) : null}
+              </MotionMenu>
             </div>
           </div>
         </div>

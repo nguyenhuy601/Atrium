@@ -1,44 +1,69 @@
 ---
-description: Quy chuẩn animation/motion enterprise Atrium — token, map action→pattern, presence overlay, cấm invent keyframes
+description: Quy chuẩn animation/motion enterprise Atrium — token, catalog bề mặt, map action→pattern, presence, cấm invent keyframes
 globs: client/src/**/*.{jsx,tsx,css,js}
 alwaysApply: false
 ---
 
 # Enterprise Motion Standard (SoT)
 
-CSS-first. Compose token/primitive từ `client/src/motion/` + utilities `vh-motion-*` / `vh-presence-*`. **Không** bật `framer-motion` trên feature pages. **Không** invent `@keyframes` / duration / easing ad-hoc.
+**CSS-first** cho micro-interaction ổn định; **Motion (`motion/react`)** + **GSAP** chỉ trong lớp `client/src/motion/` (primitives / hooks). Feature pages **compose** token/class/primitive — **không** import `motion/react`, `gsap`, hay invent `@keyframes` / duration / easing ad-hoc.
 
-Chi tiết API: `client/src/motion/tokens.js`, `client/src/motion/classes.js`, `client/src/index.css`.
+Chi tiết: `client/src/motion/catalog.js`, `tokens.js`, `transitions.js`, `classes.js`, `primitives/*`, `client/src/index.css`. QA: `/dev/motion-lab`.
+
+## Engines (phân vai)
+
+| Layer | Dùng cho | Import từ |
+|-------|----------|-----------|
+| CSS `vh-motion-*` / `vh-presence-*` | Hover, press fallback, overlay presence, nav collapse, skeleton | `classes.js` |
+| Motion | Button/field, page/tab, fetch bar, scroll progress, query fade | primitives + `MotionProvider` |
+| GSAP | List reveal, scroll reveal (ScrollTrigger), field invalid pulse | `useGsapReveal`, `useScrollReveal`, `gsapFieldInvalidPulse` |
+
+Cấm: package `framer-motion`; gọi `gsap`/`motion` thẳng trong `features/**` (trừ re-export primitive).
+
+## Catalog bề mặt (tóm tắt)
+
+| Nhóm | Surfaces | Status mục tiêu |
+|------|----------|-----------------|
+| Micro | button, textField, rowHover, cardHover | ready |
+| Nav | pageRoute, tabPanel, tabIndicator, navCollapse | ready |
+| Overlay | modal, drawer, popover, toast | ready (MotionPresence) |
+| Async | pageLoader, skeleton, fetchBar, inlineBusy, queryState, listReveal | ready |
+| Scroll | scrollReveal, scrollProgress | ready |
+| Domain | waveform, boardDnd | planned (ngoài SoT general) |
+
+Nguồn SoT đầy đủ: `MOTION_SURFACE` trong `catalog.js`.
 
 ## Tokens (khóa)
 
 | Token | Giá trị | Dùng cho |
 |-------|---------|----------|
-| `--vh-motion-fast` / `VH_MOTION_FAST_MS` | 100ms | hover color, row, press |
-| `--vh-motion-base` / `VH_MOTION_BASE_MS` | 150ms | button, input, tab fade, tooltip |
-| `--vh-motion-slow` / `VH_MOTION_SLOW_MS` | 220ms | modal/drawer/page enter-exit |
-| `--vh-motion-ease` | `cubic-bezier(0.4, 0, 0.2, 1)` | mặc định |
-| `--vh-motion-ease-out` | `cubic-bezier(0, 0, 0.2, 1)` | enter overlay |
-| `--vh-motion-ease-in` | `cubic-bezier(0.4, 0, 1, 1)` | exit overlay |
-| Distance | 4px Y / 8px X / scale 0.96 | fade-up / slide / scale |
-
-Nguyên tắc: ngắn, mượt — **không** bounce, spring mạnh, glow marketing.
+| `--vh-motion-fast` / `VH_MOTION_FAST_MS` | 100ms | hover color, row, fetch fade |
+| `--vh-motion-base` / `VH_MOTION_BASE_MS` | 150ms | button, input, tab, page, query |
+| `--vh-motion-slow` / `VH_MOTION_SLOW_MS` | 220ms | modal/drawer enter-exit |
+| `--vh-motion-press` | 80ms | press scale |
+| Ease | Material standard + Motion bezier tuples | không bounce/spring mạnh |
+| Distance | 4px Y / 8px X / scale 0.97·1.01 | fade-up / slide / press |
 
 ## Map action → pattern
 
 | Action | Pattern | Primitive |
 |--------|---------|-----------|
-| Click CTA | color 150ms + `active:scale(0.97)` | `vh-motion-btn` / `VH_MOTION_BTN` |
-| Hover row | bg 100ms | `vh-motion-row` |
-| Hover card | lift 2px + shadow; reduce tắt translate | `vh-motion-card` |
-| Modal open/close | backdrop fade + panel scale; presence exit | `useMotionPresence` + `vh-presence-*` |
-| Drawer | translateX 220ms | `vh-presence-drawer-right/left` |
-| Sidebar submenu / accordion | grid-rows + fade-up 220ms | `NavCollapse` / `vh-nav-collapse` |
-| Tab / segment | content `fade-in-fast` 150ms | `VH_MOTION_TAB_PANEL` |
-| Route change | `PageMotion` fade-in-fast | `client/src/motion/PageMotion.jsx` |
-| Popover | fade + 4px Y | `vh-presence-popover` |
-| Toast | slide-up + fade | `FIGMA_TOAST_ROOT` (SoT) |
-| Skeleton | `vh-skeleton`; reduce = static | existing |
+| Click CTA | color + scale 0.97 | `MotionButton` |
+| Text field | focus + invalid pulse | `MotionTextField` |
+| Route change | fade/slide 150ms | `PageMotion` (Suite + Admin shell) |
+| Tab change | indicator `layoutId` + panel fade | `TabIndicator` + `TabPanelMotion` |
+| Hover row/card | bg / lift 2px | `VH_MOTION_ROW` / `VH_MOTION_CARD` |
+| List mount | stagger fade-up | `useGsapReveal` |
+| Scroll into view | once fade-up | `useScrollReveal` |
+| Scroll reading | top scaleX | `ScrollProgressBar` |
+| Page Suspense | brand spinner | `BrandPageLoader` |
+| Query loading | skeleton lines | `SkeletonBlock` / `QueryStateView` |
+| Background fetch | top indeterminate bar | `FetchBar` (`isFetching`) |
+| Button busy | spinner | `InlineBusy` / `VH_MOTION_SPINNER` |
+| Modal/Drawer/Popover | Motion enter/exit 220ms | `MotionPresence` + `overlayMotion` |
+| Toast | slide + fade | `Toast` + `motionToast` |
+| Nav accordion | grid-rows | `NavCollapse` |
+
 
 ## Presence (overlay)
 
@@ -47,24 +72,23 @@ isOpen true  → mounted=true, phase=enter
 isOpen false → phase=exit → sau duration (reduce=0) → mounted=false
 ```
 
-- Public Modal/Confirm API giữ `isOpen` / `onClose`.
-- A11y (`useModalA11y`) theo **logical** `isOpen`; visual theo `phase`.
-- Exit: `pointer-events: none` trên overlay.
-
 ## Cấm
 
-- `transition: all` mới (nợ `vh-transition` — alias, không nhân rộng).
-- Animate `width` / `height` layout thrash — ưu tiên `opacity` + `transform`.
-- Page-fade mỗi message chat/voice; invent keyframes feature khi đã có token.
-- Dùng legacy `animate-fadeIn` / `animate-scaleIn` trên Shared mới — dùng `animate-fade-in` / `animate-scale-in` + presence.
+- `transition: all` mới; bounce / `hover:scale-105` / spring marketing.
+- Animate `width`/`height` layout thrash — ưu tiên opacity + transform.
+- Scroll scrub/parallax marketing trên app shell.
+- Invent keyframes feature khi đã có token (trừ waveform / board DnD).
 
 ## Reduced motion
 
-Mọi primitive mới: `vh-motion-respect` + `@media (prefers-reduced-motion: reduce)` → duration 0 / `animation: none` / không transform. Hook presence: duration 0 khi OS reduce.
+- CSS: `vh-motion-respect` + `motion-reduce:*`
+- Motion: `MotionProvider` → `reducedMotion="user"`
+- GSAP: `matchMedia` + `resolveMotionDuration(..., reduced)`
 
-## Checklist trước khi coi xong UI có motion
+## Checklist
 
-- [ ] Dùng token/class từ `client/src/motion` hoặc `vh-motion-*` / `vh-presence-*`
-- [ ] Không thêm keyframes one-off trừ domain đặc thù (waveform, board DnD) đã out-of-scope SoT
-- [ ] Có `motion-reduce` / `vh-motion-respect`
-- [ ] Overlay mount/unmount qua `useMotionPresence` nếu cần exit
+- [ ] Token/class/primitive từ `client/src/motion`
+- [ ] Surface có trong `catalog.js` (hoặc domain exception)
+- [ ] Reduced motion
+- [ ] Overlay qua `useMotionPresence` nếu cần exit
+- [ ] QA `/dev/motion-lab` khi thêm surface

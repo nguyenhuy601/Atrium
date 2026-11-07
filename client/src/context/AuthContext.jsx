@@ -168,16 +168,18 @@ function AuthProvider({ children }) {
       }
       notifyWorkspaceClearedOnLogout();
 
-      try {
-        const merged = await restoreAuthSessionAfterLogin(userData);
-        setUser(applyUiRoleOverlay(merged));
-      } catch (e) {
-        setUser(applyUiRoleOverlay(userData));
-      }
-      
-      // Hiển thị toast notification thành công
+      // Set user ngay — không chặn nút login chờ bootstrap/me (tránh kẹt "Đang đăng nhập…").
+      setUser(applyUiRoleOverlay(userData));
       toast.success(t('authSession.loginSuccess'));
-      
+
+      void restoreAuthSessionAfterLogin(userData)
+        .then((merged) => {
+          setUser(applyUiRoleOverlay(merged));
+        })
+        .catch(() => {
+          /* giữ userData từ login */
+        });
+
       return { ok: true };
     } catch (error) {
       // Nếu có lỗi (sai password, user không tồn tại, etc.)

@@ -49,7 +49,9 @@ export default function useProjectCapabilities(projectId) {
       /** Project có ít nhất 1 member với analysis:tech_review — cổng Tech bắt buộc (DEC D6). */
       hasAnalysisTechReviewer: Boolean(c.hasAnalysisTechReviewer),
       hasPlanningTechReviewer: Boolean(c.hasPlanningTechReviewer),
-      canChangeDeliveryPhase: Boolean(c.canChangeDeliveryPhase),
+      canChangeDeliveryPhase:
+        Boolean(c.canChangeDeliveryPhase) ||
+        (Array.isArray(c.permissions) && c.permissions.includes('delivery_phase:change')),
       canCutSrs: Boolean(c.canCutSrs),
       canViewPlanning: Boolean(c.canViewPlanning),
       canEditPlanning: Boolean(c.canEditPlanning),

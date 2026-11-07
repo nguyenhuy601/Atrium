@@ -16,7 +16,11 @@
 // Import axios - HTTP client library
 import axios from 'axios';
 import { applyAuthHeader, removeToken } from '../utils/tokenStorage';
-import { isAuthRefreshDisabled, tryRefreshAndRetry } from '../utils/authRefresh';
+import {
+  isAuthRefreshDisabled,
+  isAuthRefreshRateLimited,
+  tryRefreshAndRetry,
+} from '../utils/authRefresh';
 import { mapAuthSessionMessageForLogout } from '../utils/authErrorMessages';
 import { extractApiErrorMeta, resolveApiErrorMessage } from '../utils/resolveApiErrorMessage';
 import { createTranslator } from '../locales/buildStrings.js';
@@ -318,6 +322,11 @@ api.interceptors.response.use(
             return retried;
           }
         } catch (refreshErr) {
+          if (isAuthRefreshRateLimited(refreshErr)) {
+            console.warn('[API] Refresh rate-limited (429) — giữ session, không logout.');
+            toast.error(message || t('api.networkError'));
+            return Promise.reject(buildRejectedError(refreshErr, 'errors.generic'));
+          }
           console.warn('[API] Auto refresh failed:', refreshErr?.message || refreshErr);
         }
       }
@@ -384,6 +393,9 @@ api.interceptors.response.use(
     }
     // 500+ Server Error: 502 đã xử lý riêng
     else if (error.response?.status >= 500) {
+      // #region agent log
+      fetch('http://127.0.0.1:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bbb8bb'},body:JSON.stringify({sessionId:'bbb8bb',runId:'pre-fix',hypothesisId:'A-E',location:'client/src/services/api.js:5xx',message:'API 5xx on chat page load',data:{status:error.response?.status,method:String(error.config?.method||'').toUpperCase(),url:String(error.config?.url||''),baseURL:String(error.config?.baseURL||''),params:error.config?.params||null,errorCode:errorCode||null,serverMessage:error.response?.data?.message||null,messageUser:error.response?.data?.messageUser||null,pathHint:typeof window!=='undefined'?String(window.location?.pathname||''):''},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       toast.error(message || t('errors.server'));
     }
     // Các lỗi khác (400, 422, etc.) không show toast

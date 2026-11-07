@@ -18,6 +18,27 @@ async function getFriends(req, res) {
     return res.json({ success: true, data });
   } catch (error) {
     logger.error('[dmRoster] getFriends error:', error);
+    // #region agent log
+    try {
+      const msg = String(error?.message || error || '').slice(0, 300);
+      const stack = String(error?.stack || '').split('\n').slice(0, 4).join(' | ').slice(0, 500);
+      fetch('http://host.docker.internal:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'bbb8bb' },
+        body: JSON.stringify({
+          sessionId: 'bbb8bb',
+          runId: 'pre-fix',
+          hypothesisId: 'A',
+          location: 'dmRoster.controller.js:getFriends',
+          message: 'dmRoster getFriends 500',
+          data: { errMessage: msg, stack, userId: String(actorId(req) || '').slice(0, 24) },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    } catch (_) {
+      /* ignore */
+    }
+    // #endregion
     return sendServiceError(res, 500, {
       errorCode: 'DM_ROSTER_LIST_FAILED',
       messageUser: 'Không tải được danh sách liên lạc.',

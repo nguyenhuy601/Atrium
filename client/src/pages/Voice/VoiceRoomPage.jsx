@@ -33,7 +33,6 @@ import NavigationSidebar from '../../components/Layout/NavigationSidebar';
 import api from '../../services/api';
 import { organizationAPI } from '../../services/api/organizationAPI';
 import { toShellCompat } from '../../utils/orgShellCompat';
-import userService from '../../services/userService';
 import friendService from '../../services/friendService';
 import { useAuth } from '../../context/AuthContext';
 import { useShellLayout } from '../../context/ShellLayoutContext';
@@ -1766,7 +1765,20 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
           setInviteCandidates([]);
           return;
         }
-        const res = await organizationAPI.getMembers(selectedOrgId);
+        const teamRow =
+          hasTeamScope && Array.isArray(teams)
+            ? teams.find((t) => String(t?._id || t?.id || '') === String(selectedTeamId))
+            : null;
+        const scopedDeptId = hasDepartmentScope
+          ? String(selectedDeptId)
+          : String(teamRow?.departmentId || teamRow?.department || selectedDeptId || '').trim();
+        if (!scopedDeptId) {
+          setInviteCandidates([]);
+          return;
+        }
+        const res = await organizationAPI.getMembers(selectedOrgId, {
+          departmentId: scopedDeptId,
+        });
         const members = parseMembersRes(res);
         const filtered = members.filter((m) => {
           const active = String(m?.status || 'active') === 'active';
@@ -1777,26 +1789,19 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
           if (notifyScopeType === 'department') return deptMatchesMember(m, selectedDeptId);
           return teamMatchesMember(m, selectedTeamId);
         });
-        const rows = await Promise.all(
-          filtered.map(async (m) => {
-            const uid = memberUserId(m);
-            let label = `…${uid.slice(-6)}`;
-            let subtitle = '';
-            let avatar = null;
-            try {
-              const ur = await userService.getProfile(uid);
-              const raw = ur?.data ?? ur;
-              const p = raw?.data ?? raw;
-              label =
-                p?.displayName || p?.fullName || p?.username || p?.email?.split('@')[0] || label;
-              subtitle = p?.email || '';
-              avatar = p?.avatar || null;
-            } catch {
-              /* giữ mặc định */
-            }
-            return { id: uid, label, subtitle, avatar };
-          })
-        );
+        const rows = filtered.map((m) => {
+          const uid = memberUserId(m);
+          const label =
+            String(m?.displayName || m?.fullName || m?.username || '').trim() ||
+            (m?.email ? String(m.email).split('@')[0] : '') ||
+            `…${String(uid).slice(-6)}`;
+          return {
+            id: uid,
+            label,
+            subtitle: String(m?.email || '').trim(),
+            avatar: m?.avatar || null,
+          };
+        });
         setInviteCandidates(rows);
         return;
       }
@@ -1808,7 +1813,15 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
     } finally {
       setInviteLoading(false);
     }
-  }, [roomKind, selectedOrgId, notifyScopeType, selectedDeptId, selectedTeamId, currentUserId]);
+  }, [
+    roomKind,
+    selectedOrgId,
+    notifyScopeType,
+    selectedDeptId,
+    selectedTeamId,
+    currentUserId,
+    teams,
+  ]);
 
   useEffect(() => {
     if (!inviteModalOpen) return;

@@ -3,7 +3,7 @@ export const PHASE4_SECTION_SHELL =
   'overflow-hidden rounded-xl border border-border bg-surface shadow-sm';
 
 export const PHASE4_SECTION_HEAD =
-  'border-b border-border bg-primary/5 px-3.5 py-2.5';
+  'border-b border-border bg-muted/60 px-3.5 py-2.5';
 
 export const PHASE4_PRIMARY_MODULES = Object.freeze([
   'overview',

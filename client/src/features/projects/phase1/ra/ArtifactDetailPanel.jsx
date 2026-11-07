@@ -13,7 +13,14 @@ import {
 } from './artifactFieldCatalog';
 import { listArtifactReviewTimeline } from './artifactReviewTimeline';
 import { formatActorRef } from './srsEmptyAudit';
-import { kindChipClass, statusBadgeClass, isTechFocusKind, techFocusBadgeClass, formatPhase1StatusLabel } from '../shared/phase1UiTokens';
+import {
+  kindChipClass,
+  statusBadgeClass,
+  isTechFocusKind,
+  techFocusBadgeClass,
+  formatPhase1StatusLabel,
+  formatPhase1KindLabel,
+} from '../shared/phase1UiTokens';
 
 const inputClass =
   'mt-1 w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm disabled:opacity-60';
@@ -157,7 +164,7 @@ export default function ArtifactDetailPanel({
       <div className="flex items-start justify-between gap-2 border-b border-border px-3 py-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className={kindChipClass(kind)}>{kind}</span>
+            <span className={kindChipClass(kind)}>{formatPhase1KindLabel(kind, t)}</span>
             {isTechFocusKind(kind) ? (
               <span className={techFocusBadgeClass()} title={t('workspace.phase1TechFocusHint')}>
                 {t('workspace.phase1TechFocusBadge')}
@@ -349,12 +356,12 @@ export default function ArtifactDetailPanel({
         </p>
       ) : null}
       {contentEditable || nextStatus || canRequestChanges || canReject ? (
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-[#FAFAFA] px-4 py-3 dark:bg-surface">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-muted/40 px-4 py-3 dark:bg-surface">
           {contentEditable ? (
             <>
               <button
                 type="button"
-                className="rounded-full border border-[#D9D9D9] bg-white px-4 py-1.5 text-sm text-[#595959] hover:bg-[#FAFAFA] disabled:opacity-50"
+                className="rounded-full border border-border bg-surface px-4 py-1.5 text-sm text-muted-foreground hover:bg-muted/40 disabled:opacity-50"
                 disabled={saving || transitioning}
                 onClick={() => {
                   if (typeof onCancel === 'function') onCancel();
@@ -367,8 +374,8 @@ export default function ArtifactDetailPanel({
                 type="button"
                 className={`rounded-full px-4 py-1.5 text-sm font-semibold disabled:opacity-50 ${
                   canSave
-                    ? 'border border-[#1677FF] bg-white text-[#1677FF] hover:bg-[#E6F4FF]'
-                    : 'border border-[#D9D9D9] bg-white text-[#BFBFBF]'
+                    ? 'border border-primary bg-surface text-primary hover:bg-primary/10'
+                    : 'border border-border bg-surface text-[#BFBFBF]'
                 }`}
                 disabled={!canSave}
                 onClick={() => {
@@ -387,7 +394,7 @@ export default function ArtifactDetailPanel({
           ) : (
             <button
               type="button"
-              className="rounded-full border border-[#D9D9D9] bg-white px-4 py-1.5 text-sm text-[#595959] hover:bg-[#FAFAFA]"
+              className="rounded-full border border-border bg-surface px-4 py-1.5 text-sm text-muted-foreground hover:bg-muted/40"
               onClick={onClose}
             >
               {t('common.close')}
@@ -396,7 +403,7 @@ export default function ArtifactDetailPanel({
           {canRequestChanges && onTransition ? (
             <button
               type="button"
-              className="rounded-full border border-orange-400/60 bg-white px-4 py-1.5 text-sm text-orange-800 dark:text-orange-200 disabled:opacity-50"
+              className="rounded-full border border-orange-400/60 bg-surface px-4 py-1.5 text-sm text-orange-800 dark:text-orange-200 disabled:opacity-50"
               disabled={saving || transitioning || isDirty}
               onClick={() =>
                 setNoteDialog({
@@ -415,7 +422,7 @@ export default function ArtifactDetailPanel({
           {canReject && onTransition ? (
             <button
               type="button"
-              className="rounded-full border border-destructive/40 bg-white px-4 py-1.5 text-sm text-destructive disabled:opacity-50"
+              className="rounded-full border border-destructive/40 bg-surface px-4 py-1.5 text-sm text-destructive disabled:opacity-50"
               disabled={saving || transitioning || isDirty}
               onClick={() =>
                 setNoteDialog({
@@ -434,7 +441,7 @@ export default function ArtifactDetailPanel({
           {nextStatus && onTransition ? (
             <button
               type="button"
-              className="rounded-full bg-[#1677FF] px-4 py-1.5 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-[#0958D9] disabled:opacity-50"
+              className="rounded-full bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 disabled:opacity-50"
               disabled={saving || transitioning || isDirty}
               title={
                 isDirty

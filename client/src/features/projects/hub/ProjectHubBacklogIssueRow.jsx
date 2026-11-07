@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import { useDraggable } from '@dnd-kit/core';
+import MotionPresence from '../../../motion/primitives/MotionPresence';
+import { motionPopover } from '../../../motion/overlayMotion';
+import { VH_MOTION_BTN, VH_MOTION_ROW } from '../../../motion/classes';
 import { CSS } from '@dnd-kit/utilities';
 import { AlertTriangle, ChevronDown, ChevronRight, Clock, GitFork } from 'lucide-react';
 import UserAvatar from '../../../components/Shared/UserAvatar';
@@ -239,7 +243,7 @@ export default function ProjectHubBacklogIssueRow({
               title={epic ? epic.title : t('workspace.projectHubBacklogAddEpicAria')}
               aria-label={epic ? epic.title : t('workspace.projectHubBacklogAddEpicAria')}
               aria-expanded={epicOpen}
-              className={`${epicLabelCls} ${
+              className={`${VH_MOTION_BTN} ${epicLabelCls} ${
                 epic
                   ? 'bg-primary/15 text-primary'
                   : 'border border-dashed border-border text-muted-foreground'
@@ -247,8 +251,12 @@ export default function ProjectHubBacklogIssueRow({
             >
               {epic?.title || t('workspace.projectHubBacklogAddEpic')}
             </button>
-            {epicOpen ? (
-              <div className="absolute right-0 z-30 mt-1 min-w-[180px] rounded-lg border border-border bg-surface py-1 shadow-xl">
+            <MotionPresence open={epicOpen}>
+              <motion.div
+                key="backlog-epic-picker"
+                className="absolute right-0 z-30 mt-1 min-w-[180px] rounded-lg border border-border bg-surface py-1 shadow-xl"
+                {...motionPopover}
+              >
                 <p className="px-2 py-1 text-[10px] font-semibold uppercase text-muted-foreground">
                   {t('workspace.projectHubBacklogRecentEpics')}
                 </p>
@@ -256,7 +264,7 @@ export default function ProjectHubBacklogIssueRow({
                   <button
                     key={ep._id}
                     type="button"
-                    className="w-full truncate px-2 py-1.5 text-left text-xs hover:bg-muted"
+                    className={`w-full truncate px-2 py-1.5 text-left text-xs hover:bg-muted ${VH_MOTION_ROW}`}
                     onClick={() => {
                       setEpicOpen(false);
                       onLinkEpic?.(issueId, ep._id);
@@ -268,7 +276,7 @@ export default function ProjectHubBacklogIssueRow({
                 {issue?.epicId ? (
                   <button
                     type="button"
-                    className="w-full border-t border-border px-2 py-1.5 text-left text-xs text-destructive hover:bg-muted"
+                    className={`w-full border-t border-border px-2 py-1.5 text-left text-xs text-destructive hover:bg-muted ${VH_MOTION_ROW}`}
                     onClick={() => {
                       setEpicOpen(false);
                       onLinkEpic?.(issueId, null);
@@ -277,8 +285,8 @@ export default function ProjectHubBacklogIssueRow({
                     {t('workspace.projectHubBacklogRemoveParent')}
                   </button>
                 ) : null}
-              </div>
-            ) : null}
+              </motion.div>
+            </MotionPresence>
           </div>
         ) : epic ? (
           <span

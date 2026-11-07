@@ -46,4 +46,27 @@ function createAdminAccountLimiter(env = process.env) {
   });
 }
 
-module.exports = { createSensitiveAuthLimiter, createAdminAccountLimiter };
+/**
+ * Session refresh — trần cao hơn login/forgot nhưng vẫn theo IP.
+ * Tránh 429 cascade khi nhiều tab/HMR; vẫn chống brute-force cookie refresh.
+ */
+function createRefreshTokenLimiter(env = process.env) {
+  return rateLimit({
+    windowMs: readPositiveInt(env.AUTH_REFRESH_RATE_WINDOW_MS, 60 * 1000),
+    max: readPositiveInt(env.AUTH_REFRESH_RATE_MAX, 60),
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) =>
+      sendServiceError(res, 429, {
+        errorCode: 'AUTH_RATE_LIMITED',
+        messageUser: 'Bạn thao tác quá nhanh. Vui lòng thử lại sau ít phút.',
+        message: 'Too many requests',
+      }),
+  });
+}
+
+module.exports = {
+  createSensitiveAuthLimiter,
+  createAdminAccountLimiter,
+  createRefreshTokenLimiter,
+};

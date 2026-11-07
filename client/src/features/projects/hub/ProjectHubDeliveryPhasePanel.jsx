@@ -79,7 +79,7 @@ function evidenceFromProject(raw) {
 }
 
 /**
- * Overview — delivery phase stepper, Plan D deploy SoT, handover checklist (Plan B).
+ * Vận hành — delivery phase stepper, Plan D deploy SoT, handover checklist (Plan B).
  */
 export default function ProjectHubDeliveryPhasePanel({
   projectId = '',
@@ -108,7 +108,7 @@ export default function ProjectHubDeliveryPhasePanel({
 
   const phase = coerceDeliveryPhase(deliveryPhase);
   const phaseIndex = Math.max(0, DELIVERY_PHASES.indexOf(phase));
-  const muted = isDarkMode ? 'text-slate-400' : 'text-muted-foreground';
+  const muted = 'text-muted-foreground';
   const titleCls = isDarkMode ? 'text-white' : 'text-foreground';
   const uatPassed = String(uatStatus || '') === 'pass';
   const readyConfirmed = String(releaseReadyStatus || '') === 'confirmed';

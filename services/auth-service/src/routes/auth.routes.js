@@ -9,7 +9,11 @@ const { adminUserController, internalAuthSummaryBatch } = require('../controller
 const { companyAdminAuth } = require('../middleware/companyAdminAuth');
 const requireStoredSystemAdmin = require('../middleware/requireStoredSystemAdmin');
 const requireClientHeader = require('../middleware/requireClientHeader');
-const { createSensitiveAuthLimiter, createAdminAccountLimiter } = require('../middleware/sensitiveAuthLimiter');
+const {
+  createSensitiveAuthLimiter,
+  createAdminAccountLimiter,
+  createRefreshTokenLimiter,
+} = require('../middleware/sensitiveAuthLimiter');
 const UserAuth = require('../models/UserAuth');
 
 router.use(cookieParser());
@@ -111,11 +115,17 @@ router.post('/internal/users-auth-summary', internalGatewayAuth, internalAuthSum
 const sensitiveAuthLimiter = createSensitiveAuthLimiter();
 /** Defense in depth nếu gọi thẳng auth-service (bypass gateway loginLimiter). */
 const loginRouteLimiter = createSensitiveAuthLimiter();
+const refreshTokenLimiter = createRefreshTokenLimiter();
 
 // Public routes — OpenAPI SSOT: api-gateway/src/swagger/paths/*.paths.js (+ scan stubs)
 router.post('/login', loginRouteLimiter, authController.login.bind(authController));
 router.post('/register', authController.register.bind(authController));
-router.post('/refresh-token', requireClientHeader(), authController.refreshToken.bind(authController));
+router.post(
+  '/refresh-token',
+  refreshTokenLimiter,
+  requireClientHeader(),
+  authController.refreshToken.bind(authController)
+);
 
 router.post('/forgot-password', sensitiveAuthLimiter, authController.forgotPassword.bind(authController));
 router.post('/resend-verification', sensitiveAuthLimiter, authController.resendVerification.bind(authController));

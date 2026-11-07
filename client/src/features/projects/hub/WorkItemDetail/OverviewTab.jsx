@@ -215,6 +215,29 @@ export default function OverviewTab() {
     : [{ key: currentPriority, label: currentPriority }, ...priorityItems];
   const planningListId = isPlanning ? planningStatusToListId(workItem?.status, listArr) : '';
   const statusOptions = listsForStatusSelect(listArr, isPlanning ? planningListId : workItem?.listId);
+  const planningStatusFromList = statusOptions.find(
+    (list) => String(list._id || list.id) === String(planningListId || '')
+  );
+  const planningStatusKey = String(workItem?.status || '').toLowerCase();
+  const planningStatusI18nKey = `workspace.projectHubPlanningStatus_${planningStatusKey}`;
+  const planningStatusI18n = planningStatusKey ? t(planningStatusI18nKey) : '';
+  const planningStatusLabel =
+    (planningStatusFromList?.title && String(planningStatusFromList.title)) ||
+    (planningStatusI18n && planningStatusI18n !== planningStatusI18nKey
+      ? planningStatusI18n
+      : planningStatusKey) ||
+    '';
+  const priorityHit = priorityItems.find((i) => i.key === currentPriority);
+  const priorityDisplayLabel =
+    priorityHit?.label ||
+    (currentPriority === 'medium'
+      ? t('tasks.priorityMedium')
+      : currentPriority === 'high' || currentPriority === 'urgent'
+        ? t('tasks.priorityHigh')
+        : currentPriority === 'low'
+          ? t('tasks.priorityLow')
+          : currentPriority) ||
+    t('workspace.projectHubWorkNone');
 
   const toggleComplete = async () => {
     if (isPlanning || !canChangeStatus) return;
@@ -322,7 +345,7 @@ export default function OverviewTab() {
             <p className="text-muted-foreground">{t('taskBoard.loadingBoardMembers')}</p>
           ) : (
             <select
-              className={`${FIGMA_ORG_TASK_MODAL_INPUT} py-1.5 text-xs`}
+              className={`${FIGMA_ORG_TASK_MODAL_INPUT} h-8 py-1.5 text-xs`}
               value={assigneeId}
               disabled={saving}
               onChange={async (e) => {
@@ -373,7 +396,7 @@ export default function OverviewTab() {
           <DetailRow label={t('workspace.projectHubWorkFieldStatus')}>
             {canChangeStatus && statusOptions.length > 0 ? (
               <select
-                className={`${FIGMA_ORG_TASK_MODAL_INPUT} py-1.5 text-xs`}
+                className={`${FIGMA_ORG_TASK_MODAL_INPUT} h-8 py-1.5 text-xs`}
                 value={planningListId}
                 disabled={saving}
                 onChange={async (e) => {
@@ -389,13 +412,15 @@ export default function OverviewTab() {
                 ))}
               </select>
             ) : (
-              t('workspace.projectHubWorkNone')
+              <span className="text-foreground">
+                {planningStatusLabel || t('workspace.projectHubWorkNone')}
+              </span>
             )}
           </DetailRow>
           <DetailRow label={t('workspace.projectHubWorkFieldPriority')}>
             {canChangeStatus ? (
               <select
-                className={`${FIGMA_ORG_TASK_MODAL_INPUT} py-1.5 text-xs`}
+                className={`${FIGMA_ORG_TASK_MODAL_INPUT} h-8 py-1.5 text-xs`}
                 value={currentPriority}
                 disabled={saving}
                 onChange={async (e) => {
@@ -409,7 +434,7 @@ export default function OverviewTab() {
                 ))}
               </select>
             ) : (
-              t('workspace.projectHubWorkNone')
+              <span className="text-foreground">{priorityDisplayLabel}</span>
             )}
           </DetailRow>
         </>

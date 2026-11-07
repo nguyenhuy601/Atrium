@@ -61,6 +61,44 @@ function createServiceErrorHelper(defaultInternalErrorCode, opts = {}) {
       fallbackCode
     );
     const clientMessage = String(err?.messageUser || err?.message || fallbackMessage || '').trim();
+    // #region agent log
+    if (isServerError) {
+      const path = String(res?.req?.originalUrl || res?.req?.url || '');
+      const msg = String(err?.message || err || '').slice(0, 300);
+      const stack = String(err?.stack || '').split('\n').slice(0, 4).join(' | ').slice(0, 500);
+      console.error(
+        `[debug-bbb8bb] sendErrorFromCatch status=${status} code=${resolvedCode || ''} path=${path} msg=${msg}`
+      );
+      try {
+        const payload = JSON.stringify({
+          sessionId: 'bbb8bb',
+          runId: 'pre-fix',
+          hypothesisId: 'D',
+          location: 'shared/middleware/httpErrorResponse.js:sendErrorFromCatch',
+          message: 'BE 5xx from sendErrorFromCatch',
+          data: {
+            status,
+            errorCode: resolvedCode || null,
+            path,
+            errMessage: msg,
+            stack,
+            service: defaultInternalErrorCode,
+          },
+          timestamp: Date.now(),
+        });
+        fetch('http://host.docker.internal:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': 'bbb8bb',
+          },
+          body: payload,
+        }).catch(() => {});
+      } catch (_) {
+        /* ignore debug transport */
+      }
+    }
+    // #endregion
     return sendApiError(res, status, {
       errorCode: resolvedCode,
       messageUser: isServerError ? GENERIC_5XX_MESSAGE : clientMessage,

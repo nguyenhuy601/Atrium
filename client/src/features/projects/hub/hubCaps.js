@@ -55,6 +55,9 @@ function applyReadOnly(caps, readOnly) {
     canUpdateBacklog: false,
     canEstimate: false,
     canCompleteProject: false,
+    canChangeDeliveryPhase: false,
+    canSignOffUat: false,
+    canAcceptHandover: false,
     allowedIssueTypes: [],
   };
 }
@@ -145,8 +148,10 @@ export function resolveHubCapabilities(projectPayload, { canManageFallback = fal
         canCompleteProject: flagOrPerm(caps, 'canCompleteProject', ['project:complete']),
         canArchiveProject: flagOrPerm(caps, 'canArchiveProject', ['project:archive']),
         canArchiveWithoutComplete: permissions.includes('project:delete'),
-        canChangeDeliveryPhase: caps?.canChangeDeliveryPhase === true,
-        canSignOffUat: caps?.canSignOffUat === true,
+        canChangeDeliveryPhase: flagOrPerm(caps, 'canChangeDeliveryPhase', [
+          'delivery_phase:change',
+        ]),
+        canSignOffUat: flagOrPerm(caps, 'canSignOffUat', ['uat:sign_off']),
         // SoD: chỉ tin flag BE (role matrix) — không suy từ permissions dump (creator/admin).
         canAcceptHandover: caps?.canAcceptHandover === true,
         allowedIssueTypes: allowedIssueTypesFromCaps(caps),

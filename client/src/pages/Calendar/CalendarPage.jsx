@@ -1006,7 +1006,7 @@ function CalendarPage({
                   role="listbox"
                   aria-label={t('calendar.attendeeSuggestionsAria')}
                   hidden={!isAttendeeListOpen}
-                  className="absolute left-0 right-[6.5rem] top-[calc(100%+0.35rem)] z-20 m-0 max-h-52 list-none overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg motion-safe:animate-fade-in-fast"
+                  className="absolute left-0 right-[6.5rem] top-[calc(100%+0.35rem)] z-20 m-0 max-h-52 list-none overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg vh-presence-popover vh-motion-respect motion-reduce:animate-none"
                 >
                   {filteredAttendeeSuggestions.map((item, index) => {
                     const active = index === attendeeActiveIndex;

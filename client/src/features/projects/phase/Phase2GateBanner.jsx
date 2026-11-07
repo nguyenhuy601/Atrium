@@ -190,8 +190,7 @@ export default function Phase2GateBanner({
                     {t('workspace.phase2OptionManual') || 'Thủ công'}
                   </span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {t('workspace.phase2OptionManualHint') ||
-                      'Mở bảng preview Backlog/Board → PM sửa → Gửi PO duyệt (HITL) trước Development.'}
+                    {t('workspace.phase2OptionManualHint')}
                   </span>
                 </span>
               </label>

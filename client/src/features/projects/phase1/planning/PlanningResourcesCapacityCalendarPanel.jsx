@@ -192,12 +192,6 @@ export default function PlanningResourcesCapacityCalendarPanel({
               ) : (
                 <ForecastWorkloadBreakdown data={forecastQ.data} t={t} />
               )}
-              <Link
-                to={buildPhase1ModulePath(projectId, 'planning/resources/budget')}
-                className="mt-2 inline-block text-[11px] font-medium text-sky-700 hover:underline dark:text-sky-300"
-              >
-                {t('workspace.phaseNavPlanningResourcesBudget')} →
-              </Link>
             </div>
             <dl className="grid gap-2 text-sm sm:grid-cols-2">
               <div className="rounded-lg border border-border/70 px-2.5 py-2">

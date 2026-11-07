@@ -10,7 +10,11 @@ import { resolveApiErrorMessage } from '../../../../utils/resolveApiErrorMessage
 import useProjectCapabilities from '../hooks/useProjectCapabilities';
 import { buildPhase1ModulePath } from '../nav/phase1NavConfig';
 import { modulePathForArtifactKind } from './artifactRelated';
-import { kindAccentCardClass, kindChipClass } from '../shared/phase1UiTokens';
+import {
+  formatPhase1KindLabel,
+  kindAccentCardClass,
+  kindChipClass,
+} from '../shared/phase1UiTokens';
 import {
   artifactRowId,
   buildBpmToBrPairs,
@@ -165,7 +169,9 @@ export default function TraceabilityPage({ projectId, readOnly = false }) {
       disabled={!id}
       onClick={() => openArtifact(kind, id)}
     >
-      {kind ? <span className={kindChipClass(kind)}>{kind}</span> : null}
+      {kind ? (
+        <span className={kindChipClass(kind)}>{formatPhase1KindLabel(kind, t)}</span>
+      ) : null}
       {label}
       {extra}
     </button>
@@ -374,7 +380,7 @@ export default function TraceabilityPage({ projectId, readOnly = false }) {
               {groupPeersByKind(activeCrRow.peers).map(([kind, peers]) => (
                 <div key={kind} className="rounded-lg border border-border/80 p-2.5">
                   <div className="mb-1.5 flex items-center gap-2">
-                    <span className={kindChipClass(kind)}>{kind}</span>
+                    <span className={kindChipClass(kind)}>{formatPhase1KindLabel(kind, t)}</span>
                     <span className="text-[11px] text-muted-foreground">
                       {t('workspace.phase1TraceItemsCount', { count: peers.length })}
                     </span>
@@ -596,7 +602,10 @@ export default function TraceabilityPage({ projectId, readOnly = false }) {
                     artifactRowId(pair.fr),
                     `${pair.fr.externalKey} — ${pair.fr.title || t('workspace.phase1RelatedNoTitle')}`,
                     <span className="ml-1 text-[10px] opacity-70">
-                      · {pair.linkType || 'constrains'}
+                      ·{' '}
+                      {pair.linkType === 'constrains'
+                        ? t('workspace.phase1LinkTypeConstrains')
+                        : pair.linkType || t('workspace.phase1LinkTypeConstrains')}
                     </span>
                   )
                 : t('workspace.phase1UnresolvedKey', { key: pair.unresolvedFrKey })}

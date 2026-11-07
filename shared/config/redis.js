@@ -42,6 +42,9 @@ const connectRedis = (options = {}) => {
 
     redisClient.on('error', (err) => {
       logger.error('Redis Error:', err);
+      // #region agent log
+      fetch('http://host.docker.internal:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'67bd6d'},body:JSON.stringify({sessionId:'67bd6d',runId:'pre-fix',hypothesisId:'E',location:'shared/config/redis.js:error',message:'redis client error event',data:{errCode:err?.code||null,errMsg:String(err?.message||err).slice(0,160),status:redisClient?.status||null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
     });
 
     redisClient.on('close', () => {

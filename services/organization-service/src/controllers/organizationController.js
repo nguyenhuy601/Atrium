@@ -444,9 +444,31 @@ exports.getMyOrganizations = async (req, res, next) => {
     if (!userRef) {
       return orgUnauthorized(res);
     }
-    const memberships = await Membership.find({ user: userRef, status: 'active' })
+    let memberships = await Membership.find({ user: userRef, status: 'active' })
       .select('organization role')
       .lean();
+
+    // ?mutualWith=<userId> — chỉ org cả hai đều active (FriendChat panel; tránh N× getMembers).
+    const mutualWithRaw = String(req.query?.mutualWith || '').trim();
+    if (mutualWithRaw) {
+      const peerRef = toObjectId(mutualWithRaw);
+      if (!peerRef) {
+        return orgValidation(res, 'mutualWith không hợp lệ');
+      }
+      const myOrgIds = memberships.map((m) => m.organization).filter(Boolean);
+      if (!myOrgIds.length) {
+        return res.json({ status: 'success', data: [] });
+      }
+      const peerRows = await Membership.find({
+        user: peerRef,
+        organization: { $in: myOrgIds },
+        status: 'active',
+      })
+        .select('organization')
+        .lean();
+      const peerOrgSet = new Set(peerRows.map((r) => String(r.organization)));
+      memberships = memberships.filter((m) => peerOrgSet.has(String(m.organization)));
+    }
 
     const orgIds = memberships.map((m) => m.organization).filter(Boolean);
     const orgDocs = orgIds.length

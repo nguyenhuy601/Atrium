@@ -187,14 +187,6 @@ const COL_STATUS = {
   },
 };
 
-const WBS_LEVEL_LABELS = Object.freeze({
-  epic: 'Epic',
-  feature: 'Feature',
-  story: 'Story',
-  work_package: 'Work package',
-  task: 'Task',
-});
-
 function wbsTitleIndent(row, _t, ctx = {}) {
   // Prefer edited depth (stamped when Level changes) so "Sửa" updates indent live.
   const title = clip(row?.title || row?.name || '—', 140);
@@ -242,8 +234,7 @@ function wbsTitleIndent(row, _t, ctx = {}) {
 function wbsLevelLabel(row, t, ctx = {}) {
   const level = resolveWbsEffectiveLevel(row, ctx?.decision?.editedPayload);
   if (!level) return '—';
-  const fallback = WBS_LEVEL_LABELS[level] || level;
-  return tr(t, `requirements.gate2WbsLevel_${level}`, fallback);
+  return tr(t, `requirements.gate2WbsLevel_${level}`, level);
 }
 
 /**
@@ -987,9 +978,7 @@ export function getGate2ColumnsForSection(section, opts = {}) {
                 event.stopPropagation();
                 onOpenSprintScope(r);
               },
-              title: typeof t === 'function'
-                ? t('requirements.gate2OpenSprintScope') || 'Open scope'
-                : 'Open scope',
+              title: tr(t, 'requirements.gate2OpenSprintScope', ''),
             },
             label
           );

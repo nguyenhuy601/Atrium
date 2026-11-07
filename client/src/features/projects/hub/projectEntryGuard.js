@@ -4,6 +4,7 @@ import {
   shouldDenyProjectEntry,
 } from '../projectRoleEntry';
 import {
+  canAccessProjectModule,
   canEnterProjectSettings,
   normalizeProjectCapabilities,
 } from '../projectCapabilities';
@@ -11,6 +12,7 @@ import {
 export {
   isProjectAccessDeniedError,
   shouldDenyProjectEntry,
+  canAccessProjectModule,
   canEnterProjectSettings,
   normalizeProjectCapabilities,
 };

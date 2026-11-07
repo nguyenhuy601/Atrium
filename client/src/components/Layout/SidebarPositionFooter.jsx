@@ -29,11 +29,8 @@ export function formatSidebarPositionLabel(raw) {
   return text;
 }
 
-/**
- * Footer SoT: Vai trò tổ chức + Vị trí tổ chức (assignment từ my-profile).
- * Chức danh HR hồ sơ chỉ hiện phụ nếu khác vị trí.
- */
-export default function SidebarPositionFooter({ collapsed = false, wrap = true }) {
+/** Shared org role / position labels for sidebar identity card. */
+export function useSidebarOrgIdentity() {
   const { t } = useAppStrings();
   const { user } = useAuth();
   const { company, activeWorkspace, lastOrganizationId } = useWorkspace();
@@ -92,6 +89,30 @@ export default function SidebarPositionFooter({ collapsed = false, wrap = true }
     Boolean(hrJobTitleLabel) &&
     hrJobTitleLabel.toLowerCase() !== String(positionLabel || '').toLowerCase() &&
     hrJobTitleLabel.toLowerCase() !== String(primary || '').toLowerCase();
+
+  return {
+    primary,
+    positionLabel: showPosition ? positionLabel : '',
+    displayPositionLabel: positionLabel,
+    showPosition,
+    showHrJobTitle,
+    hrJobTitleLabel,
+  };
+}
+
+/**
+ * Footer SoT: Vai trò tổ chức + Vị trí tổ chức (assignment từ my-profile).
+ * Chức danh HR hồ sơ chỉ hiện phụ nếu khác vị trí.
+ */
+export default function SidebarPositionFooter({ collapsed = false, wrap = true }) {
+  const { t } = useAppStrings();
+  const {
+    primary,
+    positionLabel,
+    showPosition,
+    showHrJobTitle,
+    hrJobTitleLabel,
+  } = useSidebarOrgIdentity();
 
   const body = collapsed ? (
     <div

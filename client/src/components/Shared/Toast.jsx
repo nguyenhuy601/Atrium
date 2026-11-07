@@ -1,4 +1,6 @@
+import { motion } from 'motion/react';
 import { useAppStrings } from '../../locales/appStrings';
+import { motionToast } from '../../motion/overlayMotion';
 import {
   FIGMA_TOAST_ERROR,
   FIGMA_TOAST_INFO,
@@ -7,7 +9,7 @@ import {
 } from './figmaSharedClasses';
 
 /**
- * Thông báo nổi góc màn hình (dùng chung với showToast + useState trong trang).
+ * Thông báo nổi góc màn hình — Motion enter/exit (SoT overlay).
  */
 function Toast({ message, type = 'success', onClose }) {
   const { t } = useAppStrings();
@@ -19,7 +21,11 @@ function Toast({ message, type = 'success', onClose }) {
       : FIGMA_TOAST_SUCCESS;
 
   return (
-    <div className={`${FIGMA_TOAST_ROOT} ${tone}`} role="status">
+    <motion.div
+      className={`${FIGMA_TOAST_ROOT} ${tone}`}
+      role="status"
+      {...motionToast}
+    >
       <p className="flex-1 text-sm font-medium">{message}</p>
       {onClose && (
         <button
@@ -31,7 +37,7 @@ function Toast({ message, type = 'success', onClose }) {
           ✕
         </button>
       )}
-    </div>
+    </motion.div>
   );
 }
 

@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Modal from '../../../../components/Shared/Modal';
 import { useAppStrings } from '../../../../locales/appStrings';
-import { kindChipClass } from '../shared/phase1UiTokens';
+import { formatPhase1KindLabel, kindChipClass } from '../shared/phase1UiTokens';
 
 const KIND_ORDER = Object.freeze([
   'WBS',
@@ -310,10 +310,12 @@ export default function PlanningWorkbookPreviewModal({
                     aria-expanded={isOpen}
                   >
                     <span className="flex items-center gap-2">
-                      <span className={kindChipClass(kind)}>{kind}</span>
+                      <span className={kindChipClass(kind)}>
+                        {formatPhase1KindLabel(kind, t)}
+                      </span>
                       <span className="text-xs font-medium text-foreground">
                         {t('workspace.phase1DumpPreviewGroupCount', {
-                          kind,
+                          kind: formatPhase1KindLabel(kind, t),
                           count: items.length,
                         })}
                       </span>

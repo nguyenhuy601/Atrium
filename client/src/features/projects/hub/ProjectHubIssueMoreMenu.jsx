@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MoreHorizontal } from 'lucide-react';
+import MotionMenu from '../../../motion/primitives/MotionMenu';
+import { VH_MOTION_BTN, VH_MOTION_ROW } from '../../../motion/classes';
 
 /**
  * Menu ... trên hàng issue — hiện chỉ Delete.
@@ -39,32 +41,31 @@ export default function ProjectHubIssueMoreMenu({
           e.stopPropagation();
           setOpen((v) => !v);
         }}
-        className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+        className={`rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 ${VH_MOTION_BTN}`}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t('workspace.projectHubBacklogMoreAria')}
       >
         <MoreHorizontal size={16} />
       </button>
-      {open ? (
-        <div
-          role="menu"
-          className={`absolute right-0 z-30 mt-1 min-w-[140px] rounded-lg border py-1 ${menuCls}`}
+      <MotionMenu
+        open={open}
+        menuKey="issue-more-menu"
+        className={`absolute right-0 z-30 mt-1 min-w-[140px] rounded-lg border py-1 ${menuCls}`}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          className={`w-full px-3 py-2 text-left text-sm font-semibold text-destructive hover:bg-muted ${VH_MOTION_ROW}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen(false);
+            onDelete?.();
+          }}
         >
-          <button
-            type="button"
-            role="menuitem"
-            className="w-full px-3 py-2 text-left text-sm font-semibold text-destructive hover:bg-muted"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-              onDelete?.();
-            }}
-          >
-            {t('workspace.projectHubBacklogDeleteIssue')}
-          </button>
-        </div>
-      ) : null}
+          {t('workspace.projectHubBacklogDeleteIssue')}
+        </button>
+      </MotionMenu>
     </div>
   );
 }

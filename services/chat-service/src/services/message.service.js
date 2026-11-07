@@ -566,6 +566,59 @@ class MessageService {
     }
   }
 
+  /**
+   * Tin DM mới nhất theo từng peer (một round-trip thay dump inbox limit lớn).
+   * Quét cửa sổ tin gần đây rồi group — đủ cho rail snippet / sort.
+   */
+  async listLastDmByPeer(userId, { maxScan = 1500, maxPeers = 300 } = {}) {
+    try {
+      await ensureMongoReady();
+      const uid = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(String(userId))
+        : userId;
+      const scan = Math.min(Math.max(Number(maxScan) || 1500, 50), 5000);
+      const peerCap = Math.min(Math.max(Number(maxPeers) || 300, 1), 500);
+
+      const rows = await Message.aggregate([
+        {
+          $match: {
+            isDeleted: { $ne: true },
+            isRecalled: { $ne: true },
+            $and: [
+              { $or: [{ roomId: { $exists: false } }, { roomId: null }] },
+              { $or: [{ senderId: uid }, { receiverId: uid }] },
+            ],
+          },
+        },
+        { $sort: { createdAt: -1 } },
+        { $limit: scan },
+        {
+          $addFields: {
+            peerId: {
+              $cond: [{ $eq: ['$senderId', uid] }, '$receiverId', '$senderId'],
+            },
+          },
+        },
+        {
+          $group: {
+            _id: '$peerId',
+            doc: { $first: '$$ROOT' },
+          },
+        },
+        { $replaceRoot: { newRoot: '$doc' } },
+        { $sort: { createdAt: -1 } },
+        { $limit: peerCap },
+      ]);
+
+      const messages = (rows || [])
+        .map((doc) => toClientMessage(doc, { fields: 'summary', viewerId: String(userId) }))
+        .filter(Boolean);
+      return { messages };
+    } catch (error) {
+      throw toServiceError('listLastDmByPeer', error);
+    }
+  }
+
   async addReaction(messageId, userId, emoji) {
     try {
       await ensureMongoReady();

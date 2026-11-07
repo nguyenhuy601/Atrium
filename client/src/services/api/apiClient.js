@@ -1,7 +1,11 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { applyAuthHeader, removeToken } from '../../utils/tokenStorage';
-import { isAuthRefreshDisabled, tryRefreshAndRetry } from '../../utils/authRefresh';
+import {
+  isAuthRefreshDisabled,
+  isAuthRefreshRateLimited,
+  tryRefreshAndRetry,
+} from '../../utils/authRefresh';
 import { mapAuthSessionMessageForLogout } from '../../utils/authErrorMessages';
 import { extractApiErrorMeta, resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
 import { isAutoLogoutDisabled } from '../../utils/devAuth';
@@ -185,6 +189,11 @@ apiClient.interceptors.response.use(
             return retried;
           }
         } catch (refreshErr) {
+          if (isAuthRefreshRateLimited(refreshErr)) {
+            console.warn('[apiClient] Refresh rate-limited (429) — giữ session, không logout.');
+            toast.error(message || t('api.networkError'));
+            return Promise.reject(toNormalizedError(refreshErr, 'errors.generic'));
+          }
           console.warn('[apiClient] Auto refresh failed:', refreshErr?.message || refreshErr);
         }
       }

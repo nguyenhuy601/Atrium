@@ -47,10 +47,13 @@ import {
 } from '../../config/rbacUiGrantMap';
 import OrgStructureSetupModal from '../../features/adminOrgStructure/OrgStructureSetupModal';
 import SidebarPositionFooter from './SidebarPositionFooter';
+import { motion } from 'motion/react';
 import NavCollapse from '../../motion/NavCollapse';
 import { VH_NAV_CHEVRON } from '../../motion/classes';
-import useMotionPresence from '../../motion/useMotionPresence';
-import { VH_MOTION_BASE_MS } from '../../motion/tokens';
+import MotionPresence from '../../motion/primitives/MotionPresence';
+import MotionMenu from '../../motion/primitives/MotionMenu';
+import { motionPopover } from '../../motion/overlayMotion';
+
 import {
   FIGMA_SIDEBAR,
   FIGMA_SIDEBAR_COLLAPSED,
@@ -143,12 +146,10 @@ function AdminDomainPicker({ domains, selectedDomain, onSelect }) {
 }
 
 function AdminDomainPickerMenu({ open, domains, selectedDomain, onSelect, onClose, t, anchorRef }) {
-  const { mounted, phase } = useMotionPresence(open, { durationMs: VH_MOTION_BASE_MS });
   const [menuBox, setMenuBox] = useState(null);
 
   useEffect(() => {
     if (!open || !anchorRef?.current) {
-      setMenuBox(null);
       return undefined;
     }
     const update = () => {
@@ -169,23 +170,29 @@ function AdminDomainPickerMenu({ open, domains, selectedDomain, onSelect, onClos
     };
   }, [open, anchorRef]);
 
-  if (!mounted || typeof document === 'undefined' || !menuBox) return null;
+  if (typeof document === 'undefined') return null;
 
   return createPortal(
-    <>
+    <MotionPresence open={Boolean(open && menuBox)}>
+      <motion.div
+        key="admin-domain-picker"
+        className="fixed inset-0 z-[260] vh-motion-respect"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      >
       <button
         type="button"
         aria-label={t('common.close')}
-        className="fixed inset-0 z-[260] cursor-default bg-black/40"
+        className="absolute inset-0 cursor-default bg-black/40"
         onClick={onClose}
       />
-      <div
+      <motion.div
         role="listbox"
-        data-motion-phase={phase || 'enter'}
-        style={{ top: menuBox.top, left: menuBox.left, width: menuBox.width }}
-        className="fixed z-[270] max-h-[min(16rem,42vh)] overflow-y-auto rounded-lg border border-red-500/30 bg-[#12080A] py-1 shadow-[0_12px_32px_rgba(0,0,0,0.65)] vh-presence-overlay vh-motion-respect"
+        style={menuBox ? { top: menuBox.top, left: menuBox.left, width: menuBox.width } : undefined}
+        className="fixed z-[270] max-h-[min(16rem,42vh)] overflow-y-auto rounded-lg border border-red-500/30 bg-[#12080A] py-1 shadow-[0_12px_32px_rgba(0,0,0,0.65)]"
+        {...motionPopover}
       >
-        <div className="vh-presence-panel px-0 py-0 shadow-none border-0 bg-transparent rounded-none max-h-none">
           {domains.map((domain) => {
             const DomainItemIcon = DOMAIN_ICONS[domain.icon] || LayoutGrid;
             const active = domain.id === selectedDomain?.id;
@@ -214,9 +221,9 @@ function AdminDomainPickerMenu({ open, domains, selectedDomain, onSelect, onClos
               </button>
             );
           })}
-        </div>
-      </div>
-    </>,
+      </motion.div>
+      </motion.div>
+    </MotionPresence>,
     document.body
   );
 }
@@ -317,23 +324,24 @@ function AdminNavActionGroup({ items, labelKey, collapsed, isActivePath, badgeFo
         ) : null}
       </button>
       {collapsed ? (
-        open ? (
-          <div
-            id={listId}
-            className="absolute left-full top-0 z-40 ml-1 min-w-[11rem] rounded-lg border border-red-500/30 bg-[#12080A] py-1 shadow-[0_12px_32px_rgba(0,0,0,0.65)] motion-safe:animate-fade-in-fast"
-          >
-            {items.map((item) => (
-              <AdminNavItem
-                key={item.id}
-                item={item}
-                collapsed={false}
-                isActive={isActivePath(item)}
-                badge={badgeForItem(item)}
-                onNavigate={onNavigate}
-              />
-            ))}
-          </div>
-        ) : null
+        <MotionMenu
+          open={open}
+          menuKey={`admin-rail-flyout-${listId}`}
+          id={listId}
+          role="navigation"
+          className="absolute left-full top-0 z-40 ml-1 min-w-[11rem] rounded-lg border border-red-500/30 bg-[#12080A] py-1 shadow-[0_12px_32px_rgba(0,0,0,0.65)]"
+        >
+          {items.map((item) => (
+            <AdminNavItem
+              key={item.id}
+              item={item}
+              collapsed={false}
+              isActive={isActivePath(item)}
+              badge={badgeForItem(item)}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </MotionMenu>
       ) : (
         <NavCollapse open={open} id={listId} className="mb-1 ml-1.5 border-l border-red-500/20 pl-1">
           <div className="mt-0.5 space-y-px">

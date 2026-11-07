@@ -2,19 +2,25 @@ import { Navigate, Outlet } from 'react-router-dom';
 import AdminNavigationSidebar from './AdminNavigationSidebar';
 import JoinOrganizationModal from './JoinOrganizationModal';
 import NetworkOfflineBanner from './NetworkOfflineBanner';
+import ShellCommandPalette from './ShellCommandPalette';
 import ShellRoleBanner from './ShellRoleBanner';
 import TopHeader from './TopHeader';
-import { ShellLayoutProvider } from '../../context/ShellLayoutContext';
+import { ShellLayoutProvider, useShellLayout } from '../../context/ShellLayoutContext';
 import useCompanyAdminAccess from '../../hooks/useCompanyAdminAccess';
 import { useGrantScopes } from '../../hooks/useGrantScopes';
 import { getVisibleAdminDomains } from '../../config/adminDomainsConfig';
 import { hasAnyAdminNavGrant } from '../../config/rbacUiGrantMap';
+import PageMotion from '../../motion/PageMotion';
+import FetchBar from '../../motion/primitives/FetchBar';
 import { FIGMA_SHELL_BODY, FIGMA_SHELL_MAIN, FIGMA_SHELL_ROOT } from './figmaShellClasses';
 import { getDefaultPathForSuite, SUITE, writeStoredSuite } from '../../utils/suitePathUtils';
 
+
 function AdminShellLayoutInner() {
+  const { headerLoadingLabel } = useShellLayout();
   const { isSystemAdmin, orgId } = useCompanyAdminAccess();
   const { hasGrant, scopeOf, loading, error } = useGrantScopes(orgId);
+  const headerLoading = headerLoadingLabel != null;
   const canEnter =
     isSystemAdmin || hasAnyAdminNavGrant(hasGrant, scopeOf, getVisibleAdminDomains());
 
@@ -55,11 +61,16 @@ function AdminShellLayoutInner() {
       <ShellRoleBanner />
       <NetworkOfflineBanner />
       <JoinOrganizationModal />
+      <FetchBar active={headerLoading} />
+      <ShellCommandPalette />
       <div className={FIGMA_SHELL_BODY}>
         <AdminNavigationSidebar />
         <div className={FIGMA_SHELL_MAIN}>
-          <Outlet />
+          <PageMotion className="min-h-0 flex-1">
+            <Outlet />
+          </PageMotion>
         </div>
+
       </div>
     </div>
   );

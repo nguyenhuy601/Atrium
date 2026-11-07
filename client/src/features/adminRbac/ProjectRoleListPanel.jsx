@@ -28,6 +28,7 @@ import {
 import { hasLayerPrefix } from '../../utils/roleLayerNaming';
 import { adminRoleHubLink } from '../../utils/adminHubLinks';
 import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
+import MotionMenu from '../../motion/primitives/MotionMenu';
 import { useAdminActionGate } from '../../hooks/useAdminActionGate';
 
 const PROJECT_ROLE_MANAGE_HUB = '/admin/rbac/project-roles/manage';
@@ -75,31 +76,30 @@ function RoleRowMoreMenu({ roleName, deleteTo, t }) {
       >
         …
       </button>
-      {open ? (
-        <div
-          role="menu"
-          className="absolute right-0 top-full z-20 mt-1 min-w-[9rem] rounded-lg border border-border bg-card py-1 shadow-md motion-safe:animate-fade-in-fast"
-          onKeyDown={(e) => {
-            if (e.key === 'Escape' || e.key === 'Tab') {
-              e.preventDefault();
-              close();
-            } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
-              e.preventDefault();
-              itemRef.current?.focus();
-            }
-          }}
+      <MotionMenu
+        open={open}
+        menuKey="project-role-row-menu"
+        className="absolute right-0 top-full z-20 mt-1 min-w-[9rem] rounded-lg border border-border bg-card py-1 shadow-md"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' || e.key === 'Tab') {
+            e.preventDefault();
+            close();
+          } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
+            e.preventDefault();
+            itemRef.current?.focus();
+          }
+        }}
+      >
+        <Link
+          ref={itemRef}
+          role="menuitem"
+          to={deleteTo}
+          className="block px-3 py-1.5 text-xs text-destructive hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+          onClick={() => setOpen(false)}
         >
-          <Link
-            ref={itemRef}
-            role="menuitem"
-            to={deleteTo}
-            className="block px-3 py-1.5 text-xs text-destructive hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
-            onClick={() => setOpen(false)}
-          >
-            {t('adminRbac.delete')}
-          </Link>
-        </div>
-      ) : null}
+          {t('adminRbac.delete')}
+        </Link>
+      </MotionMenu>
     </div>
   );
 }

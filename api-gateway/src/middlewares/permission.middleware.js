@@ -47,6 +47,7 @@ function denyPermission(res, reason) {
   return res.status(403).json({
     success: false,
     message: 'Permission denied',
+    messageUser: 'Bạn không có quyền thực hiện thao tác này.',
     reason: reason || 'You do not have permission to perform this action',
   });
 }

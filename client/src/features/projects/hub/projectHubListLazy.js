@@ -1,5 +1,12 @@
 /** List tree: mặc định thu gọn; chevron khi chưa load / đang load / đã có con. */
 
+/** Id con trực tiếp — dùng đánh dấu fade-enter khi expand. */
+export function collectDirectChildIds(node) {
+  return (Array.isArray(node?.children) ? node.children : [])
+    .map((child) => (child?.id != null ? String(child.id) : ''))
+    .filter(Boolean);
+}
+
 export function flattenExpandedRows(nodes, expandedIds) {
   const open = expandedIds instanceof Set ? expandedIds : new Set();
   const out = [];
@@ -89,6 +96,67 @@ export function removeIdFromSetRef(setRef, id) {
 
 /** Infinite scroll List: số root work mỗi lần reveal. */
 export const LIST_ROOT_PAGE_SIZE = 5;
+
+/** Expand chunk — tránh mount hàng trăm row trong 1 frame. */
+export const LIST_EXPAND_CHUNK_SIZE = 40;
+
+/** Ước lượng chiều cao hàng List (virtualizer). */
+export const LIST_ROW_ESTIMATE_PX = 56;
+
+/**
+ * Ids cần mở thêm đúng 1 cấp so với `expandedIds` hiện tại (frontier của cây).
+ * Chỉ thêm node đang “thấy” qua flatten + còn con.
+ */
+export function collectOneLevelExpandIds(nodes, expandedIds, hasChildrenFn = null) {
+  const open = expandedIds instanceof Set ? expandedIds : new Set();
+  const next = [];
+  const seen = new Set();
+  const flat = flattenExpandedRows(nodes, open);
+  for (const { node } of flat) {
+    const id = node?.id != null ? String(node.id) : '';
+    if (!id || open.has(id) || seen.has(id)) continue;
+    const hasChildren = hasChildrenFn
+      ? Boolean(hasChildrenFn(node))
+      : Array.isArray(node.children) && node.children.length > 0;
+    if (!hasChildren) continue;
+    seen.add(id);
+    next.push(id);
+  }
+  return next;
+}
+
+/**
+ * Ids mọi ancestor có con trong cây (mở hết cây). Thứ tự DFS để chunk mở từ trên xuống.
+ */
+export function collectFullExpandIds(nodes, hasChildrenFn = null) {
+  const out = [];
+  const seen = new Set();
+  const walk = (list) => {
+    for (const node of list || []) {
+      const id = node?.id != null ? String(node.id) : '';
+      if (!id || seen.has(id)) continue;
+      const hasChildren = hasChildrenFn
+        ? Boolean(hasChildrenFn(node))
+        : Array.isArray(node.children) && node.children.length > 0;
+      if (hasChildren) {
+        seen.add(id);
+        out.push(id);
+      }
+      if (Array.isArray(node.children) && node.children.length > 0) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
+/** Cắt mảng id thành các chunk cố định (expand dần). */
+export function chunkIds(ids, chunkSize = LIST_EXPAND_CHUNK_SIZE) {
+  const size = Math.max(1, Math.floor(Number(chunkSize) || LIST_EXPAND_CHUNK_SIZE));
+  const list = Array.isArray(ids) ? ids : [];
+  const chunks = [];
+  for (let i = 0; i < list.length; i += size) chunks.push(list.slice(i, i + size));
+  return chunks;
+}
 
 export function sliceTreeRoots(tree, limit) {
   const n = Math.max(0, Math.floor(Number(limit) || 0));

@@ -52,9 +52,17 @@ const DEVELOPMENT_MODULES = Object.freeze([
   'settings',
   'calendar',
   'documents',
+  'delivery-phase',
 ]);
 
-const COLLAB_MIN = Object.freeze(['chat', 'calendar', 'documents', 'settings', 'members']);
+const COLLAB_MIN = Object.freeze([
+  'chat',
+  'calendar',
+  'documents',
+  'settings',
+  'members',
+  'delivery-phase',
+]);
 
 const PLANNING_SUBMODULES = Object.freeze([
   'planning-overview',

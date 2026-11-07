@@ -33,6 +33,8 @@ import './index.css';
 ======================================== */
 
 import AtriumToaster from './components/Shared/AtriumToaster';
+import MotionProvider from './motion/MotionProvider';
+
 
 // Import AuthProvider để quản lý authentication state
 // File: ./context/AuthContext.jsx
@@ -125,6 +127,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
                 - File: ./context/SocketContext.jsx */}
             <SocketProvider>
               <QueryRealtimeSync />
+              <MotionProvider>
               {/* App component: chứa tất cả routes và pages
                   - File: ./App.jsx
                   - Có thể access tất cả contexts ở trên */}
@@ -136,6 +139,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
                   - Đặt ở đây để dùng được ở mọi nơi
                   - toast.success(), toast.error() ở bất kỳ component nào */}
               <AtriumToaster />
+              </MotionProvider>
             </SocketProvider>
             </WorkspaceSuiteProvider>
             </WorkspaceProvider>

@@ -208,8 +208,8 @@ export default function Gate2ConsolidationPanel({
               value={draft.owner}
               onChange={(event) => setDraft((prev) => ({ ...prev, owner: event.target.value }))}
             >
-              <option value="tech">Tech Lead</option>
-              <option value="po">PO</option>
+              <option value="tech">{labelOf(t, 'requirements.gate2ProposalOwnerTech', 'Tech Lead')}</option>
+              <option value="po">{labelOf(t, 'requirements.gate2ProposalOwnerPo', 'PO')}</option>
             </select>
           </label>
           <label className="text-xs">

@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Plus, RefreshCw } from 'lucide-react';
 import { toDateKey } from '../../utils/calendarUtils';
 import { resolveCalendarGridNav } from '../../utils/calendarGridNav';
 import { adminSecondaryBtnClass } from '../adminUsers/adminUserPanelUi';
+import { VH_MOTION_SKELETON } from '../../motion/classes';
 import CalendarEventSidebar from './CalendarEventSidebar';
 import CalendarListView from './CalendarListView';
 import CalendarViewModeToggle from './CalendarViewModeToggle';
@@ -217,7 +218,7 @@ export default function CalendarFigmaView({
   const renderGridSkeleton = () => (
     <div className="grid grid-cols-7 gap-1" aria-hidden="true">
       {Array.from({ length: 42 }, (_, i) => (
-        <div key={i} className="min-h-[88px] rounded-[10px] bg-muted motion-safe:animate-pulse" />
+        <div key={i} className={`min-h-[88px] rounded-[10px] bg-muted ${VH_MOTION_SKELETON}`} />
       ))}
     </div>
   );

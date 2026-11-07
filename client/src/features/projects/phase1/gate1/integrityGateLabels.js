@@ -27,8 +27,8 @@ export function integrityRowLabelKey(blockKind) {
 }
 
 export function integrityRowLabelFallback(blockKind) {
-  if (blockKind === 'relationship_integrity') return 'Relationship integrity';
-  return 'Missing fields';
+  if (blockKind === 'relationship_integrity') return 'Toàn vẹn quan hệ';
+  return 'Thiếu trường';
 }
 
 export function formatMissingFieldsSuffix(issue) {

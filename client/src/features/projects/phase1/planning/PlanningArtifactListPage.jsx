@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { planningAPI } from '../../../../services/api/planningAPI';
 import { useAppStrings } from '../../../../locales/appStrings';
 import { resolveApiErrorMessage } from '../../../../utils/resolveApiErrorMessage';
 import useProjectCapabilities from '../hooks/useProjectCapabilities';
-import { buildPhase1ModulePath } from '../nav/phase1NavConfig';
 import PlanningResourcePanel from './PlanningResourcePanel';
 import Modal from '../../../../components/Shared/Modal';
 import { AdminLoadErrorState } from '../../../../components/adminUsers/adminPanelStates';
@@ -54,14 +52,13 @@ const SUGGEST_FROM_RA_KINDS = new Set(['WBS', 'RISK', 'RESOURCE', 'MILESTONE', '
 const CONTENT_EDITABLE = new Set(['draft', 'rejected', 'changes_requested']);
 
 const CELL_INPUT =
-  'w-full min-w-[8rem] rounded border border-[#FFD591] bg-[#FFFBE6] px-1.5 py-1 text-[13px] text-[#262626] outline-none focus:border-[#FA8C16]';
+  'w-full min-w-[8rem] rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-[13px] text-foreground outline-none focus:border-amber-500';
 
 /**
  * Planning list — inline cell edit + view-only side detail; create via Modal.
  */
 export default function PlanningArtifactListPage({ projectId, kind, title }) {
   const { t } = useAppStrings();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { capabilities } = useProjectCapabilities(projectId);
   const [filter, setFilter] = useState('');
@@ -131,7 +128,12 @@ export default function PlanningArtifactListPage({ projectId, kind, title }) {
       const data = res?.data?.data ?? res?.data ?? res;
       const id = String(data?.id || data?._id || '');
       if (vars?._inlineAdd && id) {
-        const row = { ...data, status: 'draft', kind, title: data?.title || 'Untitled' };
+        const row = {
+          ...data,
+          status: 'draft',
+          kind,
+          title: data?.title || t('workspace.phase1ArtifactUntitled'),
+        };
         // Inline + : sửa trên bảng — không mở side panel.
         setSelected(null);
         const draft = draftFromPlanningArtifact(row);
@@ -169,7 +171,7 @@ export default function PlanningArtifactListPage({ projectId, kind, title }) {
     const key = `${String(kind || 'ROW')}-${Date.now().toString(36).toUpperCase()}`.slice(0, 64);
     createMut.mutate({
       externalKey: key,
-      title: 'Untitled',
+      title: t('workspace.phase1ArtifactUntitled'),
       summary: '',
       _inlineAdd: true,
     });
@@ -362,22 +364,12 @@ export default function PlanningArtifactListPage({ projectId, kind, title }) {
       <Phase1DataTableToolbar
         kind={kind}
         title={title}
-        subtitle={t('workspace.phase1PlanningListHint', { kind, count: rows.length })}
+        subtitle={t('workspace.phase1PlanningListHint', { count: rows.length })}
         searchValue={filter}
         onSearchChange={setFilter}
         searchPlaceholder={t('common.search')}
         extraActions={
           <>
-            {canEdit ? (
-              <button
-                type="button"
-                className="rounded-full border border-[#2563EB]/60 bg-[#EFF6FF] px-3 py-1.5 text-sm text-[#1D4ED8]"
-                onClick={() => navigate(buildPhase1ModulePath(projectId, 'planning/overview'))}
-                title={t('workspace.phase1DumpGoImportHint')}
-              >
-                {t('workspace.phase1DumpGoImport')}
-              </button>
-            ) : null}
             {showGantt ? (
               <button
                 type="button"
@@ -387,10 +379,10 @@ export default function PlanningArtifactListPage({ projectId, kind, title }) {
                 {t('workspace.phase1PlanningViewTimeline')}
               </button>
             ) : null}
-            {SUGGEST_FROM_RA_KINDS.has(String(kind || '').toUpperCase()) ? (
+            {canEdit && SUGGEST_FROM_RA_KINDS.has(String(kind || '').toUpperCase()) ? (
               <button
                 type="button"
-                className="rounded-full border border-[#D9D9D9] bg-white px-3 py-1.5 text-sm shadow-sm"
+                className="rounded-full border border-border bg-surface px-3 py-1.5 text-sm shadow-sm"
                 onClick={() => setSuggestOpen(true)}
               >
                 {t('workspace.phase1AiSuggest')}
@@ -481,7 +473,7 @@ export default function PlanningArtifactListPage({ projectId, kind, title }) {
               <tr>
                 {canEdit ? (
                   <th className={`${PHASE1_TD} w-8 px-1`}>
-                    <span className="sr-only">Select</span>
+                    <span className="sr-only">{t('workspace.phase1SelectHeader')}</span>
                   </th>
                 ) : null}
                 {listColumns.map((col) => (
@@ -507,7 +499,7 @@ export default function PlanningArtifactListPage({ projectId, kind, title }) {
                 return (
                   <tr
                     key={id}
-                    className={`${rowEditable ? PHASE1_DENSE_ROW : 'odd:bg-[#F5F7FA] even:bg-white'} ${
+                    className={`${rowEditable ? PHASE1_DENSE_ROW : 'odd:bg-surface even:bg-muted/30'} ${
                       isEditing ? PHASE1_DENSE_ROW_EDITING : isSelected ? PHASE1_DENSE_ROW_SELECTED : ''
                     }`}
                     onClick={() => selectRow(row)}
@@ -521,7 +513,9 @@ export default function PlanningArtifactListPage({ projectId, kind, title }) {
                           type="checkbox"
                           checked={checked}
                           onChange={(e) => toggleSelectId(id, e.target.checked)}
-                          aria-label={`Select ${row.externalKey || id}`}
+                          aria-label={t('workspace.phase1SelectRowWithKey', {
+                            key: row.externalKey || id,
+                          })}
                         />
                       </td>
                     ) : null}
@@ -534,7 +528,7 @@ export default function PlanningArtifactListPage({ projectId, kind, title }) {
                         <td
                           key={col.id}
                           className={`${PHASE1_TD} ${col.mono ? 'font-mono text-xs' : ''} ${
-                            isActive ? 'bg-[#FFF7E6] ring-2 ring-inset ring-[#FAAD14]' : ''
+                            isActive ? 'bg-amber-500/10 ring-2 ring-inset ring-amber-500/50' : ''
                           }`}
                           title={raw || undefined}
                           onClick={(e) => {

@@ -20,7 +20,7 @@ import {
   MessageCircle,
   Plus,
   Settings,
-  Shield,
+  Flag,
   Users,
   GanttChart,
 } from 'lucide-react';
@@ -29,11 +29,15 @@ import { useWorkspaceSuite, SUITE } from '../../context/WorkspaceSuiteContext';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { useShellLayout } from '../../context/ShellLayoutContext';
 import useCompanyAdminAccess from '../../hooks/useCompanyAdminAccess';
-import SidebarPositionFooter from './SidebarPositionFooter';
+import { useSidebarOrgIdentity } from './SidebarPositionFooter';
+import { motion } from 'motion/react';
 import NavCollapse from '../../motion/NavCollapse';
-import { VH_NAV_CHEVRON } from '../../motion/classes';
-import useMotionPresence from '../../motion/useMotionPresence';
-import { VH_MOTION_BASE_MS } from '../../motion/tokens';
+import { VH_MOTION_SPINNER, VH_NAV_CHEVRON } from '../../motion/classes';
+import MotionPresence from '../../motion/primitives/MotionPresence';
+import MotionMenu from '../../motion/primitives/MotionMenu';
+import { motionPopover } from '../../motion/overlayMotion';
+
+
 import {
   FIGMA_SIDEBAR,
   FIGMA_SIDEBAR_COLLAPSED,
@@ -77,6 +81,7 @@ import {
   loadLinkedPackForAiNav,
 } from '../../features/projects/phase1/aiHitl/loadLinkedPackForAiNav';
 import { resolveDeliveryRoleBadges } from './profileDeliveryRoleBadge';
+import ShellAccountMenu from './ShellAccountMenu';
 import useGrantScopes from '../../hooks/useGrantScopes';
 import { PROJECT_CREATE_GRANT } from '../../lib/capabilities';
 import { localizedProjectRoleShortLabel } from '../../utils/projectRoleLocale';
@@ -158,6 +163,8 @@ const MODULE_ICONS = {
   members: Users,
   activity: Activity,
   reports: BarChart3,
+  'delivery-phase': Flag,
+  deliveryPhase: Flag,
   settings: Settings,
   picker: FolderKanban,
   new: Plus,
@@ -268,19 +275,18 @@ function ProjectNavSectionGroup({
             aria-hidden
           />
         </button>
-        {flyoutOpen ? (
-          <div
-            id={listId}
-            role="menu"
-            aria-label={section.label}
-            className="absolute left-full top-0 z-40 ml-1 min-w-[12rem] rounded-lg border border-white/10 bg-[#0D0D1A] py-1 shadow-[0_12px_32px_rgba(0,0,0,0.65)] motion-safe:animate-fade-in-fast"
-          >
-            <div className="px-2.5 pb-1 pt-1.5 text-[0.55rem] font-bold uppercase tracking-wider text-white/35">
-              {section.label}
-            </div>
-            <div className="space-y-px px-1 pb-1">{children}</div>
+        <MotionMenu
+          open={flyoutOpen}
+          menuKey={`projects-rail-flyout-${listId}`}
+          id={listId}
+          aria-label={section.label}
+          className="absolute left-full top-0 z-40 ml-1 min-w-[12rem] rounded-lg border border-white/10 bg-[#0D0D1A] py-1 shadow-[0_12px_32px_rgba(0,0,0,0.65)]"
+        >
+          <div className="px-2.5 pb-1 pt-1.5 text-[0.55rem] font-bold uppercase tracking-wider text-white/35">
+            {section.label}
           </div>
-        ) : null}
+          <div className="space-y-px px-1 pb-1">{children}</div>
+        </MotionMenu>
       </div>
     );
   }
@@ -348,7 +354,7 @@ function NavItem({
       {isPending ? (
         <Loader2
           size={15}
-          className="shrink-0 animate-spin"
+          className={`shrink-0 ${VH_MOTION_SPINNER}`}
           style={{ color: suiteColor }}
           aria-hidden
         />
@@ -520,6 +526,7 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
     () => buildViewerRoleChips(viewerRoleKeys, roleCatalog, t),
     [viewerRoleKeys, roleCatalog, t]
   );
+  const { primary: orgRoleLabel, positionLabel: orgPositionLabel } = useSidebarOrgIdentity();
 
   const workspaceOrgId = String(
     activeWorkspace?._id || company?.id || company?._id || ''
@@ -778,12 +785,10 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
     });
   };
 
-  const { mounted: suitePickerMounted, phase: suitePickerPhase } = useMotionPresence(
-    showSuitePicker && !railCollapsed,
-    { durationMs: VH_MOTION_BASE_MS }
-  );
+  const suitePickerOpen = showSuitePicker && !railCollapsed;
 
   return (
+
     <>
       {mobileNavOpen ? (
         <button
@@ -857,13 +862,13 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
             )}
           </div>
 
-          {suitePickerMounted ? (
-            <div
-              className="absolute left-2 right-2 top-[calc(100%+4px)] z-[200] overflow-hidden rounded-xl border border-white/10 bg-[#0D0D1A] shadow-2xl vh-presence-overlay vh-motion-respect"
-              data-motion-phase={suitePickerPhase || 'enter'}
+          <MotionPresence open={suitePickerOpen}>
+            <motion.div
+              key="projects-suite-picker"
+              className="absolute left-2 right-2 top-[calc(100%+4px)] z-[200] overflow-hidden rounded-xl border border-white/10 bg-[#0D0D1A] shadow-2xl vh-motion-respect"
               role="menu"
+              {...motionPopover}
             >
-              <div className="vh-presence-panel px-0 py-0">
               <div className="px-2.5 pb-1 pt-2 text-[0.575rem] font-bold uppercase tracking-widest text-white/25">
                 {t('nav.chooseSpace')}
               </div>
@@ -918,9 +923,8 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
                 );
               })}
               <div className="h-1.5" />
-              </div>
-            </div>
-          ) : null}
+            </motion.div>
+          </MotionPresence>
         </div>
 
         {projectId && !railCollapsed ? (
@@ -988,54 +992,16 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
         </nav>
 
         <div className={FIGMA_SIDEBAR_FOOTER}>
-          {projectId && viewerRoleChips.length ? (
-            railCollapsed ? (
-              <div
-                className="flex flex-col items-center gap-1 py-0.5"
-                title={viewerRoleChips.map((c) => c.title || c.label).join(' · ')}
-              >
-                <Shield size={14} className="text-white/35" aria-hidden />
-                {viewerRoleChips.slice(0, 2).map((chip) => (
-                  <span
-                    key={chip.key}
-                    className={`inline-flex max-w-full truncate rounded px-1 py-0.5 text-[0.55rem] font-bold tracking-wide ${chip.className}`}
-                  >
-                    {chip.label}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <div className="px-1.5 py-1">
-                <div className="mb-1 flex items-center gap-1.5 text-[0.55rem] font-bold uppercase tracking-wider text-white/25">
-                  <Shield size={10} aria-hidden />
-                  {t('nav.yourRole')}
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {viewerRoleChips.map((chip) => (
-                    <span
-                      key={chip.key}
-                      title={chip.title}
-                      className={`inline-flex max-w-full whitespace-normal break-words rounded px-1.5 py-0.5 text-left text-[0.625rem] font-bold leading-snug tracking-wide ${chip.className}`}
-                    >
-                      {chip.label}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )
-          ) : projectId && !railCollapsed ? (
-            <div className="px-1.5 py-1">
-              <div className="mb-0.5 flex items-center gap-1.5 text-[0.55rem] font-bold uppercase tracking-wider text-white/25">
-                <Shield size={10} aria-hidden />
-                {t('nav.yourRole')}
-              </div>
-              <p className="text-[0.625rem] text-white/35">
-                {t('nav.projectRoleUnassigned')}
-              </p>
-            </div>
-          ) : !projectId ? (
-            <SidebarPositionFooter collapsed={railCollapsed} wrap={false} />
-          ) : null}
+          <ShellAccountMenu
+            variant="sidebar"
+            menuPlacement="above"
+            compact={railCollapsed}
+            roleBadges={resolveDeliveryRoleBadges(viewerRoleKeys)}
+            roleChips={projectId ? viewerRoleChips : []}
+            orgRoleLabel={!projectId ? orgRoleLabel : ''}
+            positionLabel={orgPositionLabel}
+            className={railCollapsed ? 'flex justify-center' : ''}
+          />
         </div>
       </div>
     </>

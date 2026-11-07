@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { motion } from 'motion/react';
 import { Pencil, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ConfirmDialog } from '../../../components/Shared';
@@ -6,8 +7,15 @@ import { useAppStrings } from '../../../locales/appStrings';
 import { projectAPI } from '../../../services/api/projectAPI';
 import { resolveApiErrorMessage } from '../../../utils/resolveApiErrorMessage';
 import EntityApprovalTimeline from '../../../features/approvals/EntityApprovalTimeline';
+import MotionPresence from '../../../motion/primitives/MotionPresence';
+import TabPanelMotion from '../../../motion/primitives/TabPanelMotion';
+import { motionBackdrop, motionDrawerRight } from '../../../motion/overlayMotion';
+import useOverlayScrollLock from '../../../motion/useOverlayScrollLock';
+import { VH_MOTION_BTN } from '../../../motion/classes';
+
 import { formatHubDateTime, unwrapChangeRequestEntity, displayIssueKey, resolveHubActor, isLinkableCrWorkType, collectCrWorkItems, mergeChangeRequestPatch } from './projectHubUtils';
 import { listAllowedCrStatusTransitions, labelCrWorkStatus } from './projectHubCrWorkflow';
+
 
 const CR_DETAIL_TABS = [
   { id: 'overview', labelKey: 'workspace.projectHubCrTabOverview' },
@@ -83,7 +91,9 @@ export default function ProjectHubChangeRequestDetailDrawer({
   initialTab = 'overview',
 }) {
   const { t } = useAppStrings();
+  const { release, locked } = useOverlayScrollLock(Boolean(open));
   const [row, setRow] = useState(null);
+
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [tab, setTab] = useState('overview');
@@ -177,9 +187,10 @@ export default function ProjectHubChangeRequestDetailDrawer({
     [boardCards, linkedIds]
   );
 
-  if (!open) return null;
+  if (!open && !locked) return null;
 
   const labelOrRaw = (prefix, value) => {
+
     if (!value) return '';
     const key = `${prefix}_${value}`;
     const label = t(key);
@@ -614,97 +625,109 @@ export default function ProjectHubChangeRequestDetailDrawer({
 
   return (
     <>
-      <button
-        type="button"
-        className="fixed inset-0 z-40 bg-black/40"
-        aria-label={t('workspace.projectHubCrDetailClose')}
-        onClick={() => {
-          if (confirmDelete) return;
-          onClose?.();
-        }}
-      />
-      <aside
-        className="fixed inset-y-0 right-0 z-50 flex h-full w-full max-w-lg flex-col border-l border-border bg-surface shadow-lg"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="project-hub-cr-detail-title"
-      >
-        <header className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {t('workspace.projectHubCrDetailTitle')}
-            </p>
-            <h3 id="project-hub-cr-detail-title" className="truncate text-sm font-bold text-foreground">
-              {row?.code || t('workspace.projectHubCrDetailTitle')}
-            </h3>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {canUpdate && row && !loading && !loadError ? (
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground hover:bg-muted"
-                onClick={() => onEdit?.(row)}
-              >
-                <Pencil size={12} aria-hidden />
-                {t('workspace.projectHubCrEdit')}
-              </button>
-            ) : null}
-            {canDelete && row && !loading && !loadError ? (
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 rounded-md border border-destructive/40 px-2 py-1 text-xs font-semibold text-destructive hover:bg-destructive/10"
-                disabled={deleting}
-                onClick={() => setConfirmDelete(true)}
-              >
-                <Trash2 size={12} aria-hidden />
-                {t('workspace.projectHubCrDelete')}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label={t('workspace.projectHubCrDetailClose')}
-              onClick={() => {
-                if (confirmDelete) return;
-                onClose?.();
-              }}
-            >
-              <X size={16} aria-hidden />
-            </button>
-          </div>
-        </header>
-
-        <div
-          className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-4 py-2"
-          role="tablist"
-          aria-label={t('workspace.projectHubCrDetailTitle')}
+      <MotionPresence open={open} onExitComplete={release}>
+        <motion.div
+          key="project-hub-cr-detail-drawer"
+          className="fixed inset-0 z-40 vh-motion-respect"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
         >
-          {CR_DETAIL_TABS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === item.id}
-              onClick={() => setTab(item.id)}
-              className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold ${
-                tab === item.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-              }`}
-            >
-              {t(item.labelKey)}
-            </button>
-          ))}
-        </div>
+          <motion.button
+            type="button"
+            className="absolute inset-0 bg-black/40"
+            aria-label={t('workspace.projectHubCrDetailClose')}
+            onClick={() => {
+              if (confirmDelete) return;
+              onClose?.();
+            }}
+            {...motionBackdrop}
+          />
+          <motion.aside
+            className="absolute inset-y-0 right-0 z-50 flex h-full w-full max-w-lg flex-col border-l border-border bg-surface shadow-lg"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-hub-cr-detail-title"
+            {...motionDrawerRight}
+          >
+            <header className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t('workspace.projectHubCrDetailTitle')}
+                </p>
+                <h3 id="project-hub-cr-detail-title" className="truncate text-sm font-bold text-foreground">
+                  {row?.code || t('workspace.projectHubCrDetailTitle')}
+                </h3>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                {canUpdate && row && !loading && !loadError ? (
+                  <button
+                    type="button"
+                    className={`inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground hover:bg-muted ${VH_MOTION_BTN}`}
+                    onClick={() => onEdit?.(row)}
+                  >
+                    <Pencil size={12} aria-hidden />
+                    {t('workspace.projectHubCrEdit')}
+                  </button>
+                ) : null}
+                {canDelete && row && !loading && !loadError ? (
+                  <button
+                    type="button"
+                    className={`inline-flex items-center gap-1 rounded-md border border-destructive/40 px-2 py-1 text-xs font-semibold text-destructive hover:bg-destructive/10 ${VH_MOTION_BTN}`}
+                    disabled={deleting}
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    <Trash2 size={12} aria-hidden />
+                    {t('workspace.projectHubCrDelete')}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className={`rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground ${VH_MOTION_BTN}`}
+                  aria-label={t('workspace.projectHubCrDetailClose')}
+                  onClick={() => {
+                    if (confirmDelete) return;
+                    onClose?.();
+                  }}
+                >
+                  <X size={16} aria-hidden />
+                </button>
+              </div>
+            </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          {loading ? (
-            <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
-          ) : loadError ? (
-            <p className="text-sm text-muted-foreground">{t('workspace.projectHubCrLoadFail')}</p>
-          ) : (
-            renderTabBody()
-          )}
-        </div>
-      </aside>
+            <div
+              className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-4 py-2"
+              role="tablist"
+              aria-label={t('workspace.projectHubCrDetailTitle')}
+            >
+              {CR_DETAIL_TABS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === item.id}
+                  onClick={() => setTab(item.id)}
+                  className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold ${VH_MOTION_BTN} ${
+                    tab === item.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                  }`}
+                >
+                  {t(item.labelKey)}
+                </button>
+              ))}
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+              {loading ? (
+                <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+              ) : loadError ? (
+                <p className="text-sm text-muted-foreground">{t('workspace.projectHubCrLoadFail')}</p>
+              ) : (
+                <TabPanelMotion activeKey={tab}>{renderTabBody()}</TabPanelMotion>
+              )}
+            </div>
+          </motion.aside>
+        </motion.div>
+      </MotionPresence>
       <ConfirmDialog
         isOpen={confirmDelete}
         onClose={() => {

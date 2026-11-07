@@ -19,35 +19,71 @@ export function isAuthRefreshDisabled() {
   return disabled;
 }
 
-async function callRefreshEndpoint() {
+/** 429 trên refresh — giữ session, không coi như logout. */
+export function isAuthRefreshRateLimited(error) {
+  return Boolean(error?.isAuthRateLimited) || Number(error?.response?.status) === 429;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveRetryAfterMs(error) {
+  const raw = error?.response?.headers?.['retry-after'];
+  const sec = Number(raw);
+  if (Number.isFinite(sec) && sec > 0) return Math.min(sec * 1000, 10_000);
+  return 2000;
+}
+
+async function postRefreshOnce() {
   const API_URL = resolveApiBaseUrl();
-  try {
-    const res = await axios.post(
-      `${API_URL}/auth/refresh-token`,
-      {},
-      {
-        withCredentials: true,
-        headers: {
-          'Content-Type': 'application/json',
-          // Header required by CSRF guard in refresh/logout flows.
-          'X-Atrium-Client': '1',
-        },
-        timeout: 30000,
-      }
-    );
-
-    const envelope = res.data;
-    const body = envelope?.data !== undefined ? envelope.data : envelope;
-    const accessToken = body?.accessToken || body?.token;
-    if (!accessToken) {
-      throw new Error('INVALID_REFRESH_RESPONSE');
+  const res = await axios.post(
+    `${API_URL}/auth/refresh-token`,
+    {},
+    {
+      withCredentials: true,
+      headers: {
+        'Content-Type': 'application/json',
+        // Header required by CSRF guard in refresh/logout flows.
+        'X-Atrium-Client': '1',
+      },
+      timeout: 30000,
     }
+  );
 
-    setToken(accessToken);
-    return accessToken;
+  const envelope = res.data;
+  const body = envelope?.data !== undefined ? envelope.data : envelope;
+  const accessToken = body?.accessToken || body?.token;
+  if (!accessToken) {
+    throw new Error('INVALID_REFRESH_RESPONSE');
+  }
+
+  setToken(accessToken);
+  return accessToken;
+}
+
+async function callRefreshEndpoint() {
+  try {
+    return await postRefreshOnce();
   } catch (error) {
-    if (Number(error?.response?.status) === 401) {
+    const status = Number(error?.response?.status);
+    if (status === 401) {
       clearSessionMarkerCookie();
+      throw error;
+    }
+    if (status === 429) {
+      await sleep(resolveRetryAfterMs(error));
+      try {
+        return await postRefreshOnce();
+      } catch (retryErr) {
+        if (Number(retryErr?.response?.status) === 401) {
+          clearSessionMarkerCookie();
+        }
+        if (Number(retryErr?.response?.status) === 429) {
+          retryErr.isAuthRateLimited = true;
+        }
+        throw retryErr;
+      }
     }
     throw error;
   }

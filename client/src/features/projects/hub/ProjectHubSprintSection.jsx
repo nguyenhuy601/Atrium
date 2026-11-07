@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import { useDroppable } from '@dnd-kit/core';
 import { ChevronDown, ChevronRight, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import MotionPresence from '../../../motion/primitives/MotionPresence';
+import { motionPopover } from '../../../motion/overlayMotion';
+import { VH_MOTION_BTN, VH_MOTION_ROW } from '../../../motion/classes';
 import ProjectHubInlineCreateBar from './ProjectHubInlineCreateBar';
 import { assertCanStartSprint, countIssuesByStatusBucket, defaultSprintDateRange } from './projectHubUtils';
 
@@ -153,21 +157,27 @@ export default function ProjectHubSprintSection({
               <button
                 type="button"
                 onClick={() => setMenuOpen((v) => !v)}
-                className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                className={`rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground ${VH_MOTION_BTN}`}
+                aria-expanded={menuOpen}
+                aria-haspopup="menu"
                 aria-label={t('workspace.projectHubBacklogSprintMenuAria')}
               >
                 <MoreHorizontal size={16} />
               </button>
-              {menuOpen ? (
-                <div
+              <MotionPresence open={menuOpen}>
+                <motion.div
+                  key="sprint-more-menu"
+                  role="menu"
                   className={`absolute right-0 z-[80] mt-1 min-w-[180px] rounded-lg border border-border py-1 shadow-xl ${
                     isDarkMode ? 'bg-background' : 'bg-surface'
                   }`}
+                  {...motionPopover}
                 >
                   {canManageSprints ? (
                     <button
                       type="button"
-                      className="w-full px-3 py-2 text-left text-sm hover:bg-muted"
+                      role="menuitem"
+                      className={`w-full px-3 py-2 text-left text-sm ${VH_MOTION_ROW}`}
                       onClick={() => {
                         setMenuOpen(false);
                         onEdit?.();
@@ -179,7 +189,8 @@ export default function ProjectHubSprintSection({
                   {canRemovePlannedSprint ? (
                     <button
                       type="button"
-                      className="w-full px-3 py-2 text-left text-sm text-destructive hover:bg-muted"
+                      role="menuitem"
+                      className={`w-full px-3 py-2 text-left text-sm text-destructive ${VH_MOTION_ROW}`}
                       onClick={() => {
                         setMenuOpen(false);
                         onDeleteSprint?.();
@@ -188,8 +199,8 @@ export default function ProjectHubSprintSection({
                       {t('workspace.projectHubBacklogDeleteSprint')}
                     </button>
                   ) : null}
-                </div>
-              ) : null}
+                </motion.div>
+              </MotionPresence>
             </div>
           ) : null}
         </div>

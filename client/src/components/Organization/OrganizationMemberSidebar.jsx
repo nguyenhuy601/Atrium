@@ -24,6 +24,7 @@ import { RBAC_GRANT, parseUserPermissionsPayload } from '../../config/rbacUiGran
 import useCompanyAdminAccess from '../../hooks/useCompanyAdminAccess';
 import { useTheme } from '../../context/ThemeContext';
 import { shellNavRailBackdrop, shellNavRailMenuBackdropZ } from '../../theme/shellTheme';
+import { VH_PRESENCE_POPOVER } from '../../motion/classes';
 import OrgWorkspaceSearchSidebar from '../../features/search/components/OrgWorkspaceSearchSidebar';
 import OrgMemberSidebarAttachments from '../../features/orgAttachments/OrgMemberSidebarAttachments';
 import UserAvatar from '../Shared/UserAvatar';
@@ -1042,7 +1043,7 @@ function OrganizationMemberSidebar({
         />
         <div
           ref={menuPanelRef}
-          className={`fixed z-[9998] rounded-xl border border-border bg-card py-1.5 text-sm text-foreground shadow-2xl motion-safe:animate-fade-in-fast ${
+          className={`fixed z-[9998] rounded-xl border border-border bg-card py-1.5 text-sm text-foreground shadow-2xl ${VH_PRESENCE_POPOVER} ${
             menu.menuMaxHeight != null ? 'overflow-y-auto scrollbar-overlay' : 'overflow-hidden'
           }`}
           style={{
@@ -1203,7 +1204,7 @@ function OrganizationMemberSidebar({
             role="menu"
             aria-label={t('organizations.memberRoleOf', { name: rolesSubmenu.member.displayName })}
             onKeyDown={handleContextMenuKeyDown}
-            className="fixed z-[9999] w-[250px] overflow-hidden rounded-xl border border-border bg-card py-1.5 text-sm text-foreground shadow-2xl motion-safe:animate-fade-in-fast"
+            className={`fixed z-[9999] w-[250px] overflow-hidden rounded-xl border border-border bg-card py-1.5 text-sm text-foreground shadow-2xl ${VH_PRESENCE_POPOVER}`}
             style={{ left: rolesSubmenu.x, top: rolesSubmenu.y, maxHeight: 'min(70vh, 360px)' }}
           >
             <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1260,7 +1261,7 @@ function OrganizationMemberSidebar({
         ref={memberCardRef}
         role="dialog"
         aria-label={memberCard.member.displayName}
-        className="fixed z-[9999] w-[min(340px,calc(100vw-16px))] overflow-hidden rounded-2xl border border-border bg-card text-foreground shadow-2xl motion-safe:animate-fade-in-fast"
+        className={`fixed z-[9999] w-[min(340px,calc(100vw-16px))] overflow-hidden rounded-2xl border border-border bg-card text-foreground shadow-2xl ${VH_PRESENCE_POPOVER}`}
         style={{ left: memberCard.x, top: memberCard.y }}
       >
         <div className="h-16 bg-muted" />

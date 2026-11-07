@@ -45,6 +45,11 @@ export const dmMessageService = {
     return api.get('/messages', { params: { unreadByPeer: 1 } });
   },
 
+  /** GET /messages?lastByPeer=1 — tin DM mới nhất theo từng peer (rail snippet). */
+  getLastByPeer() {
+    return api.get('/messages', { params: { lastByPeer: 1, fields: 'summary' } });
+  },
+
   addReaction(messageId, emoji) {
     return api.post(`/messages/${messageId}/reactions`, { emoji });
   },

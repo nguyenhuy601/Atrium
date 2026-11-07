@@ -974,7 +974,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
       goMonitorTab();
       await refresh();
     } catch (err) {
-      toast.error(resolveApiErrorMessage(err, { fallback: 'Data Gate pass failed' }));
+      toast.error(resolveApiErrorMessage(err, { fallback: t('requirements.phase1DataGatePassFail') }));
     } finally {
       setBusy(false);
     }
@@ -991,7 +991,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
       toast.success(t('requirements.phase1DataGateRejectToast'));
       await refresh();
     } catch (err) {
-      toast.error(resolveApiErrorMessage(err, { fallback: 'Data Gate reject failed' }));
+      toast.error(resolveApiErrorMessage(err, { fallback: t('requirements.phase1DataGateRejectFail') }));
     } finally {
       setBusy(false);
     }
@@ -1043,7 +1043,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
       clearGate1DecisionsForReseed();
       await refresh();
     } catch (err) {
-      toast.error(resolveApiErrorMessage(err, { fallback: 'Submit Gate 1 failed' }));
+      toast.error(resolveApiErrorMessage(err, { fallback: t('requirements.phase1Gate1SubmitFail') }));
     } finally {
       setBusy(false);
       setGateActionLabel('');
@@ -1105,7 +1105,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
       });
     } catch (err) {
       toast.error(
-        formatGate1ApproveError(err, { t, fallback: 'Approve Gate 1 failed' }) ||
+        formatGate1ApproveError(err, { t, fallback: t('requirements.phase1Gate1ApproveFail') }) ||
           resolveApiErrorMessage(err)
       );
     } finally {

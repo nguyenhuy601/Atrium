@@ -9,7 +9,7 @@ import Modal from '../../../../components/Shared/Modal';
 import { planningAPI } from '../../../../services/api/planningAPI';
 import { useAppStrings } from '../../../../locales/appStrings';
 import { resolveApiErrorMessage } from '../../../../utils/resolveApiErrorMessage';
-import { kindChipClass } from '../shared/phase1UiTokens';
+import { formatPhase1KindLabel, kindChipClass } from '../shared/phase1UiTokens';
 
 function unwrap(res) {
   return res?.data?.data ?? res?.data ?? res;
@@ -150,12 +150,9 @@ export default function PlanningSuggestFromRaModal({
     >
       <div className="flex max-h-[min(70vh,32rem)] flex-col gap-3">
         <p className="text-xs text-muted-foreground">{t('workspace.phase1AiSuggestModalHint')}</p>
-        <p className="rounded-lg border border-primary/20 bg-primary/5 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-          {t('workspace.phase1AiSuggestWorkbookHint')}
-        </p>
 
         <div className="flex flex-wrap items-center gap-2">
-          <span className={kindChipClass(kind)}>{kind}</span>
+          <span className={kindChipClass(kind)}>{formatPhase1KindLabel(kind, t)}</span>
           <button
             type="button"
             className="ml-auto rounded border border-border px-2 py-1 text-xs"
@@ -204,7 +201,7 @@ export default function PlanningSuggestFromRaModal({
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-1.5">
                         <span className={kindChipClass(s.kind || kind)}>
-                          {s.kind || kind}
+                          {formatPhase1KindLabel(s.kind || kind, t)}
                         </span>
                         <span className="font-mono text-[11px] text-primary">{s.externalKey}</span>
                       </span>

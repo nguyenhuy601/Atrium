@@ -7,6 +7,7 @@ import {
 } from '../../utils/orgChannelScope';
 import { channelUnreadCount } from './organizationStructureTheme';
 import { FIGMA_ORG_STRUCTURE_SCROLL } from './figmaOrganizationClasses';
+import { VH_MOTION_ROW } from '../../motion/classes';
 
 function kindIcon(kind) {
   const k = String(kind || '');
@@ -79,7 +80,7 @@ export default function ProjectChatProjectsSidebar({
               <button
                 type="button"
                 onClick={() => toggleProject(pid)}
-                className={`flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-left text-xs font-semibold ${textActive} ${rowHover}`}
+                className={`flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-left text-xs font-semibold ${textActive} ${rowHover} ${VH_MOTION_ROW}`}
               >
                 {expanded ? (
                   <ChevronDown size={14} className="shrink-0 opacity-70" aria-hidden />
@@ -102,7 +103,7 @@ export default function ProjectChatProjectsSidebar({
                         key={cid}
                         type="button"
                         onClick={() => onSelectChannel?.(cid)}
-                        className={`group relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
+                        className={`group relative flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${VH_MOTION_ROW} ${
                           selected ? rowActive : `${textMuted} ${rowHover}`
                         }`}
                         title={

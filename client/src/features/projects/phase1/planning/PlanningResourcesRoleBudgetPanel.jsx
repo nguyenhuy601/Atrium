@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Link } from 'react-router-dom';
 import { projectAPI } from '../../../../services/api/projectAPI';
 import { useAppStrings } from '../../../../locales/appStrings';
 import { resolveApiErrorMessage } from '../../../../utils/resolveApiErrorMessage';
+import { deliveryPhaseLabelKey } from '../../../../utils/projectPhaseNav';
+import { localizedProjectRoleShortLabel } from '../../../../utils/projectRoleLocale';
 import useProjectCapabilities from '../hooks/useProjectCapabilities';
-import { buildPhase1ModulePath } from '../nav/phase1NavConfig';
+import { formatPhase1StatusLabel } from '../shared/phase1UiTokens';
 
 function unwrap(res) {
   return res?.data?.data ?? res?.data ?? res;
@@ -90,24 +91,7 @@ export default function PlanningResourcesRoleBudgetPanel({ projectId }) {
 
   return (
     <div className="space-y-3">
-      <div className="space-y-1">
-        <p className="text-sm text-muted-foreground">{t('workspace.phase1BudgetIntro')}</p>
-        <p className="text-[11px] text-muted-foreground">{t('workspace.phase1BudgetPlannedNote')}</p>
-        <div className="flex flex-wrap gap-2 text-[11px]">
-          <Link
-            className="text-primary underline-offset-2 hover:underline"
-            to={buildPhase1ModulePath(projectId, 'planning/resources/capacity')}
-          >
-            {t('workspace.phaseNavPlanningResourcesCapacity')}
-          </Link>
-          <Link
-            className="text-primary underline-offset-2 hover:underline"
-            to={buildPhase1ModulePath(projectId, 'planning/resources/effort')}
-          >
-            {t('workspace.phaseNavPlanningResourcesEffort')}
-          </Link>
-        </div>
-      </div>
+      <p className="text-[11px] text-muted-foreground">{t('workspace.phase1BudgetPlannedNote')}</p>
 
       {budgetsQ.isLoading ? (
         <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
@@ -130,10 +114,13 @@ export default function PlanningResourcesRoleBudgetPanel({ projectId }) {
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <p className="text-sm font-medium">
-                      {row.roleKey} · {row.deliveryPhase}
+                      {localizedProjectRoleShortLabel(row.roleKey, '', t)}
+                      {' · '}
+                      {t(deliveryPhaseLabelKey(row.deliveryPhase))}
                     </p>
                     <p className="text-[11px] text-muted-foreground">
-                      {row.activityLabel || '—'} · v{row.baselineVersion} · {row.status}
+                      {row.activityLabel || '—'} · v{row.baselineVersion} ·{' '}
+                      {formatPhase1StatusLabel(row.status, t)}
                     </p>
                     <p className="text-[11px] text-muted-foreground">
                       {t('workspace.phase1BudgetResidual')}:{' '}
@@ -207,8 +194,8 @@ export default function PlanningResourcesRoleBudgetPanel({ projectId }) {
                           }))
                         }
                       >
-                        <option value="task">task</option>
-                        <option value="meeting">meeting</option>
+                        <option value="task">{t('workspace.phase1BudgetAllocTask')}</option>
+                        <option value="meeting">{t('workspace.phase1BudgetAllocMeeting')}</option>
                       </select>
                     </label>
                     <label className="text-[10px] text-muted-foreground">

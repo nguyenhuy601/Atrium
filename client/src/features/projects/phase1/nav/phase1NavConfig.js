@@ -166,6 +166,13 @@ export const PHASE1_COLLAB_MODULES = Object.freeze([
   { key: 'calendar', module: 'calendar', labelKey: 'nav.calendar', pathSeg: 'calendar', group: 'collab' },
   { key: 'documents', module: 'documents', labelKey: 'nav.documents', pathSeg: 'documents', group: 'collab' },
   { key: 'members', module: 'members', labelKey: 'workspace.projectHubTabMembers', pathSeg: 'members', group: 'ops' },
+  {
+    key: 'deliveryPhase',
+    module: 'delivery-phase',
+    labelKey: 'workspace.phaseNavDeliveryPhase',
+    pathSeg: 'delivery-phase',
+    group: 'ops',
+  },
   { key: 'settings', module: 'settings', labelKey: 'workspace.projectHubTabSettings', pathSeg: 'settings', group: 'ops' },
 ]);
 

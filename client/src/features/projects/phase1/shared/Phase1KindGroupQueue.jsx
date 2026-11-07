@@ -3,7 +3,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useAppStrings } from '../../../../locales/appStrings';
-import { kindChipClass } from './phase1UiTokens';
+import { formatPhase1KindLabel, kindChipClass } from './phase1UiTokens';
 
 const PLANNING_KIND_ORDER = Object.freeze([
   'WBS',
@@ -48,9 +48,12 @@ function KindGroupCard({ kind, items, defaultOpen = false, renderItem }) {
         aria-expanded={open}
       >
         <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <span className={kindChipClass(kind)}>{kind}</span>
+          <span className={kindChipClass(kind)}>{formatPhase1KindLabel(kind, t)}</span>
           <span className="text-xs font-medium text-foreground">
-            {t('workspace.phase1QueueKindGroup', { kind, count: items.length })}
+            {t('workspace.phase1QueueKindGroup', {
+              kind: formatPhase1KindLabel(kind, t),
+              count: items.length,
+            })}
           </span>
         </span>
         <span className="shrink-0 text-xs text-muted-foreground" aria-hidden>

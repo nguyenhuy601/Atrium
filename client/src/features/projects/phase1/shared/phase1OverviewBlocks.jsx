@@ -3,7 +3,8 @@
  */
 import { useMemo, useState } from 'react';
 import { buildPhase1ModulePath } from '../nav/phase1NavConfig';
-import { kindChipClass } from './phase1UiTokens';
+import { formatPhase1KindLabel, kindChipClass } from './phase1UiTokens';
+import { useAppStrings } from '../../../../locales/appStrings';
 
 export const PHASE1_OVERVIEW_CARD =
   'relative z-0 w-full shrink-0 rounded-xl border border-border bg-surface shadow-sm';
@@ -74,8 +75,10 @@ export function Phase1KindNavChip({
   locked = false,
   lockedHint = '',
 }) {
+  const { t } = useAppStrings();
   const moduleSeg = resolvePath(kind);
   const isLocked = Boolean(locked) || !moduleSeg;
+  const kindLabel = formatPhase1KindLabel(kind, t);
   return (
     <button
       type="button"
@@ -84,7 +87,7 @@ export function Phase1KindNavChip({
         locked && lockedHint
           ? lockedHint
           : moduleSeg
-            ? `${kind}: ${count ?? 0}`
+            ? `${kindLabel}: ${count ?? 0}`
             : undefined
       }
       className={`${kindChipClass(kind)} transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 ${
@@ -95,7 +98,7 @@ export function Phase1KindNavChip({
         navigate(buildPhase1ModulePath(projectId, moduleSeg, { organizationId }));
       }}
     >
-      {kind}
+      {kindLabel}
       <span className="opacity-80">{count ?? 0}</span>
     </button>
   );

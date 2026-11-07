@@ -422,7 +422,14 @@ html.dark {
   }
 
   .vh-presence-popover {
-    animation: vh-fade-in var(--vh-motion-base) var(--vh-motion-ease-out) forwards;
+    transform-origin: top center;
+    animation: vh-popover-in var(--vh-motion-slow) var(--vh-motion-ease-out) forwards;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .vh-presence-popover {
+      animation: vh-fade-in-fast var(--vh-motion-fast) linear forwards;
+    }
   }
 
   /* Suite sidebar submenu / accordion */
@@ -460,13 +467,16 @@ html.dark {
     border-radius: var(--radius-sm);
   }
 
-  .vh-input-focus {
+  .vh-input-focus,
+  .vh-motion-field {
     transition:
       border-color var(--vh-motion-base) var(--vh-motion-ease),
-      box-shadow var(--vh-motion-base) var(--vh-motion-ease);
+      box-shadow var(--vh-motion-base) var(--vh-motion-ease),
+      background-color var(--vh-motion-base) var(--vh-motion-ease);
   }
 
-  .vh-input-focus:focus {
+  .vh-input-focus:focus,
+  .vh-motion-field:focus {
     border-color: var(--primary);
     box-shadow: 0 0 0 3px var(--ring);
   }
@@ -574,6 +584,29 @@ html.dark {
   }
   to {
     opacity: 1;
+  }
+}
+
+/* Dropdown / popover CSS-only — đồng bộ motionPopover (opacity + y + scale) */
+@keyframes vh-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes vh-popover-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
   }
 }
 

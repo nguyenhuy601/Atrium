@@ -1203,6 +1203,7 @@ class MessageController {
         includeReadCursors,
         lastReadMessageId,
         unreadByPeer,
+        lastByPeer,
         search,
       } = q;
       const searchQ = q.q;
@@ -1213,6 +1214,14 @@ class MessageController {
         }
         const byPeer = await messageService.countUnreadByPeer(userId);
         return res.json({ success: true, data: { byPeer } });
+      }
+
+      if (String(lastByPeer || '') === '1') {
+        if (!userId) {
+          return chatUnauthorized(res);
+        }
+        const result = await messageService.listLastDmByPeer(userId);
+        return res.json({ success: true, data: result });
       }
 
       if (

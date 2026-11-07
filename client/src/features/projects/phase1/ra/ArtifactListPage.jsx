@@ -60,7 +60,7 @@ function unwrap(res) {
 }
 
 const CELL_INPUT =
-  'w-full min-w-[8rem] rounded border border-[#FFD591] bg-[#FFFBE6] px-1.5 py-1 text-[13px] text-[#262626] outline-none focus:border-[#FA8C16] focus:ring-1 focus:ring-[#FA8C16]';
+  'w-full min-w-[8rem] rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-[13px] text-foreground outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500';
 
 /**
  * RA artifact table — inline cell edit + view-only side detail; create via Modal.
@@ -276,7 +276,12 @@ export default function ArtifactListPage({
         setSelectedId(null);
         clearArtifactQuery();
         const form = buildArtifactFormState(
-          { ...data, status: 'draft', kind, title: data?.title || 'Untitled' },
+          {
+            ...data,
+            status: 'draft',
+            kind,
+            title: data?.title || t('workspace.phase1ArtifactUntitled'),
+          },
           kind
         );
         setInlineForm(form);
@@ -315,7 +320,7 @@ export default function ArtifactListPage({
     const key = `${String(kind || 'ROW')}-${Date.now().toString(36).toUpperCase()}`.slice(0, 64);
     createMut.mutate({
       externalKey: key,
-      title: 'Untitled',
+      title: t('workspace.phase1ArtifactUntitled'),
       summary: '',
       _inlineAdd: true,
     });
@@ -626,7 +631,7 @@ export default function ArtifactListPage({
               <tr>
                 {canEdit ? (
                   <th className={`${PHASE1_TD} w-8 px-1`}>
-                    <span className="sr-only">Select</span>
+                    <span className="sr-only">{t('workspace.phase1SelectHeader')}</span>
                   </th>
                 ) : null}
                 {columns.map((col) => (
@@ -670,7 +675,9 @@ export default function ArtifactListPage({
                           type="checkbox"
                           checked={checked}
                           onChange={(e) => toggleSelectId(id, e.target.checked)}
-                          aria-label={`Select ${row.externalKey || id}`}
+                          aria-label={t('workspace.phase1SelectRowWithKey', {
+                            key: row.externalKey || id,
+                          })}
                         />
                       </td>
                     ) : null}
@@ -685,9 +692,9 @@ export default function ArtifactListPage({
                           key={col.id}
                           className={`${isIdCol ? PHASE1_TD_STICKY : PHASE1_TD} max-w-[16rem] ${
                             isActive
-                              ? 'bg-[#FFF7E6] ring-2 ring-inset ring-[#FAAD14]'
+                              ? 'bg-amber-500/10 ring-2 ring-inset ring-amber-500/50'
                               : isEditing && isIdCol
-                                ? 'bg-[#FFF7E6]'
+                                ? 'bg-amber-500/10'
                                 : isSelected && isIdCol
                                   ? 'bg-primary/10'
                                   : ''
@@ -904,7 +911,7 @@ export default function ArtifactListPage({
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
-              className="rounded-full border border-[#D9D9D9] bg-white px-4 py-1.5 text-sm"
+              className="rounded-full border border-border bg-surface px-4 py-1.5 text-sm"
               onClick={() => {
                 setCreateOpen(false);
                 setCreating(false);
@@ -914,7 +921,7 @@ export default function ArtifactListPage({
             </button>
             <button
               type="button"
-              className="rounded-full bg-[#1677FF] px-4 py-1.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+              className="rounded-full bg-primary px-4 py-1.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
               disabled={
                 !createDraft.externalKey.trim() ||
                 !createDraft.title.trim() ||

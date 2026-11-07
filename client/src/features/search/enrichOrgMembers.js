@@ -17,13 +17,23 @@ function unwrapProfile(res) {
   return u?.data ?? u;
 }
 
+function membershipHasEmbeddedContact(m) {
+  if (!m || typeof m !== 'object') return false;
+  const name = String(m.displayName || m.fullName || '').trim();
+  const email = String(m.email || '').trim();
+  const avatar = m.avatar != null && String(m.avatar).trim() !== '';
+  const username = String(m.username || '').trim();
+  return Boolean(name || email || avatar || username);
+}
+
 /**
- * Membership (org API, user = ObjectId) → hàng có displayName / email / avatar.
- * Dùng chung People admin, ACL, sidebar, search.
+ * Membership (org API) → hàng có displayName / email / avatar.
+ * Org members/with-roles đã batch profile phía BE — không gọi N× GET /users/:id khi đã có contact.
  */
 export async function enrichMembershipsWithProfiles(members, options = {}) {
   const fallback = String(options.fallback || '—');
   const limit = Number.isFinite(options.limit) ? options.limit : Infinity;
+  const forceFetch = Boolean(options.forceFetchProfiles);
   const list = Array.isArray(members) ? members : [];
   const slice = Number.isFinite(limit) ? list.slice(0, Math.max(0, limit)) : list;
 
@@ -31,7 +41,8 @@ export async function enrichMembershipsWithProfiles(members, options = {}) {
     slice.map(async (m) => {
       const uid = memberUserId(m);
       let profile = null;
-      if (uid) {
+      const canSkipFetch = !forceFetch && membershipHasEmbeddedContact(m);
+      if (uid && !canSkipFetch) {
         try {
           profile = unwrapProfile(await userService.getProfile(uid));
         } catch {
@@ -81,12 +92,27 @@ export async function enrichMembershipsForSearch(members) {
 
 /**
  * Batch profile theo danh sách userId (ACL access rows, v.v.).
+ * Chỉ fetch khi chưa có tên trong options.seedByUserId.
  */
 export async function enrichUserIdsWithProfiles(userIds, options = {}) {
   const fallback = String(options.fallback || '—');
+  const seed =
+    options.seedByUserId && typeof options.seedByUserId === 'object'
+      ? options.seedByUserId
+      : {};
   const ids = [...new Set((userIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
   const entries = await Promise.all(
     ids.map(async (uid) => {
+      const seeded = seed[uid];
+      if (seeded && (seeded.displayName || seeded.email)) {
+        return [
+          uid,
+          {
+            displayName: String(seeded.displayName || uid.slice(-6) || fallback),
+            email: String(seeded.email || '').trim(),
+          },
+        ];
+      }
       let displayName = uid.slice(-6) || fallback;
       let email = '';
       try {
@@ -96,7 +122,6 @@ export async function enrichUserIdsWithProfiles(userIds, options = {}) {
           profile?.fullName ||
           profile?.username ||
           displayName;
-        // Peer profiles omit email; leave empty unless self/admin returned it.
         email = String(profile?.email || '').trim();
       } catch {
         /* */

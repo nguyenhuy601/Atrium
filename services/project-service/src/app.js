@@ -43,12 +43,12 @@ app.use('/api/workspaces/:workspaceSlug/task-boards', workspaceTaskBoardRoutes);
 const taskRoutes = require('./routes/task.routes');
 app.use('/api/tasks', taskRoutes);
 
-// 404
+// 404 — generic resource (không dùng TASK_NOT_FOUND để tránh toast «Không tìm thấy task.»)
 app.use((req, res) => {
   const { sendServiceError } = require('./middleware/sendServiceError');
   sendServiceError(res, 404, {
-    errorCode: 'TASK_NOT_FOUND',
-    messageUser: 'Không tìm thấy tài nguyên.',
+    errorCode: 'RESOURCE_NOT_FOUND',
+    messageUser: 'Không tìm thấy dữ liệu.',
     message: 'Not found',
   });
 });

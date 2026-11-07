@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DndContext,
   PointerSensor,
@@ -7,6 +7,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
@@ -34,14 +35,23 @@ import ProjectHubListRow, { LIST_TABLE_COLUMNS } from './ProjectHubListRow';
 import ResizableTableHeader from './ResizableTableHeader';
 import { useResizableTableColumns } from './useResizableTableColumns';
 import { childWorkStats } from './projectHubBacklogStats';
+import QueryStateView from '../../../components/Shared/QueryStateView';
+import { VH_MOTION_BTN } from '../../../motion/classes';
+import { VH_MOTION_SLOW_MS } from '../../../motion/tokens';
 import {
   addIdToSetRef,
   canExpandListRow,
+  chunkIds,
+  collectDirectChildIds,
+  collectFullExpandIds,
   collectLoadedIdsFromTree,
+  collectOneLevelExpandIds,
   flattenExpandedRows,
   hasLocalChildCards,
   isScrollNearBottom,
+  LIST_EXPAND_CHUNK_SIZE,
   LIST_ROOT_PAGE_SIZE,
+  LIST_ROW_ESTIMATE_PX,
   listViewportNeedsMoreRoots,
   nextRootLimit,
   removeIdFromSetRef,
@@ -147,6 +157,7 @@ export default function ProjectHubListPanel({
     [t]
   );
   const tableScrollRef = useRef(null);
+  const expandRunRef = useRef(0);
   const { gridStyle, onResizeStart } = useResizableTableColumns({
     storageKey: 'vh.hub.list.colWidths.v2',
     columns: listColumns,
@@ -158,6 +169,10 @@ export default function ProjectHubListPanel({
   const [listPlanningItems, setListPlanningItems] = useState([]);
   const [listCards, setListCards] = useState([]);
   const [expandedIds, setExpandedIds] = useState(() => new Set());
+  /** Row ids vừa xuất hiện sau expand — fade enter (không animate lúc scroll virtual). */
+  const [enterRowIds, setEnterRowIds] = useState(() => new Set());
+  const enterRowTimersRef = useRef(new Map());
+  const expandedChildIdsRef = useRef(new Map());
   const [loadedIds, setLoadedIds] = useState(() => new Set());
   const [loadingIds, setLoadingIds] = useState(() => new Set());
   const [expandErrorIds, setExpandErrorIds] = useState(() => new Set());
@@ -170,6 +185,7 @@ export default function ProjectHubListPanel({
   const [busyIds, setBusyIds] = useState(() => new Set());
   const [creatingUnderId, setCreatingUnderId] = useState('');
   const [rootCreateOpen, setRootCreateOpen] = useState(false);
+  const rootCreateFooterRef = useRef(null);
   const [detailIssueId, setDetailIssueId] = useState('');
   const [detailIssueKind, setDetailIssueKind] = useState('');
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -349,8 +365,80 @@ export default function ProjectHubListPanel({
     () => flattenExpandedRows(visibleTree, expandedIds),
     [visibleTree, expandedIds]
   );
+
+  const markEnterRows = useCallback((ids) => {
+    const list = (ids || []).map((id) => String(id || '')).filter(Boolean);
+    if (!list.length) return;
+    setEnterRowIds((prev) => {
+      const next = new Set(prev);
+      for (const id of list) next.add(id);
+      return next;
+    });
+    for (const id of list) {
+      const prevTimer = enterRowTimersRef.current.get(id);
+      if (prevTimer) clearTimeout(prevTimer);
+      enterRowTimersRef.current.set(
+        id,
+        setTimeout(() => {
+          setEnterRowIds((prev) => {
+            if (!prev.has(id)) return prev;
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+          enterRowTimersRef.current.delete(id);
+        }, VH_MOTION_SLOW_MS + 40)
+      );
+    }
+  }, []);
+
+  useEffect(
+    () => () => {
+      for (const timer of enterRowTimersRef.current.values()) clearTimeout(timer);
+      enterRowTimersRef.current.clear();
+    },
+    []
+  );
+
+  /** Fade các row con mới xuất hiện khi expand / load children (không animate scroll remount). */
+  useEffect(() => {
+    const added = [];
+    for (const parentId of expandedIds) {
+      const node = findNodeById(tree, parentId);
+      if (!node) continue;
+      const childIds = collectDirectChildIds(node);
+      const prev = expandedChildIdsRef.current.get(parentId) || new Set();
+      for (const childId of childIds) {
+        if (!prev.has(childId)) added.push(childId);
+      }
+      expandedChildIdsRef.current.set(parentId, new Set(childIds));
+    }
+    for (const parentId of [...expandedChildIdsRef.current.keys()]) {
+      if (!expandedIds.has(parentId)) expandedChildIdsRef.current.delete(parentId);
+    }
+    if (added.length) markEnterRows(added);
+  }, [tree, expandedIds, markEnterRows]);
+
+  const getChildStats = useMemo(() => {
+    const cache = new Map();
+    return (node) => {
+      const rawId = node?.raw?._id || node?.raw?.id;
+      const key = `${String(rawId || '')}|${String(node?.workType || '')}`;
+      if (!cache.has(key)) {
+        cache.set(key, childWorkStats(listCards, rawId, lists, node?.workType));
+      }
+      return cache.get(key);
+    };
+  }, [listCards, lists]);
   const rootCount = countRootNodes(tree);
   const hasMoreRoots = visibleRootLimit < tree.length;
+
+  const rowVirtualizer = useVirtualizer({
+    count: flatRows.length,
+    getScrollElement: () => tableScrollRef.current,
+    estimateSize: () => LIST_ROW_ESTIMATE_PX,
+    overscan: 14,
+  });
 
   useEffect(() => {
     setVisibleRootLimit(LIST_ROOT_PAGE_SIZE);
@@ -554,6 +642,80 @@ export default function ProjectHubListPanel({
     [expandErrorIds, expandedIds, loadNodeChildren]
   );
 
+  const nodeHasChildren = useCallback(
+    (node) =>
+      (Array.isArray(node?.children) && node.children.length > 0) ||
+      hasLocalChildCards(
+        listCards,
+        node?.raw?._id || node?.raw?.id,
+        node?.workType || node?.kind
+      ),
+    [listCards]
+  );
+
+  const prefetchExpandNodes = useCallback(
+    (ids) => {
+      for (const id of ids || []) {
+        const node = findNodeById(tree, id);
+        if (node) void loadNodeChildren(node);
+      }
+    },
+    [tree, loadNodeChildren]
+  );
+
+  /** Mở ids theo chunk + startTransition — tránh mount cả cây trong 1 frame. */
+  const applyExpandIdsChunked = useCallback(
+    (ids, { merge = true } = {}) => {
+      const unique = [];
+      const seen = new Set();
+      for (const raw of ids || []) {
+        const id = String(raw || '');
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        unique.push(id);
+      }
+      if (unique.length === 0) return;
+      const runId = ++expandRunRef.current;
+      prefetchExpandNodes(unique);
+      const chunks = chunkIds(unique, LIST_EXPAND_CHUNK_SIZE);
+      let chunkIndex = 0;
+      const step = () => {
+        if (runId !== expandRunRef.current) return;
+        const slice = chunks[chunkIndex] || [];
+        chunkIndex += 1;
+        startTransition(() => {
+          setExpandedIds((prev) => {
+            const next = merge ? new Set(prev) : new Set();
+            for (const id of slice) next.add(id);
+            return next;
+          });
+        });
+        if (chunkIndex < chunks.length) {
+          requestAnimationFrame(step);
+        }
+      };
+      step();
+    },
+    [prefetchExpandNodes]
+  );
+
+  const expandOneLevel = useCallback(() => {
+    const ids = collectOneLevelExpandIds(visibleTree, expandedIds, nodeHasChildren);
+    applyExpandIdsChunked(ids, { merge: true });
+  }, [visibleTree, expandedIds, nodeHasChildren, applyExpandIdsChunked]);
+
+  const expandFullTree = useCallback(() => {
+    // Reveal mọi root trước khi mở hết — infinite-scroll limit không được chặn cây.
+    setVisibleRootLimit((prev) => Math.max(prev, tree.length));
+    const ids = collectFullExpandIds(tree, nodeHasChildren);
+    applyExpandIdsChunked(ids, { merge: true });
+  }, [tree, nodeHasChildren, applyExpandIdsChunked]);
+
+  const collapseAllRows = useCallback(() => {
+    expandRunRef.current += 1;
+    startTransition(() => setExpandedIds(new Set()));
+  }, []);
+
   const patchCards = useCallback(
     (updater) => {
       setListCards((prev) => updater(Array.isArray(prev) ? prev : []));
@@ -751,6 +913,16 @@ export default function ProjectHubListPanel({
     await createChild(null, typeId, text);
     setRootCreateOpen(false);
   };
+
+  useEffect(() => {
+    if (!rootCreateOpen) return undefined;
+    const onDoc = (e) => {
+      if (rootCreateFooterRef.current?.contains(e.target)) return;
+      setRootCreateOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [rootCreateOpen]);
 
   const doCreateBoardCard = async (parentNode, type, text, parentPayload) => {
     const boardIssueType =
@@ -1130,8 +1302,16 @@ export default function ProjectHubListPanel({
   const titleCls = 'text-foreground';
   const showPlanningRetry = loadError && flatRows.length === 0 && !loading;
   const showPlanningWait = loading && flatRows.length === 0;
-  const controlBtn =
-    'rounded-md border border-border bg-background px-2 py-1 text-[11px] font-semibold text-foreground transition-colors motion-reduce:transition-none hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  const treeSelectCls =
+    `h-8 rounded-md border border-border bg-background px-2.5 text-xs text-foreground shadow-sm transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_BTN}`;
+
+  const onTreeControlChange = (e) => {
+    const value = e.target.value;
+    e.target.value = '';
+    if (value === 'one') expandOneLevel();
+    else if (value === 'all') expandFullTree();
+    else if (value === 'collapse') collapseAllRows();
+  };
 
   if (showPlanningRetry) {
     return (
@@ -1204,42 +1384,29 @@ export default function ProjectHubListPanel({
 
   return (
     <div
-      className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+      className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-surface"
       aria-busy={loading || undefined}
     >
-      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border px-4 py-2 sm:px-4">
-        <div className="min-w-0">
-          <h3 className={`text-sm font-bold ${titleCls}`}>{t('workspace.projectHubTabList')}</h3>
-          <p className={`text-xs ${muted}`}>{t('workspace.projectHubListHint')}</p>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            className={controlBtn}
-            onClick={() => {
-              const next = new Set();
-              const walk = (nodes) => {
-                for (const n of nodes || []) {
-                  if (Array.isArray(n.children) && n.children.length > 0) {
-                    next.add(n.id);
-                    walk(n.children);
-                  }
-                }
-              };
-              walk(tree);
-              setExpandedIds(next);
-            }}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface px-4 py-3 sm:px-5">
+        <h3 className={`text-sm font-bold tracking-tight ${titleCls}`}>
+          {t('workspace.projectHubTabList')}
+        </h3>
+        <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+          <span className="sr-only">{t('workspace.projectHubListTreeControlAria')}</span>
+          <select
+            className={treeSelectCls}
+            defaultValue=""
+            aria-label={t('workspace.projectHubListTreeControlAria')}
+            onChange={onTreeControlChange}
           >
-            {t('workspace.projectHubListExpandAll')}
-          </button>
-          <button
-            type="button"
-            className={controlBtn}
-            onClick={() => setExpandedIds(new Set())}
-          >
-            {t('workspace.projectHubListCollapseAll')}
-          </button>
-        </div>
+            <option value="" disabled>
+              {t('workspace.projectHubListTreeControl')}
+            </option>
+            <option value="one">{t('workspace.projectHubListExpandOneLevel')}</option>
+            <option value="all">{t('workspace.projectHubListExpandAll')}</option>
+            <option value="collapse">{t('workspace.projectHubListCollapseAll')}</option>
+          </select>
+        </label>
       </div>
 
       <DndContext
@@ -1256,7 +1423,7 @@ export default function ProjectHubListPanel({
             <div
               role="row"
               style={gridStyle}
-              className="sticky top-0 z-10 border-b border-border/50 bg-muted/40 px-2 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur-sm"
+              className="sticky top-0 z-10 border-b border-border bg-muted px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
             >
               <div aria-hidden />
               <div className="flex items-center justify-center">
@@ -1270,7 +1437,7 @@ export default function ProjectHubListPanel({
                     });
                   }}
                   aria-label={t('workspace.projectHubListSelectAllAria')}
-                  className="size-3.5 rounded border-border"
+                  className="size-4 rounded border-border-strong accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
                 />
               </div>
               <ResizableTableHeader column={listColumns[2]} onResizeStart={onResizeStart}>
@@ -1307,109 +1474,127 @@ export default function ProjectHubListPanel({
             </div>
 
             {flatRows.length === 0 ? (
-              <div className="px-4 py-12 text-center">
-                <p className={`text-sm ${muted}`}>
-                  {showPlanningWait ? t('common.loading') : t('workspace.projectHubListEmpty')}
-                </p>
-              </div>
+              showPlanningWait ? (
+                <QueryStateView loading loadingClassName="bg-surface px-4 py-10" skeletonLines={6} />
+              ) : (
+                <div className="bg-surface px-4 py-16 text-center">
+                  <p className={`text-sm ${muted}`}>{t('workspace.projectHubListEmpty')}</p>
+                </div>
+              )
             ) : (
-              flatRows.map(({ node, depth }) => (
-                <ProjectHubListRow
-                  key={node.id}
-                  node={node}
-                  projectCode={projectCode}
-                  depth={depth}
-                  locale={locale}
-                  expanded={expandedIds.has(node.id)}
-                  canExpand={canExpandListRow({
-                    loading: loadingIds.has(node.id),
-                    hasChildren:
-                      (Array.isArray(node.children) && node.children.length > 0) ||
-                      hasLocalChildCards(
-                        listCards,
-                        node.raw?._id || node.raw?.id,
-                        node.workType || node.kind
-                      ),
-                  })}
-                  expandLoading={loadingIds.has(node.id)}
-                  expandError={expandErrorIds.has(node.id)}
-                  selected={selectedIds.has(node.id)}
-                  childTypes={childTypesForParent(node.workType, workTypeConfig, createCaps)}
-                  childStats={childWorkStats(
-                    listCards,
-                    node.raw?._id || node.raw?.id,
-                    lists,
-                    node.workType
-                  )}
-                  lists={lists}
-                  listMap={listMap}
-                  workflowTransitionsByFrom={workflowTransitionsByFrom}
-                  priorityConfig={priorityConfig}
-                  hasBoardColumn={hasBoardColumn}
-                  busy={isRowBusy(entityId(node.raw) || node.id)}
-                  canChangeStatus={canChangeStatus}
-                  canAssign={Boolean(
-                    canCreateTask ||
-                      (Array.isArray(hubCaps?.permissions) &&
-                        hubCaps.permissions.includes('task:assign'))
-                  )}
-                  gridStyle={gridStyle}
-                  assignableMembers={assignableMembers}
-                  membersLoading={membersLoading}
-                  dragDeltaX={activeDragId === node.id ? dragDeltaX : 0}
-                  dragValid={activeDragId === node.id ? dragValid : null}
-                  dropAllowed={
-                    Boolean(activeDragId && activeDragNode) &&
-                    isLiveListDragValid({
-                      activeNode: activeDragNode,
-                      overNode: node,
-                      deltaX: 0,
-                      deltaY: 40,
-                      tree,
-                      flatRows,
-                      config: workTypeConfig,
-                    })
-                  }
-                  creatingUnderId={creatingUnderId}
-                  onToggleSelect={(id) => {
-                    setSelectedIds((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(id)) next.delete(id);
-                      else next.add(id);
-                      return next;
-                    });
-                  }}
-                  onToggleExpand={() => toggleExpand(node)}
-                  onRetryExpand={() => void loadNodeChildren(node)}
-                  onStartCreateChild={(n) => {
-                    setRootCreateOpen(false);
-                    setCreatingUnderId(n.id);
-                  }}
-                  onCancelCreateChild={() => setCreatingUnderId('')}
-                  onCreateChild={createChild}
-                  onOpenWorkItem={(n) => {
-                    if (!n?.raw) return;
-                    const id = entityId(n.raw);
-                    if (!id) return;
-                    setDetailIssueKind(n.kind === 'planning' ? 'planning' : 'card');
-                    setDetailIssueId(id);
-                  }}
-                  onChangeStatus={changeStatus}
-                  onChangePriority={changePriority}
-                  onChangePlanningStatus={changePlanningStatus}
-                  onChangeStartDate={changeStartDate}
-                  onChangeDueDate={changeDueDate}
-                  onAssignMember={(n, member) => void assignMember(n, member)}
-                  onManageTypes={onOpenSettings}
-                  t={t}
-                />
-              ))
+              <div
+                className="relative w-full"
+                style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+              >
+                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const row = flatRows[virtualRow.index];
+                  if (!row) return null;
+                  const { node, depth } = row;
+                  return (
+                    <div
+                      key={node.id}
+                      data-index={virtualRow.index}
+                      ref={rowVirtualizer.measureElement}
+                      className="absolute left-0 top-0 w-full"
+                      style={{
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
+                    >
+                      <ProjectHubListRow
+                        node={node}
+                        projectCode={projectCode}
+                        depth={depth}
+                        locale={locale}
+                        expanded={expandedIds.has(node.id)}
+                        animateEnter={enterRowIds.has(node.id)}
+                        canExpand={canExpandListRow({
+                          loading: loadingIds.has(node.id),
+                          hasChildren:
+                            (Array.isArray(node.children) && node.children.length > 0) ||
+                            hasLocalChildCards(
+                              listCards,
+                              node.raw?._id || node.raw?.id,
+                              node.workType || node.kind
+                            ),
+                        })}
+                        expandLoading={loadingIds.has(node.id)}
+                        expandError={expandErrorIds.has(node.id)}
+                        selected={selectedIds.has(node.id)}
+                        childTypes={childTypesForParent(node.workType, workTypeConfig, createCaps)}
+                        childStats={getChildStats(node)}
+                        lists={lists}
+                        listMap={listMap}
+                        workflowTransitionsByFrom={workflowTransitionsByFrom}
+                        priorityConfig={priorityConfig}
+                        hasBoardColumn={hasBoardColumn}
+                        busy={isRowBusy(entityId(node.raw) || node.id)}
+                        canChangeStatus={canChangeStatus}
+                        canAssign={Boolean(
+                          canCreateTask ||
+                            (Array.isArray(hubCaps?.permissions) &&
+                              hubCaps.permissions.includes('task:assign'))
+                        )}
+                        listDragActive={Boolean(activeDragId)}
+                        gridStyle={gridStyle}
+                        assignableMembers={assignableMembers}
+                        membersLoading={membersLoading}
+                        dragDeltaX={activeDragId === node.id ? dragDeltaX : 0}
+                        dragValid={activeDragId === node.id ? dragValid : null}
+                        dropAllowed={
+                          Boolean(activeDragId && activeDragNode) &&
+                          isLiveListDragValid({
+                            activeNode: activeDragNode,
+                            overNode: node,
+                            deltaX: 0,
+                            deltaY: 40,
+                            tree,
+                            flatRows,
+                            config: workTypeConfig,
+                          })
+                        }
+                        creatingUnderId={creatingUnderId}
+                        onToggleSelect={(id) => {
+                          setSelectedIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(id)) next.delete(id);
+                            else next.add(id);
+                            return next;
+                          });
+                        }}
+                        onToggleExpand={() => toggleExpand(node)}
+                        onRetryExpand={() => void loadNodeChildren(node)}
+                        onStartCreateChild={(n) => {
+                          setRootCreateOpen(false);
+                          setCreatingUnderId(n.id);
+                        }}
+                        onCancelCreateChild={() => setCreatingUnderId('')}
+                        onCreateChild={createChild}
+                        onOpenWorkItem={(n) => {
+                          if (!n?.raw) return;
+                          const id = entityId(n.raw);
+                          if (!id) return;
+                          setDetailIssueKind(n.kind === 'planning' ? 'planning' : 'card');
+                          setDetailIssueId(id);
+                        }}
+                        onChangeStatus={changeStatus}
+                        onChangePriority={changePriority}
+                        onChangePlanningStatus={changePlanningStatus}
+                        onChangeStartDate={changeStartDate}
+                        onChangeDueDate={changeDueDate}
+                        onAssignMember={(n, member) => void assignMember(n, member)}
+                        onManageTypes={onOpenSettings}
+                        t={t}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>
       </DndContext>
 
-      <div className="relative border-t border-border bg-surface px-3 py-2">
+      <div ref={rootCreateFooterRef} className="relative border-t border-border bg-surface px-3 py-2">
         {rootCreateOpen ? (
           <div className="mb-2">
             <ProjectHubInlineCreateBar
@@ -1420,6 +1605,7 @@ export default function ProjectHubListPanel({
               menuPlacement="up"
               placeholderKey="workspace.projectHubListCreatePh"
               onCreate={createRoot}
+              onDismiss={() => setRootCreateOpen(false)}
               onManageTypes={onOpenSettings}
               t={t}
             />
@@ -1429,12 +1615,13 @@ export default function ProjectHubListPanel({
           <button
             type="button"
             disabled={busy || !rootCreateTypes.length}
+            aria-expanded={rootCreateOpen}
             onClick={() => {
               setCreatingUnderId('');
-              setRootCreateOpen(true);
+              setRootCreateOpen((prev) => !prev);
             }}
-              className="inline-flex min-h-11 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-semibold text-muted-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-              aria-busy={busy || undefined}
+            className={`inline-flex min-h-11 items-center gap-1 rounded-md px-1.5 py-1 text-xs font-semibold text-muted-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${VH_MOTION_BTN}`}
+            aria-busy={busy || undefined}
           >
             {t('workspace.projectHubBacklogCreate')}
           </button>
@@ -1447,7 +1634,7 @@ export default function ProjectHubListPanel({
             </span>
             <button
               type="button"
-              className="rounded p-1 transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={`rounded p-1 transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_BTN}`}
               aria-label={t('workspace.projectHubListRefreshAria')}
               onClick={refreshAll}
             >
@@ -1495,7 +1682,7 @@ export default function ProjectHubListPanel({
       />
 
       <WorkItemDetail
-        key={String(detailWorkItem?._id || detailWorkItem?.id || 'list-detail')}
+        key="list-work-item-detail"
         open={Boolean(detailWorkItem)}
         chrome="modal"
         isDarkMode={isDarkMode}

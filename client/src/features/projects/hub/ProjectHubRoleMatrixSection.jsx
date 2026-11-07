@@ -191,6 +191,7 @@ export default function ProjectHubRoleMatrixSection({
 
   return (
     <div className="space-y-4">
+      <p className={`text-xs ${muted}`}>{t('workspace.projectHubRoleMatrixHint')}</p>
       <label className="block">
         <span className={fieldLabelCls}>{t('workspace.projectHubRoleMatrixPickRole')}</span>
         <select

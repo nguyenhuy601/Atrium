@@ -1,8 +1,12 @@
+import { AnimatePresence, motion } from 'motion/react';
 import { AdminLoadErrorState } from '../adminUsers/adminPanelStates';
 import { useAppStrings } from '../../locales/appStrings';
+import SkeletonBlock from '../../motion/primitives/SkeletonBlock';
+import { motionTransitionBase } from '../../motion/transitions';
 
 /**
  * loading | error+retry (when empty) | empty | children
+ * loading: skeleton SoT; children: fade enter ngắn.
  */
 export default function QueryStateView({
   loading = false,
@@ -13,15 +17,17 @@ export default function QueryStateView({
   isEmpty = false,
   empty = null,
   children,
-  loadingClassName = 'py-16 text-center text-sm text-muted-foreground',
+  loadingClassName = 'space-y-3 py-10',
   errorClassName = 'px-6 py-8',
+  skeletonLines = 4,
 }) {
   const { t } = useAppStrings();
 
   if (loading) {
     return (
-      <div className={loadingClassName} role="status" aria-live="polite">
-        {t('common.loadingEllipsis')}
+      <div className={loadingClassName} role="status" aria-live="polite" aria-busy="true">
+        <span className="sr-only">{t('common.loadingEllipsis')}</span>
+        <SkeletonBlock lines={skeletonLines} />
       </div>
     );
   }
@@ -41,5 +47,18 @@ export default function QueryStateView({
     return empty;
   }
 
-  return children;
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key="query-ready"
+        className="vh-motion-respect"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={motionTransitionBase}
+      >
+        {children}
+      </motion.div>
+    </AnimatePresence>
+  );
 }

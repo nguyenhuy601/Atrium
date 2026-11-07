@@ -106,6 +106,12 @@ router.post('/approvals/stub', approval.startStub);
 
 /** Phase 6 — Enterprise Governance */
 router.post('/internal/audit-events', internalGatewayAuth, governance.ingestAuditEvent);
+const projectMembershipInternal = require('../controllers/projectMembershipInternal.controller');
+router.get(
+  '/internal/org/:organizationId/users/:userId/project-ids',
+  internalGatewayAuth,
+  projectMembershipInternal.listUserProjectIdsInOrg
+);
 const aiPlanningInternal = require('../controllers/aiPlanningInternal.controller');
 router.post(
   '/internal/ai-planning/job-result',

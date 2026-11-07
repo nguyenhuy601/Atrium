@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { motion } from 'motion/react';
 import { Archive, ArrowLeft, Eye, X } from 'lucide-react';
+import MotionPresence from '../../../motion/primitives/MotionPresence';
+import { motionPopover } from '../../../motion/overlayMotion';
+import { VH_MOTION_BTN } from '../../../motion/classes';
 import toast from 'react-hot-toast';
 import { taskAPI, unwrapTaskBoardDetailPayload } from '../../../services/api/taskAPI';
 import { useAppStrings } from '../../../locales/appStrings';
@@ -29,17 +33,28 @@ export default function TaskBoardListActionsMenu({
   const [submitting, setSubmitting] = useState(false);
   const [archiveConfirmText, setArchiveConfirmText] = useState('');
 
-  const listId = list?._id ? String(list._id) : '';
-  const listTitle = String(list?.title || '').trim();
+  const panelStashRef = useRef(null);
+
+  useEffect(() => {
+    if (isOpen && anchorRect && list?._id) {
+      panelStashRef.current = { anchorRect, list };
+    }
+  }, [isOpen, anchorRect, list]);
+
+  const panelList = (isOpen && list) || panelStashRef.current?.list || null;
+  const panelAnchor = (isOpen && anchorRect) || panelStashRef.current?.anchorRect || null;
+
+  const listId = panelList?._id ? String(panelList._id) : '';
+  const listTitle = String(panelList?.title || '').trim();
   const cardCount =
-    typeof list?.cardCount === 'number'
-      ? list.cardCount
-      : Array.isArray(list?.cards)
-        ? list.cards.length
+    typeof panelList?.cardCount === 'number'
+      ? panelList.cardCount
+      : Array.isArray(panelList?.cards)
+        ? panelList.cards.length
         : 0;
   const hasCards = cardCount > 0;
   const activeListCount = lists.length;
-  const rawBlockReason = String(list?.archiveBlockReason || '');
+  const rawBlockReason = String(panelList?.archiveBlockReason || '');
   const normBlockReason = rawBlockReason
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -48,7 +63,7 @@ export default function TaskBoardListActionsMenu({
     normBlockReason.includes('he thong mac dinh') || normBlockReason.includes('chi doi ten');
   const canArchive = isLegacyDefaultBlock
     ? activeListCount > 1 && cardCount === 0
-    : Boolean(list?.canArchive);
+    : Boolean(panelList?.canArchive);
   const archiveBlockReason = isLegacyDefaultBlock
     ? activeListCount <= 1
       ? t('taskBoard.listMinOne')
@@ -61,12 +76,12 @@ export default function TaskBoardListActionsMenu({
   useEffect(() => {
     if (!isOpen) return;
     setView('menu');
-    setCopyTitle(String(list?.title || ''));
+    setCopyTitle(String(panelList?.title || ''));
     setMoveBoardId(String(currentBoardId || ''));
     const idx = lists.findIndex((l) => String(l._id) === listId);
     setMovePosition(idx >= 0 ? idx + 1 : lists.length || 1);
     setArchiveConfirmText('');
-  }, [isOpen, list, listId, lists, currentBoardId]);
+  }, [isOpen, panelList, listId, lists, currentBoardId]);
 
   useEffect(() => {
     if (view !== 'move' || !moveBoardId) return;
@@ -101,8 +116,6 @@ export default function TaskBoardListActionsMenu({
     [lists, listId]
   );
 
-  if (!isOpen || !anchorRect || !listId) return null;
-
   const shell = isDarkMode
     ? 'border-white/10 bg-[#2b2f38] text-slate-100 shadow-2xl'
     : 'border-slate-200 bg-white text-slate-900 shadow-xl';
@@ -125,20 +138,12 @@ export default function TaskBoardListActionsMenu({
     }
   };
 
-  const menuStyle = {
-    position: 'fixed',
-    top: Math.min(anchorRect.bottom + 6, window.innerHeight - 420),
-    left: Math.min(anchorRect.left, window.innerWidth - 300),
-    zIndex: 10050,
-    width: 280,
-  };
-
   const header = (title, onBack) => (
     <div className="mb-3 flex items-center gap-2 border-b border-white/10 pb-2">
       <button
         type="button"
         onClick={onBack}
-        className={`rounded p-1 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}
+        className={`rounded p-1 ${VH_MOTION_BTN} ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}
         aria-label={t('taskBoard.backAria')}
       >
         <ArrowLeft className="h-4 w-4" />
@@ -147,7 +152,7 @@ export default function TaskBoardListActionsMenu({
       <button
         type="button"
         onClick={onClose}
-        className={`rounded p-1 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}
+        className={`rounded p-1 ${VH_MOTION_BTN} ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}
         aria-label={t('common.close')}
       >
         <X className="h-4 w-4" />
@@ -305,7 +310,7 @@ export default function TaskBoardListActionsMenu({
       <>
         <div className="mb-2 flex items-center justify-between border-b border-white/10 pb-2">
           <span className="text-sm font-semibold">{t('taskBoard.listActions')}</span>
-          <button type="button" onClick={onClose} className={`rounded p-1 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
+          <button type="button" onClick={onClose} className={`rounded p-1 ${VH_MOTION_BTN} ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}>
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -336,7 +341,7 @@ export default function TaskBoardListActionsMenu({
             className={`${itemBtn} flex items-center gap-2`}
             onClick={() =>
               run(async () => {
-                if (list?.isWatching) {
+                if (panelList?.isWatching) {
                   await taskAPI.unwatchBoardList(currentBoardId, listId, boardApiOpts);
                   toast.success(t('taskBoard.listUnwatched'));
                 } else {
@@ -347,10 +352,10 @@ export default function TaskBoardListActionsMenu({
             }
           >
             <Eye className="h-4 w-4" />
-            {list?.isWatching ? t('taskBoard.unwatchList') : t('taskBoard.watchList')}
-            {list?.watcherCount > 0 ? (
+            {panelList?.isWatching ? t('taskBoard.unwatchList') : t('taskBoard.watchList')}
+            {panelList?.watcherCount > 0 ? (
               <span className={`ml-auto text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                {list.watcherCount}
+                {panelList.watcherCount}
               </span>
             ) : null}
           </button>
@@ -378,13 +383,42 @@ export default function TaskBoardListActionsMenu({
       </>
     );
 
+  if ((!isOpen && !panelStashRef.current) || !panelList || !panelAnchor || !listId) {
+    return null;
+  }
+
+  const menuStyle = {
+    position: 'fixed',
+    top: Math.min(panelAnchor.bottom + 6, window.innerHeight - 420),
+    left: Math.min(panelAnchor.left, window.innerWidth - 300),
+    zIndex: 10050,
+    width: 280,
+  };
+
   return createPortal(
-    <>
-      <div className="fixed inset-0 z-[10040]" onClick={onClose} aria-hidden />
-      <div className={`rounded-xl border p-3 ${shell}`} style={menuStyle} role="dialog">
-        {body}
-      </div>
-    </>,
+    <MotionPresence
+      open={isOpen}
+      onExitComplete={() => {
+        panelStashRef.current = null;
+      }}
+    >
+      <motion.div key="list-actions-menu" className="fixed inset-0 z-[10040]">
+        <button
+          type="button"
+          className="absolute inset-0 cursor-default"
+          onClick={onClose}
+          aria-label={t('common.close')}
+        />
+        <motion.div
+          className={`rounded-xl border p-3 ${shell}`}
+          style={menuStyle}
+          role="dialog"
+          {...motionPopover}
+        >
+          {body}
+        </motion.div>
+      </motion.div>
+    </MotionPresence>,
     document.body
   );
 }

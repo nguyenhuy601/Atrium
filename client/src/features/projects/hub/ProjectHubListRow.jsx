@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { ChevronDown, ChevronRight, GitFork, GripVertical, Loader2, MoreHorizontal, PanelRight, Plus } from 'lucide-react';
@@ -12,6 +12,7 @@ import {
   formatHubDateTime,
   formatHubDueDate,
   listsForStatusSelect,
+  localizeBoardListTitle,
   resolveHubActor,
   HUB_GRID_CELL_BORDER,
 } from './projectHubUtils';
@@ -27,6 +28,19 @@ import {
   resolveWorkItemDueDate,
   resolveWorkItemStartDate,
 } from './WorkItemDetail/workItemDetailUtils';
+import { motion } from 'motion/react';
+import MotionPresence from '../../../motion/primitives/MotionPresence';
+import MotionFadeIn from '../../../motion/primitives/MotionFadeIn';
+import MotionMenu from '../../../motion/primitives/MotionMenu';
+import { motionFadeUp, motionTransitionBase, motionTransitionSlow } from '../../../motion/transitions';
+import { VH_MOTION_Y_FADE_PX } from '../../../motion/tokens';
+import {
+  VH_MOTION_BTN,
+  VH_MOTION_FIELD,
+  VH_MOTION_ROW,
+  VH_MOTION_SPINNER,
+  VH_NAV_CHEVRON,
+} from '../../../motion/classes';
 
 export const LIST_TABLE_COLUMNS = [
   { id: 'drag', minPx: 28, defaultPx: 28, resizable: false },
@@ -116,15 +130,100 @@ function planningStatusLabel(status, t) {
 }
 
 /**
- * Một hàng bảng List (Work + meta + dates) + drag handle.
+ * Select ô List — MotionMenu fade (native `<select>` không animate được).
  */
-export default function ProjectHubListRow({
+function ListCellMenuSelect({
+  value,
+  options,
+  disabled = false,
+  ariaLabel,
+  triggerClassName = '',
+  menuKey = 'list-cell-select',
+  onChange,
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const current = options.find((o) => String(o.value) === String(value)) || options[0];
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (event) => {
+      if (rootRef.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    const onKey = (event) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative min-w-0">
+      <button
+        type="button"
+        disabled={disabled}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={`inline-flex h-8 w-full max-w-full items-center justify-between gap-1 rounded-md border px-2 text-left text-[11px] font-semibold shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${VH_MOTION_FIELD} ${triggerClassName}`}
+      >
+        <span className="min-w-0 truncate">{current?.label || '—'}</span>
+        <ChevronDown
+          size={12}
+          className={`${VH_NAV_CHEVRON} ${open ? 'rotate-180' : 'rotate-0'}`}
+          aria-hidden
+        />
+      </button>
+      <MotionMenu
+        open={open}
+        menuKey={menuKey}
+        role="listbox"
+        aria-label={ariaLabel}
+        className="absolute left-0 top-[calc(100%+4px)] z-30 max-h-48 min-w-full overflow-y-auto rounded-lg border border-border bg-surface py-1 shadow-lg"
+      >
+        {options.map((opt) => {
+          const selected = String(opt.value) === String(value);
+          return (
+            <button
+              key={String(opt.value)}
+              type="button"
+              role="option"
+              aria-selected={selected}
+              className={`flex w-full px-2.5 py-1.5 text-left text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                selected ? 'bg-muted font-semibold text-foreground' : 'text-foreground hover:bg-muted'
+              } ${VH_MOTION_ROW}`}
+              onClick={() => {
+                setOpen(false);
+                if (!selected) onChange?.(opt.value);
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </MotionMenu>
+    </div>
+  );
+}
+
+/**
+ * Một hàng bảng List (Work + meta + dates) + drag handle.
+ * DnD chỉ đăng ký khi hover hoặc khi list đang có phiên kéo (listDragActive).
+ */
+function ProjectHubListRow({
   node,
   projectCode = '',
   depth = 0,
   locale = 'en',
   collapsed = false,
   expanded = false,
+  animateEnter = false,
   canExpand = false,
   expandLoading = false,
   expandError = false,
@@ -139,6 +238,7 @@ export default function ProjectHubListRow({
   canChangeStatus = false,
   canAssign = false,
   canDrag = true,
+  listDragActive = false,
   assignableMembers = [],
   membersLoading = false,
   gridStyle = null,
@@ -167,6 +267,9 @@ export default function ProjectHubListRow({
   const hasChildren = Array.isArray(node.children) && node.children.length > 0;
   const isExpanded = expanded || (!collapsed && hasChildren && !onToggleExpand);
   const showExpand = Boolean(canExpand || hasChildren || expandLoading);
+  const enterOnceRef = useRef(Boolean(animateEnter));
+  if (animateEnter) enterOnceRef.current = true;
+  const playEnterAnim = enterOnceRef.current;
   const childTotal = Number(childStats?.total) || 0;
   const childDone = Number(childStats?.done) || 0;
   const childLabel =
@@ -175,6 +278,24 @@ export default function ProjectHubListRow({
       : '';
   const canCreateChild = childTypes.length > 0;
   const isCreating = creatingUnderId === node.id;
+
+  useEffect(() => {
+    if (!isCreating) return undefined;
+    const onDoc = (e) => {
+      const el = e.target;
+      if (!(el instanceof Element)) return;
+      if (
+        el.closest(`[data-list-create-anchor="${node.id}"]`) ||
+        el.closest(`[data-list-create-panel="${node.id}"]`)
+      ) {
+        return;
+      }
+      onCancelCreateChild?.();
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [isCreating, node.id, onCancelCreateChild]);
+
   const raw = node.raw || {};
   const rawId = String(raw._id || raw.id || '');
   const keyLabel = displayIssueKey(projectCode, rawId);
@@ -201,8 +322,8 @@ export default function ProjectHubListRow({
   const dueIso = resolveWorkItemDueDate(raw, { isPlanning });
   const startInput = dateInputValueFromIso(startIso);
   const dueInput = dateInputValueFromIso(dueIso);
-  const startLabel = formatHubDueDate(startIso, locale) || t('workspace.projectHubListPriorityNone');
-  const dueLabel = formatHubDueDate(dueIso, locale) || t('workspace.projectHubListPriorityNone');
+  const startLabel = formatHubDueDate(startIso, locale) || t('workspace.projectHubEmptyDate');
+  const dueLabel = formatHubDueDate(dueIso, locale) || t('workspace.projectHubEmptyDate');
   const canEditDue = canChangeStatus && (openable || node.kind === 'planning');
   const canEditStart = canEditDue;
   const priorityItems = normalizePriorityConfig(priorityConfig).items;
@@ -225,15 +346,17 @@ export default function ProjectHubListRow({
     [lists, raw.listId, isPlanning, planningSelectListId, workflowTransitionsByFrom]
   );
 
+  const [pointerArmed, setPointerArmed] = useState(false);
+  const dndEnabled = Boolean(listDragActive || pointerArmed);
   const { attributes, listeners, setNodeRef: setDragRef, transform, isDragging } = useDraggable({
     id: node.id,
     data: { node },
-    disabled: busy || !canDrag,
+    disabled: busy || !canDrag || !dndEnabled,
   });
   const { setNodeRef: setDropRef, isOver } = useDroppable({
     id: `drop:${node.id}`,
     data: { node },
-    disabled: busy,
+    disabled: busy || !dndEnabled,
   });
 
   const setRowRef = (el) => {
@@ -242,6 +365,7 @@ export default function ProjectHubListRow({
   };
 
   const style = {
+    ...gridStyle,
     transform: CSS.Translate.toString(transform ? { ...transform, x: 0 } : null),
     opacity: isDragging ? 0.9 : undefined,
   };
@@ -264,29 +388,33 @@ export default function ProjectHubListRow({
         ? 'border-l-[3px] border-l-primary'
         : 'border-l-[3px] border-l-border';
 
-  return (
-    <>
-      <div
-        ref={setRowRef}
-        role="row"
-        style={{ ...style, ...gridStyle }}
-        aria-grabbed={isDragging}
-        aria-invalid={isDragging && !dragValid ? true : undefined}
-        className={`items-center border-b border-border/40 px-2 py-2 transition-colors motion-reduce:transition-none ${statusStripe} ${
-          selected
-            ? 'bg-primary/8'
-            : depth > 0
-              ? 'bg-muted/25 hover:bg-muted/45'
-              : 'odd:bg-muted/10 hover:bg-muted/35'
-        } ${isOver && dropAllowed ? 'border-t-2 border-t-primary' : ''} ${isOver && !dropAllowed ? 'opacity-60' : ''} ${dragRing}`}
-      >
+  const rowClassName = `${VH_MOTION_ROW} items-center border-b border-border px-2 py-2 text-foreground transition-colors motion-reduce:transition-none ${statusStripe} ${
+    selected
+      ? 'bg-primary-subtle'
+      : depth > 0
+        ? 'bg-muted/40 hover:bg-muted/60'
+        : 'bg-surface hover:bg-muted/35'
+  } ${isOver && dropAllowed ? 'border-t-2 border-t-primary' : ''} ${isOver && !dropAllowed ? 'opacity-60' : ''} ${dragRing}`;
+
+  const rowProps = {
+    ref: setRowRef,
+    role: 'row',
+    style,
+    'aria-grabbed': isDragging,
+    'aria-invalid': isDragging && !dragValid ? true : undefined,
+    onPointerEnter: () => setPointerArmed(true),
+    className: rowClassName,
+  };
+
+  const rowBody = (
+      <div {...rowProps}>
         <div
           className={`flex items-center justify-center ${HUB_GRID_CELL_BORDER}`}
           style={treeDepth > 0 ? { paddingLeft: Math.min(treeDepth, 1) * 8 } : undefined}
         >
           <button
             type="button"
-            className="cursor-grab touch-none rounded p-0.5 text-muted-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing disabled:opacity-40"
+            className={`cursor-grab touch-none rounded p-0.5 text-muted-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing disabled:opacity-40 ${VH_MOTION_BTN}`}
             aria-label={dragHandleAria}
             disabled={busy || !canDrag}
             {...attributes}
@@ -301,20 +429,20 @@ export default function ProjectHubListRow({
             checked={selected}
             onChange={() => onToggleSelect?.(node.id)}
             aria-label={t('workspace.projectHubBacklogSelectIssue')}
-            className="size-3.5 rounded border-border"
+            className="size-4 rounded border-border-strong accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
           />
         </div>
 
         <div
           className={`group flex min-w-0 items-center gap-1.5 ${HUB_GRID_CELL_BORDER} ${
-            depth > 0 ? 'border-l-2 border-l-primary/40' : ''
+            depth > 0 ? 'border-l-2 border-l-primary/50' : ''
           }`}
           style={{ paddingLeft: previewPad }}
         >
           {showExpand ? (
             <button
               type="button"
-              className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+              className={`shrink-0 rounded p-0.5 text-muted-foreground transition-colors motion-reduce:transition-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${VH_MOTION_BTN}`}
               aria-expanded={isExpanded}
               aria-label={
                 expandError
@@ -339,11 +467,13 @@ export default function ProjectHubListRow({
               }}
             >
               {expandLoading ? (
-                <Loader2 size={14} className="animate-spin" aria-hidden />
-              ) : isExpanded ? (
-                <ChevronDown size={14} />
+                <Loader2 size={14} className={`${VH_MOTION_SPINNER}`} aria-hidden />
               ) : (
-                <ChevronRight size={14} />
+                <ChevronRight
+                  size={14}
+                  className={`${VH_NAV_CHEVRON} ${isExpanded ? 'rotate-90' : 'rotate-0'}`}
+                  aria-hidden
+                />
               )}
             </button>
           ) : (
@@ -352,7 +482,7 @@ export default function ProjectHubListRow({
           <ProjectHubIssueTypeBadge type={badgeTypeFor(node.workType)} variant="icon" label={typeLabel} />
           <button
             type="button"
-            className={`shrink-0 text-left text-xs font-semibold underline-offset-2 ${
+            className={`shrink-0 text-left text-xs font-semibold underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               openable ? 'text-primary hover:underline' : 'text-muted-foreground'
             } ${isDone ? 'line-through opacity-70' : ''}`}
             onClick={() => openable && onOpenWorkItem?.(node)}
@@ -370,7 +500,7 @@ export default function ProjectHubListRow({
           </span>
           {childTotal > 0 ? (
             <span
-              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border/70 bg-muted/50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground"
               title={childLabel}
               aria-label={childLabel}
             >
@@ -382,7 +512,7 @@ export default function ProjectHubListRow({
             {openable ? (
               <button
                 type="button"
-                className="rounded p-1 text-muted-foreground opacity-70 transition-opacity motion-reduce:transition-none hover:bg-muted hover:text-foreground hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:opacity-0 sm:group-hover:opacity-100"
+                className={`rounded p-1 text-muted-foreground opacity-70 transition-opacity motion-reduce:transition-none hover:bg-muted hover:text-foreground hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:opacity-0 sm:group-hover:opacity-100 ${VH_MOTION_BTN}`}
                 aria-label={t('workspace.projectHubListOpenWorkItemAria')}
                 title={t('workspace.projectHubListOpenWorkItem')}
                 onClick={() => onOpenWorkItem?.(node)}
@@ -393,11 +523,16 @@ export default function ProjectHubListRow({
             {canCreateChild ? (
               <button
                 type="button"
-                className="rounded p-1 text-primary transition-colors motion-reduce:transition-none hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                data-list-create-anchor={node.id}
+                className={`rounded p-1 text-primary transition-colors motion-reduce:transition-none hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_BTN}`}
                 aria-label={t('workspace.projectHubListCreateChildAria')}
                 title={t('workspace.projectHubListCreateChild')}
+                aria-expanded={isCreating}
                 disabled={busy}
-                onClick={() => onStartCreateChild?.(node)}
+                onClick={() => {
+                  if (isCreating) onCancelCreateChild?.();
+                  else onStartCreateChild?.(node);
+                }}
               >
                 <Plus size={14} aria-hidden />
               </button>
@@ -430,19 +565,18 @@ export default function ProjectHubListRow({
 
         <div className={`min-w-0 ${HUB_GRID_CELL_BORDER}`}>
           {openable && canChangeStatus ? (
-            <select
-              className="w-full max-w-[7.5rem] rounded-md border border-border/60 bg-background px-1.5 py-1 text-[11px] font-semibold text-foreground shadow-sm outline-none transition-colors hover:border-border focus:border-primary"
+            <ListCellMenuSelect
+              menuKey={`list-priority-${node.id}`}
               value={String(raw.priority || 'medium').toLowerCase()}
               disabled={busy}
-              aria-label={t('workspace.projectHubListPriorityColumn')}
-              onChange={(e) => onChangePriority?.(node, e.target.value)}
-            >
-              {priorityOptions.map((item) => (
-                <option key={item.key} value={item.key}>
-                  {item.label || priorityLabel({ priority: item.key }, t, priorityItems)}
-                </option>
-              ))}
-            </select>
+              ariaLabel={t('workspace.projectHubListPriorityColumn')}
+              triggerClassName="max-w-[7.5rem] border-border bg-background text-foreground hover:border-border-strong"
+              options={priorityOptions.map((item) => ({
+                value: item.key,
+                label: item.label || priorityLabel({ priority: item.key }, t, priorityItems),
+              }))}
+              onChange={(next) => onChangePriority?.(node, next)}
+            />
           ) : (
             <span className="truncate text-xs text-muted-foreground">
               {priorityLabel(raw, t, priorityItems)}
@@ -452,29 +586,31 @@ export default function ProjectHubListRow({
 
         <div className={`min-w-0 ${HUB_GRID_CELL_BORDER}`}>
           {openable && canChangeStatus && listOptions.length > 0 ? (
-            <select
-              className={`w-full max-w-[9rem] rounded-md border border-border/60 px-1.5 py-1 text-[11px] font-semibold shadow-sm outline-none transition-colors focus:border-primary ${statusPillClass(bucket)}`}
+            <ListCellMenuSelect
+              menuKey={`list-status-${node.id}`}
               value={isPlanning ? planningSelectListId : String(raw.listId || '')}
               disabled={busy}
-              aria-label={statusBucketLabel(bucket, t)}
-              onChange={(e) => {
-                const next = e.target.value;
+              ariaLabel={statusBucketLabel(bucket, t)}
+              triggerClassName={`max-w-[9rem] ${statusPillClass(bucket)}`}
+              options={listOptions.map((list) => ({
+                value: String(list._id || list.id),
+                label:
+                  localizeBoardListTitle(list, t) ||
+                  statusBucketLabel(classifyListStatusBucket(list), t),
+              }))}
+              onChange={(next) => {
                 if (isPlanning) onChangePlanningStatus?.(node, next);
                 else onChangeStatus?.(node, next);
               }}
-            >
-              {listOptions.map((list) => (
-                <option key={list._id || list.id} value={String(list._id || list.id)}>
-                  {list.title || statusBucketLabel(classifyListStatusBucket(list), t)}
-                </option>
-              ))}
-            </select>
+            />
           ) : (
             <span
               className={`inline-flex rounded-md border px-1.5 py-0.5 text-[11px] font-semibold ${statusPillClass(bucket)}`}
             >
               {isPlanning
-                ? listMeta?.title || planningStatusLabel(raw.status, t)
+                ? localizeBoardListTitle(listMeta, t) ||
+                  listMeta?.title ||
+                  planningStatusLabel(raw.status, t)
                 : statusBucketLabel(bucket, t)}
             </span>
           )}
@@ -491,7 +627,7 @@ export default function ProjectHubListRow({
           {canEditStart ? (
             <input
               type="date"
-              className="w-full max-w-[9.5rem] rounded-md border border-border/60 bg-background px-1.5 py-1 text-[11px] text-foreground shadow-sm outline-none transition-colors hover:border-border focus:border-primary"
+              className={`h-8 w-full max-w-[9.5rem] rounded-md border border-border bg-background px-2 text-[11px] font-semibold text-foreground shadow-sm outline-none transition-colors hover:border-border-strong focus:border-primary focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_FIELD}`}
               value={startInput}
               disabled={busy}
               aria-label={t('workspace.projectHubListStartColumn')}
@@ -509,7 +645,7 @@ export default function ProjectHubListRow({
           {canEditDue ? (
             <input
               type="date"
-              className="w-full max-w-[9.5rem] rounded-md border border-border/60 bg-background px-1.5 py-1 text-[11px] text-foreground shadow-sm outline-none transition-colors hover:border-border focus:border-primary"
+              className={`h-8 w-full max-w-[9.5rem] rounded-md border border-border bg-background px-2 text-[11px] font-semibold text-foreground shadow-sm outline-none transition-colors hover:border-border-strong focus:border-primary focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_FIELD}`}
               value={dueInput}
               disabled={busy}
               aria-label={t('workspace.projectHubListDueColumn')}
@@ -524,7 +660,7 @@ export default function ProjectHubListRow({
           {openable ? (
             <button
               type="button"
-              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              className={`rounded p-1 text-muted-foreground transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_BTN}`}
               aria-label={t('workspace.projectHubListOpenWorkItemAria')}
               onClick={() => onOpenWorkItem?.(node)}
             >
@@ -535,11 +671,28 @@ export default function ProjectHubListRow({
           )}
         </div>
       </div>
+  );
 
-      {isCreating ? (
-        <div
+  return (
+    <>
+      {playEnterAnim ? (
+        <MotionFadeIn y={VH_MOTION_Y_FADE_PX} transition={motionTransitionSlow}>
+          {rowBody}
+        </MotionFadeIn>
+      ) : (
+        rowBody
+      )}
+
+      <MotionPresence open={isCreating}>
+        <motion.div
+          key={`list-create-under-${node.id}`}
+          data-list-create-panel={node.id}
           className="border-b border-border bg-background px-3 py-2"
           style={{ paddingLeft: 48 + (depth + 1) * WORK_TYPE_INDENT_PX }}
+          initial={motionFadeUp.initial}
+          animate={motionFadeUp.animate}
+          exit={motionFadeUp.exit}
+          transition={motionTransitionBase}
         >
           <ProjectHubInlineCreateBar
             allowedTypes={childTypes}
@@ -551,11 +704,14 @@ export default function ProjectHubListRow({
               onCreateChild?.(node, type, text);
               onCancelCreateChild?.();
             }}
+            onDismiss={onCancelCreateChild}
             onManageTypes={onManageTypes}
             t={t}
           />
-        </div>
-      ) : null}
+        </motion.div>
+      </MotionPresence>
     </>
   );
 }
+
+export default memo(ProjectHubListRow);

@@ -46,9 +46,11 @@ import {
   getDefaultPathForSuite,
 } from '../../utils/suitePathUtils';
 import { COMPANY_SPACE_LEVEL } from '../../utils/companySpaceLevel';
+import { motion } from 'motion/react';
 import { VH_NAV_CHEVRON } from '../../motion/classes';
-import useMotionPresence from '../../motion/useMotionPresence';
-import { VH_MOTION_BASE_MS } from '../../motion/tokens';
+import MotionPresence from '../../motion/primitives/MotionPresence';
+import { motionPopover } from '../../motion/overlayMotion';
+
 import {
   FIGMA_SIDEBAR,
   FIGMA_SIDEBAR_COLLAPSED,
@@ -614,12 +616,10 @@ export default function FigmaNavigationSidebar({
   const railCollapsed = collapsed && !mobileNavOpen;
   const widthClass = railCollapsed ? FIGMA_SIDEBAR_COLLAPSED : FIGMA_SIDEBAR_EXPANDED;
   const sidebarTranslate = mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0';
-  const { mounted: suitePickerMounted, phase: suitePickerPhase } = useMotionPresence(
-    showSuitePicker && !railCollapsed,
-    { durationMs: VH_MOTION_BASE_MS }
-  );
+  const suitePickerOpen = showSuitePicker && !railCollapsed;
 
   return (
+
     <>
       {mobileNavOpen ? (
         <button
@@ -694,13 +694,13 @@ export default function FigmaNavigationSidebar({
           )}
         </div>
 
-        {suitePickerMounted ? (
-          <div
-            className="absolute left-2 right-2 top-[calc(100%+4px)] z-[200] overflow-hidden rounded-xl border border-white/10 bg-[#0D0D1A] shadow-2xl vh-presence-overlay vh-motion-respect"
-            data-motion-phase={suitePickerPhase || 'enter'}
+        <MotionPresence open={suitePickerOpen}>
+          <motion.div
+            key="suite-picker"
+            className="absolute left-2 right-2 top-[calc(100%+4px)] z-[200] overflow-hidden rounded-xl border border-white/10 bg-[#0D0D1A] shadow-2xl vh-motion-respect"
             role="menu"
+            {...motionPopover}
           >
-            <div className="vh-presence-panel px-0 py-0">
               <div className="px-2.5 pb-1 pt-2 text-[0.575rem] font-bold uppercase tracking-widest text-white/25">
                 {t('nav.chooseSpace')}
               </div>
@@ -757,9 +757,8 @@ export default function FigmaNavigationSidebar({
                 );
               })}
               <div className="h-1.5" />
-            </div>
-          </div>
-        ) : null}
+          </motion.div>
+        </MotionPresence>
       </div>
 
       {contextSwitch

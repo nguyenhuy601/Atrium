@@ -2,9 +2,13 @@ import apiClient from './apiClient';
 import { getResolvedBearerToken } from '../../utils/tokenStorage';
 
 export const organizationAPI = {
-  // Get all organizations
-  getOrganizations: async () => {
-    const response = await apiClient.get('/organizations/my');
+  // Get all organizations (?mutualWith=userId → chỉ org chung)
+  getOrganizations: async (params = {}) => {
+    const mutualWith = String(params.mutualWith || '').trim();
+    const query = mutualWith ? { mutualWith } : undefined;
+    const response = await apiClient.get('/organizations/my', {
+      params: query,
+    });
     return response;
   },
 

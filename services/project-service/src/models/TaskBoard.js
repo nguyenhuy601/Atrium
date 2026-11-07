@@ -43,7 +43,7 @@ const taskBoardSchema = new mongoose.Schema(
       trim: true,
       maxlength: 180,
       /** Fallback only when create omits title; createProject sets projectCode. */
-      default: 'PRJ',
+      default: 'Board',
     },
     background: {
       type: String,

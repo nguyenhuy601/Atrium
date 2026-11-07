@@ -23,8 +23,18 @@ export function unwrapFriendsList(resp) {
 
 export async function fetchFriendsList(status = 'accepted') {
   const params = status && status !== 'accepted' ? { status } : {};
-  const resp = await friendService.getFriends(params);
-  return unwrapFriendsList(resp);
+  try {
+    const resp = await friendService.getFriends(params);
+    // #region agent log
+    fetch('http://127.0.0.1:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bbb8bb'},body:JSON.stringify({sessionId:'bbb8bb',runId:'pre-fix',hypothesisId:'A',location:'fetchers.js:fetchFriendsListOk',message:'friends list OK',data:{statusParam:String(status||'accepted'),count:unwrapFriendsList(resp).length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    return unwrapFriendsList(resp);
+  } catch (err) {
+    // #region agent log
+    fetch('http://127.0.0.1:7781/ingest/25418548-5637-4f11-a834-1c7c198bc9cb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'bbb8bb'},body:JSON.stringify({sessionId:'bbb8bb',runId:'pre-fix',hypothesisId:'A',location:'fetchers.js:fetchFriendsListFail',message:'friends list FAIL',data:{statusParam:String(status||'accepted'),status:err?.status||err?.response?.status||null,errorCode:err?.errorCode||err?.response?.data?.errorCode||err?.code||null,errMessage:String(err?.message||'').slice(0,200)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    throw err;
+  }
 }
 
 export async function fetchNotificationBadge({ scope = 'personal', organizationId = '' } = {}) {

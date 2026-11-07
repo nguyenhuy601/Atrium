@@ -29,13 +29,15 @@ export default function MeetingPlanPanel({ projectId }) {
       setErr('');
       qc.invalidateQueries({ queryKey: ['meetingPlan', projectId] });
     },
-    onError: (e) => setErr(e?.response?.data?.message || e?.message || 'Seed failed'),
+    onError: (e) =>
+      setErr(e?.response?.data?.message || e?.message || t('workspace.meetingPlanSeedFail')),
   });
 
   const confirmM = useMutation({
     mutationFn: async () => unwrap(await meetingPlanningAPI.confirmPlan(projectId)),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['meetingPlan', projectId] }),
-    onError: (e) => setErr(e?.response?.data?.message || e?.message || 'Confirm failed'),
+    onError: (e) =>
+      setErr(e?.response?.data?.message || e?.message || t('workspace.meetingPlanConfirmFail')),
   });
 
   const plan = planQ.data?.plan || planQ.data;

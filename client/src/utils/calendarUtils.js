@@ -273,12 +273,15 @@ export function mapTaskToWorkCalendarEvents(task) {
  * @returns {object|null} UI event
  */
 export function mapMeetingToCalendarEvent(meeting) {
-  if (!meeting?.startTime) return null;
-  const start = new Date(meeting.startTime);
+  // Voice meetings: startTime; project MeetingEvent: startAt
+  const startRaw = meeting?.startTime || meeting?.startAt;
+  if (!startRaw) return null;
+  const start = new Date(startRaw);
   if (Number.isNaN(start.getTime())) return null;
 
-  const end = meeting.endTime
-    ? new Date(meeting.endTime)
+  const endRaw = meeting?.endTime || meeting?.endAt;
+  const end = endRaw
+    ? new Date(endRaw)
     : new Date(start.getTime() + DEFAULT_MEETING_DURATION_MINUTES * 60 * 1000);
   const durationMins = Math.max(1, Math.round((end - start) / 60000));
 

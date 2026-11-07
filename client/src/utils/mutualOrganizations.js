@@ -12,17 +12,9 @@ function unwrapList(payload) {
   return [];
 }
 
-function memberUserId(member) {
-  const u = member?.user;
-  if (u != null && typeof u === 'object') {
-    return String(u._id || u.userId || u.id || '');
-  }
-  return String(member?.user || member?.userId || member?._id || '');
-}
-
 /**
- * Tổ chức chung: dùng API sẵn có (my orgs + members từng org).
- * Cùng pattern OrganizationsPage.loadChatContacts.
+ * Tổ chức chung với một user — GET /organizations/my?mutualWith=
+ * (một request; không kéo members từng org).
  * @param {string} friendUserId
  * @param {{ force?: boolean }} [opts]
  */
@@ -36,40 +28,20 @@ export async function fetchMutualOrganizations(friendUserId, opts = {}) {
     return cached.data;
   }
 
-  const orgResp = await organizationAPI.getOrganizations();
+  const orgResp = await organizationAPI.getOrganizations({ mutualWith: fid });
   const myOrgs = unwrapList(orgResp);
-  if (!myOrgs.length) {
-    const empty = { count: 0, organizations: [] };
-    cache.set(fid, { at: Date.now(), data: empty });
-    return empty;
-  }
+  const organizations = myOrgs.map((org) => {
+    const orgId = String(org._id || org.id || '');
+    return {
+      _id: orgId,
+      name: org.name,
+      slug: org.slug,
+      logo: org.logo ?? null,
+      description: org.description ?? '',
+      myRole: org.myRole || null,
+    };
+  }).filter((o) => o._id);
 
-  const results = await Promise.all(
-    myOrgs.map(async (org) => {
-      const orgId = String(org._id || org.id || '');
-      if (!orgId) return null;
-      try {
-        const memResp = await organizationAPI.getMembers(orgId);
-        const members = unwrapList(memResp);
-        const isMutual = members.some(
-          (m) => String(m.status || 'active') === 'active' && memberUserId(m) === fid
-        );
-        if (!isMutual) return null;
-        return {
-          _id: orgId,
-          name: org.name,
-          slug: org.slug,
-          logo: org.logo ?? null,
-          description: org.description ?? '',
-          myRole: org.myRole || null,
-        };
-      } catch {
-        return null;
-      }
-    })
-  );
-
-  const organizations = results.filter(Boolean);
   const data = { count: organizations.length, organizations };
   cache.set(fid, { at: Date.now(), data });
   return data;

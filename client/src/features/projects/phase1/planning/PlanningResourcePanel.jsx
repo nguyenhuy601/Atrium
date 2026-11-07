@@ -236,7 +236,9 @@ export default function PlanningResourcePanel({ projectId, artifact, canEdit, on
         >
           <span className="flex flex-wrap items-center gap-1.5 text-sm font-semibold">
             {t('workspace.phase1ResourceRolesTitle')}
-            <span className={kindChipClass('RESOURCE')}>RESOURCE</span>
+            <span className={kindChipClass('RESOURCE')}>
+              {t('workspace.phase1ArtifactKindResource')}
+            </span>
             <span className={statusBadgeClass(artifact?.status)}>
               {formatPhase1StatusLabel(artifact?.status, t)}
             </span>

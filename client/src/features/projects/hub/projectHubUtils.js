@@ -61,6 +61,60 @@ export function countCardsInSprint(cards = [], sprintId) {
   return (cards || []).filter((c) => String(c?.sprintId || '').trim() === sid).length;
 }
 
+/** Done column / status — EN keys + VI titles (Xong / Hoàn thành). */
+export function isHubDoneStatusText(status) {
+  const s = String(status || '').toLowerCase().trim();
+  if (!s) return false;
+  return (
+    s === 'done' ||
+    s === 'completed' ||
+    s.includes('done') ||
+    s.includes('complete') ||
+    s.includes('xong') ||
+    s.includes('hoàn thành') ||
+    s.includes('hoan thanh')
+  );
+}
+
+/**
+ * Localize board column title via statusKey (DB may store EN defaults).
+ * @param {{ statusKey?: string, title?: string } | null | undefined} list
+ * @param {(key: string) => string} t
+ */
+export function localizeBoardListTitle(list, t) {
+  const statusKey = String(list?.statusKey || '')
+    .trim()
+    .toLowerCase();
+  const title = String(list?.title || '').trim();
+  const byKey = {
+    todo: 'workspace.boardListTodo',
+    to_do: 'workspace.boardListTodo',
+    in_progress: 'workspace.boardListInProgress',
+    inprogress: 'workspace.boardListInProgress',
+    qa: 'workspace.boardListReadyForQa',
+    ready_for_qa: 'workspace.boardListReadyForQa',
+    done: 'workspace.boardListDone',
+    completed: 'workspace.boardListDone',
+  };
+  const i18nKey = byKey[statusKey];
+  if (i18nKey) {
+    const label = t(i18nKey);
+    if (label && label !== i18nKey) return label;
+  }
+  const byTitle = {
+    'to do': 'workspace.boardListTodo',
+    'in progress': 'workspace.boardListInProgress',
+    'ready for qa': 'workspace.boardListReadyForQa',
+    done: 'workspace.boardListDone',
+  };
+  const titleKey = byTitle[title.toLowerCase()];
+  if (titleKey) {
+    const label = t(titleKey);
+    if (label && label !== titleKey) return label;
+  }
+  return title;
+}
+
 export function computeHubBoardSummary(cards = [], lists = []) {
   const listById = new Map((lists || []).map((l) => [String(l._id), l]));
   const total = (cards || []).length;
@@ -74,10 +128,10 @@ export function computeHubBoardSummary(cards = [], lists = []) {
     const status = String(
       list?.statusKey || list?.title || card.status || ''
     ).toLowerCase();
-    if (status.includes('done') || status.includes('complete') || status === 'done') done += 1;
-    if (status.includes('review')) inReview += 1;
+    if (isHubDoneStatusText(status)) done += 1;
+    if (status.includes('review') || status === 'qa' || status.includes('ready for qa')) inReview += 1;
     const due = card.dueDate ? new Date(card.dueDate).getTime() : NaN;
-    if (Number.isFinite(due) && due < now && !(status.includes('done') || status.includes('complete'))) {
+    if (Number.isFinite(due) && due < now && !isHubDoneStatusText(status)) {
       overdue += 1;
     }
   }
@@ -95,8 +149,7 @@ function hubCardStatusText(card, listById) {
 }
 
 function isHubCardDoneStatus(status) {
-  const s = String(status || '').toLowerCase();
-  return s.includes('done') || s.includes('complete') || s === 'done';
+  return isHubDoneStatusText(status);
 }
 
 /**
@@ -879,12 +932,21 @@ export function normalizeHubActivityRow(raw) {
     }
     return { ...base, field: 'issue', from: null, to: null };
   }
+  if (
+    type === 'project.updated' ||
+    type === 'settings_updated' ||
+    type === 'project.settings' ||
+    type.startsWith('project.')
+  ) {
+    return { ...base, field: 'projectSettings', from: null, to: null };
+  }
   return { ...base, field: type || 'issue', from: null, to: null };
 }
 
 function hubActivityFieldLabel(field, t) {
   const key = String(field || '').trim();
   if (!key) return t('workspace.projectHubWorkFieldIssue');
+  if (key === 'projectSettings') return t('workspace.projectHubActivityProjectUpdated');
   if (key.includes(',')) {
     return key
       .split(',')
@@ -896,7 +958,7 @@ function hubActivityFieldLabel(field, t) {
   return i18nKey ? t(i18nKey) : key;
 }
 
-function formatHubActivityValue(value, t, locale = 'vi', field = '') {
+function formatHubActivityValue(value, t, locale = 'vi', field = '', lists = []) {
   if (value === null || value === undefined || value === '') {
     return t('workspace.projectHubWorkNone');
   }
@@ -906,27 +968,54 @@ function formatHubActivityValue(value, t, locale = 'vi', field = '') {
   if (typeof value === 'object') {
     const nested = value?.title || value?.name || value?.label;
     if (nested) return String(nested);
-    if (value._id || value.id) return String(value._id || value.id);
+    if (value._id || value.id) {
+      return formatHubActivityValue(value._id || value.id, t, locale, field, lists);
+    }
   }
   const text = String(value);
   if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
     return formatHubDate(text, locale);
   }
   const fieldKey = String(field || '');
-  if (fieldKey === 'status' || fieldKey === 'listId') {
+  if (fieldKey === 'listId' || fieldKey === 'status') {
+    const listHit = (Array.isArray(lists) ? lists : []).find(
+      (l) => String(l?._id || l?.id) === text
+    );
+    if (listHit) return localizeBoardListTitle(listHit, t);
+    const statusKeyLabel = {
+      todo: 'workspace.boardListTodo',
+      to_do: 'workspace.boardListTodo',
+      in_progress: 'workspace.boardListInProgress',
+      qa: 'workspace.boardListReadyForQa',
+      done: 'workspace.boardListDone',
+      completed: 'workspace.boardListDone',
+    }[text.toLowerCase()];
+    if (statusKeyLabel) {
+      const mapped = t(statusKeyLabel);
+      if (mapped && mapped !== statusKeyLabel) return mapped;
+    }
     const statusLabel = HISTORY_STATUS_LABELS[text.toLowerCase()];
-    if (statusLabel) return statusLabel;
+    if (statusLabel) {
+      const viaTitle = localizeBoardListTitle({ title: statusLabel, statusKey: text }, t);
+      return viaTitle || statusLabel;
+    }
+    // Hide raw ObjectIds when list catalog missing.
+    if (/^[a-f\d]{24}$/i.test(text)) return t('workspace.projectHubWorkNone');
   }
   return text;
 }
 
 /** Một dòng mô tả activity (i18n), không trả raw type/field key. */
-export function formatHubActivityLine(row, t, { locale = 'vi' } = {}) {
+export function formatHubActivityLine(row, t, { locale = 'vi', lists = [] } = {}) {
   const norm =
     row && Object.prototype.hasOwnProperty.call(row, 'field') && !row?.payload
       ? row
       : normalizeHubActivityRow(row);
   const field = String(norm.field || '');
+
+  if (field === 'projectSettings') {
+    return t('workspace.projectHubActivityProjectUpdated');
+  }
   const fieldLabel = hubActivityFieldLabel(field, t);
 
   if (field === 'issue') {
@@ -949,8 +1038,8 @@ export function formatHubActivityLine(row, t, { locale = 'vi' } = {}) {
     ((norm.from !== null && norm.from !== undefined && norm.from !== '') ||
       (norm.to !== null && norm.to !== undefined && norm.to !== ''))
   ) {
-    const from = formatHubActivityValue(norm.from, t, locale, field);
-    const to = formatHubActivityValue(norm.to, t, locale, field);
+    const from = formatHubActivityValue(norm.from, t, locale, field, lists);
+    const to = formatHubActivityValue(norm.to, t, locale, field, lists);
     line = `${line}: ${from} → ${to}`;
   }
 
@@ -958,7 +1047,7 @@ export function formatHubActivityLine(row, t, { locale = 'vi' } = {}) {
 }
 
 /** Map activity API / fallback card → item hiển thị Overview & Activity tab. */
-export function mapHubActivityItem(raw, t, { locale = 'vi', members = [], cards = [] } = {}) {
+export function mapHubActivityItem(raw, t, { locale = 'vi', members = [], cards = [], lists = [] } = {}) {
   if (raw?.kind === 'card') {
     return {
       id: raw.id,
@@ -990,7 +1079,7 @@ export function mapHubActivityItem(raw, t, { locale = 'vi', members = [], cards 
     id: norm.id || `${norm.type}-${norm.at}`,
     at: norm.at,
     title: norm.workTitle || cardTitle || t('workspace.projectHubActivityUntitledWork'),
-    detail: formatHubActivityLine(norm, t, { locale }),
+    detail: formatHubActivityLine(norm, t, { locale, lists }),
     assigneeName: '',
     actorName: actor?.name || '',
   };
@@ -1302,22 +1391,41 @@ export function statusBucketPillClass(bucket) {
   return 'border-border bg-muted text-muted-foreground';
 }
 
-/**
- * Màu bar Timeline theo status bucket; overdue ưu tiên destructive.
- * Token design system — không hex.
- */
-export function timelineBarToneClass({ bucket, dueTone } = {}) {
+/** Dot legend / work-row status — solid token fills. */
+export function timelineStatusDotClass({ bucket, dueTone } = {}) {
   if (dueTone === 'overdue') return 'bg-destructive';
   if (bucket === 'done') return 'bg-success';
   if (bucket === 'progress') return 'bg-primary';
-  return 'bg-primary/40 ring-1 ring-inset ring-primary/25';
+  return 'bg-muted-foreground';
 }
 
-export function timelineBarForegroundClass({ bucket, dueTone } = {}) {
-  if (dueTone === 'overdue' || bucket === 'done' || bucket === 'progress') {
-    return 'text-primary-foreground';
-  }
-  return 'text-foreground';
+/**
+ * Màu nền bar Gantt theo loại việc — Gantt đa sắc khi hầu hết còn "Cần làm".
+ * Token design system (chart/ai/info/…) — không hex.
+ */
+export function timelineWorkTypeBarClass(workType) {
+  const t = String(workType || '').toLowerCase();
+  if (t === 'epic') return 'bg-ai';
+  if (t === 'feature') return 'bg-info';
+  if (t === 'story') return 'bg-primary';
+  if (t === 'bug') return 'bg-destructive';
+  if (t === 'subtask') return 'bg-muted-foreground';
+  return 'bg-chart-2';
+}
+
+/**
+ * Màu bar Timeline: overdue/done/progress theo status; todo theo workType.
+ * Bar đặc (solid) — trọng tâm panel thời gian bên phải.
+ */
+export function timelineBarToneClass({ bucket, dueTone, workType } = {}) {
+  if (dueTone === 'overdue') return 'bg-destructive';
+  if (bucket === 'done') return 'bg-success';
+  if (bucket === 'progress') return 'bg-primary';
+  return timelineWorkTypeBarClass(workType);
+}
+
+export function timelineBarForegroundClass() {
+  return 'text-primary-foreground';
 }
 
 export function childWorkProgressPct(done, total) {
@@ -2170,7 +2278,7 @@ export function hubOverviewAggregateEnabled() {
 }
 
 /**
- * Hạng mục thuộc 1 lát/cột Overview chart (status | priority | assignee).
+ * Hạng mục thuộc 1 lát/cột Overview chart (status | priority | assignee | type).
  * @returns {{ id: string, title: string, priority?: string, assigneeName?: string }[]}
  */
 export function listOverviewChartSegmentCards({
@@ -2188,7 +2296,14 @@ export function listOverviewChartSegmentCards({
   const kind = String(chart || '').toLowerCase();
   const out = [];
 
-  if (kind === 'status') {
+  if (kind === 'type') {
+    for (const card of cards || []) {
+      const it = String(card?.issueType || card?.type || 'task').toLowerCase();
+      const bucket =
+        it === 'story' || it === 'bug' || it === 'task' ? it : 'other';
+      if (bucket === key) out.push(overviewChartCardRow(card, members));
+    }
+  } else if (kind === 'status') {
     for (const card of cards || []) {
       const list = listById.get(String(card?.listId || card?.list || ''));
       const bucket = list
@@ -2292,22 +2407,26 @@ export function dueDateTone(dueDate, statusOrList) {
   return 'none';
 }
 
+function hubDateLocaleTag(locale = 'vi') {
+  return String(locale || '').toLowerCase().startsWith('en') ? 'en-US' : 'vi-VN';
+}
+
 export function formatHubDateShort(value, locale = 'vi') {
   if (!value) return '';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString(locale === 'en' ? 'en-US' : 'en-US', {
+  return d.toLocaleDateString(hubDateLocaleTag(locale), {
     month: 'short',
     day: 'numeric',
   });
 }
 
-/** Created / Updated — Aug 07, 2026, 9:27 AM */
-export function formatHubDateTime(value, locale = 'en') {
+/** Created / Updated — locale-aware (vi: 29 thg 10, 2026, 21:35). */
+export function formatHubDateTime(value, locale = 'vi') {
   if (!value) return '';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString(locale === 'vi' ? 'en-US' : 'en-US', {
+  return d.toLocaleString(hubDateLocaleTag(locale), {
     month: 'short',
     day: '2-digit',
     year: 'numeric',
@@ -2316,12 +2435,12 @@ export function formatHubDateTime(value, locale = 'en') {
   });
 }
 
-/** Due date — Aug 8, 2026 */
-export function formatHubDueDate(value, locale = 'en') {
+/** Due date — locale-aware. */
+export function formatHubDueDate(value, locale = 'vi') {
   if (!value) return '';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString(locale === 'en' ? 'en-US' : 'en-US', {
+  return d.toLocaleDateString(hubDateLocaleTag(locale), {
     month: 'short',
     day: 'numeric',
     year: 'numeric',

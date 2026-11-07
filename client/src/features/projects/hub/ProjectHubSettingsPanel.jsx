@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
+import { VH_MOTION_BTN, VH_MOTION_CARD } from '../../../motion/classes';
 import toast from 'react-hot-toast';
 import { AdminLoadErrorState } from '../../../components/adminUsers/adminPanelStates';
 import { useQueryClient } from '@tanstack/react-query';
@@ -1413,11 +1414,12 @@ export default function ProjectHubSettingsPanel({
     Boolean(canArchiveProject) && projectStillActive && Boolean(resolvedProjectId);
 
   return (
-    <div className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto">
+    <div className="scrollbar-overlay flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain bg-background">
       <div className="mx-auto w-full max-w-3xl px-4 py-4 sm:px-6 sm:py-5">
         <header className="mb-5 border-b border-border/60 pb-4">
-          <h3 className={`text-base font-bold ${titleCls}`}>{t('workspace.projectHubTabSettings')}</h3>
-          <p className={`mt-0.5 max-w-xl text-xs leading-relaxed ${muted}`}>{t('workspace.projectHubSettingsHint')}</p>
+          <h3 className={`text-base font-bold ${titleCls}`}>
+            {t('workspace.projectHubTabSettings')}
+          </h3>
         </header>
 
         {catalogLoadError ? (
@@ -1435,7 +1437,7 @@ export default function ProjectHubSettingsPanel({
               <button
                 type="button"
                 onClick={() => setOpenSection(group.id)}
-                className="flex w-full items-start gap-2 rounded-xl border border-border bg-surface px-3 py-3 text-left text-foreground transition-colors motion-reduce:transition-none hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className={`flex w-full items-start gap-2 rounded-xl border border-border bg-surface px-3 py-3 text-left text-foreground transition-colors motion-reduce:transition-none hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${VH_MOTION_CARD}`}
                 aria-label={t('workspace.projectHubSettingsOpenAria', { title: group.title })}
               >
                 <div className="min-w-0 flex-1">
@@ -1480,7 +1482,7 @@ export default function ProjectHubSettingsPanel({
               type="button"
               disabled={!canArchiveNow}
               onClick={() => onRequestArchive?.()}
-              className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm font-semibold text-destructive hover:bg-destructive/15 disabled:cursor-not-allowed disabled:opacity-50"
+              className={`mt-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm font-semibold text-destructive hover:bg-destructive/15 disabled:cursor-not-allowed disabled:opacity-50 ${VH_MOTION_BTN}`}
             >
               {isDraftProject
                 ? t('workspace.projectHubDeleteDraft')

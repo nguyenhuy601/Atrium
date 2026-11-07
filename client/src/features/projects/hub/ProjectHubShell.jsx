@@ -1,6 +1,8 @@
-import { cloneElement, isValidElement, lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { cloneElement, isValidElement, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, ChevronLeft, ChevronRight, ExternalLink, FileText, LayoutGrid, Loader2, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, FileText, Loader2 } from 'lucide-react';
+import { VH_MOTION_BTN, VH_MOTION_CARD, VH_MOTION_SPINNER } from '../../../motion/classes';
+
 import toast from 'react-hot-toast';
 import { useAppStrings } from '../../../locales/appStrings';
 import { projectAPI } from '../../../services/api/projectAPI';
@@ -17,15 +19,30 @@ import ProjectHubTimelinePanel from './ProjectHubTimelinePanel';
 import ProjectHubChangeRequestsPanel from './ProjectHubChangeRequestsPanel';
 import ProjectHubExecutionControlPanel from './ExecutionControl/ProjectHubExecutionControlPanel';
 import ProjectHubTestCasesPanel from './ProjectHubTestCasesPanel';
-import ProjectHubDeliveryPhasePanel from './ProjectHubDeliveryPhasePanel';
 import WorkItemDetail from './WorkItemDetail';
 import ProjectChatWorkspace from '../chat/ProjectChatWorkspace';
 import ProjectHubCompleteSprintModal from './ProjectHubCompleteSprintModal';
 import ProjectHubCompleteProjectModal from './ProjectHubCompleteProjectModal';
 import ProjectHubArchiveProjectModal from './ProjectHubArchiveProjectModal';
-import ProjectHubOverviewCharts from './ProjectHubOverviewCharts';
+import ProjectHubOverviewPanel from './ProjectHubOverviewPanel';
+import {
+  HUB_BADGE_CODE,
+  HUB_BADGE_META,
+  HUB_BADGE_PHASE,
+  HUB_EMPTY,
+  HUB_HEADER,
+  HUB_HEADER_ROW,
+  HUB_HINT,
+  HUB_ICON_BTN,
+  HUB_MUTED,
+  HUB_TAB_ACTIVE,
+  HUB_TAB_DISABLED,
+  HUB_TAB_IDLE,
+  HUB_TITLE,
+} from './projectHubUiClasses';
+import { lazyWithRetry } from '../../../utils/lazyWithRetry';
 
-const ProjectClosureReportPage = lazy(() => import('./reports/ProjectClosureReportPage'));
+const ProjectClosureReportPage = lazyWithRetry(() => import('./reports/ProjectClosureReportPage'));
 import useSprintAutoCompletePrompt from './useSprintAutoCompletePrompt';
 import { isBoardSprintReady } from './projectHubHierarchy';
 import { buildProjectsPickerPath, isProjectChatTabEnabled } from '../../../utils/suitePathUtils';
@@ -43,11 +60,8 @@ import {
   countUnassignedOpenCards,
   formatHubDate,
   formatHubMethodology,
-  formatHubProjectStatus,
-  hubAttentionState,
   hubOverviewAggregateEnabled,
   listHubHealthCards,
-  normalizeIssueType,
   mapHubActivityItem,
   pickNextHubActions,
   projectInitials,
@@ -59,7 +73,6 @@ import {
   deliveryPhaseLabelKey,
   isClosedProjectStatus,
 } from '../../../utils/projectPhaseNav';
-import Phase2GateBanner from '../phase/Phase2GateBanner';
 import {
   useInvalidateProjectHub,
   useProjectHubMembers,
@@ -71,749 +84,12 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../../../lib/queryKeys';
 
-function OverviewMetricSkeleton({ count = 4, isDarkMode }) {
-  const pulse = isDarkMode ? 'bg-white/10' : 'bg-muted';
+function FilesPanel({ files, t }) {
   return (
-    <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-      {Array.from({ length: count }, (_, i) => (
-        <div
-          key={i}
-          className={`h-[4.25rem] animate-pulse rounded-lg motion-reduce:animate-none ${pulse}`}
-          aria-hidden
-        />
-      ))}
-    </div>
-  );
-}
-
-function OverviewContextSkeleton({ isDarkMode }) {
-  const pulse = isDarkMode ? 'bg-white/10' : 'bg-muted';
-  return (
-    <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            className={`h-56 animate-pulse rounded-xl motion-reduce:animate-none ${
-              i === 2 ? 'sm:col-span-2 lg:col-span-1' : ''
-            } ${pulse}`}
-            aria-hidden
-          />
-        ))}
-      </div>
-      <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
-        {[0, 1].map((i) => (
-          <div key={i} className={`h-40 animate-pulse rounded-xl motion-reduce:animate-none ${pulse}`} aria-hidden />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function overviewIssueTypeLabel(type, t) {
-  const raw = String(type || '').toLowerCase();
-  if (raw === 'feature') return t('workspace.projectHubIssueTypeFeature');
-  if (raw === 'subtask') return t('workspace.projectHubIssueTypeSubtask');
-  const key = normalizeIssueType(type);
-  if (key === 'story') return t('workspace.projectHubIssueTypeStory');
-  if (key === 'bug') return t('workspace.projectHubIssueTypeBug');
-  if (key === 'epic') return t('workspace.projectHubIssueTypeEpic');
-  return t('workspace.projectHubIssueTypeTask');
-}
-
-function overviewActionStatusLabel(action, t) {
-  if (action?.statusLabel) return action.statusLabel;
-  const raw = String(action?.statusKey || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, '_');
-  if (!raw) return '';
-  const key = `workspace.projectHubWorkStatus_${raw}`;
-  const label = t(key);
-  return label === key ? action.statusKey : label;
-}
-
-function overviewSprintStatusLabel(sprint, t) {
-  const s = String(sprint?.status || 'planned').toLowerCase();
-  const key = `workspace.projectHubPlanningStatus_${s}`;
-  const label = t(key);
-  return label === key ? s : label;
-}
-
-/** Tooltip tên hạng mục khi hover/focus KPI hoặc banner Attention. */
-function OverviewHealthTip({ items = [], totalCount = 0, heading, moreLabel, children, className = '' }) {
-  const tipId = useId();
-  const [open, setOpen] = useState(false);
-  const hasItems = items.length > 0;
-  const hiddenMore = Math.max(0, Number(totalCount) - items.length);
-  const hoverUnavailable =
-    typeof window !== 'undefined' && window.matchMedia?.('(hover: none)').matches;
-
-  return (
-    <div
-      className={`relative ${className}`}
-      onMouseEnter={() => {
-        if (!hoverUnavailable && hasItems) setOpen(true);
-      }}
-      onMouseLeave={() => {
-        if (!hoverUnavailable) setOpen(false);
-      }}
-      onFocus={() => hasItems && setOpen(true)}
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget)) setOpen(false);
-      }}
-      onClick={() => {
-        if (hoverUnavailable && hasItems) setOpen((v) => !v);
-      }}
-      onKeyDown={(e) => {
-        if (!hasItems) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          setOpen((v) => !v);
-        }
-      }}
-    >
-      {typeof children === 'function' ? children({ tipId, open, hasItems }) : children}
-      {open && hasItems ? (
-        <div
-          id={tipId}
-          role="tooltip"
-          className="absolute left-0 top-full z-20 mt-1.5 w-max max-w-[min(16rem,calc(100vw-2rem))] rounded-md border border-border bg-surface px-2.5 py-2 text-left shadow-md sm:left-1/2 sm:-translate-x-1/2"
-        >
-          {heading ? (
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {heading}
-            </p>
-          ) : null}
-          <ul className="space-y-0.5">
-            {items.map((row) => (
-              <li key={row.id || row.title} className="truncate text-xs font-medium text-foreground">
-                {row.title}
-              </li>
-            ))}
-          </ul>
-          {hiddenMore > 0 && moreLabel ? (
-            <p className="mt-1 text-[10px] text-muted-foreground">{moreLabel}</p>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function OverviewPanel({
-  board,
-  projectStatus = '',
-  deliveryPhase = 'development',
-  projectId = '',
-  organizationId = '',
-  canChangeDeliveryPhase = false,
-  canSignOffUat = false,
-  canAcceptHandover = false,
-  handoverChecklist = null,
-  releaseLabel = '',
-  releaseReadyStatus = 'none',
-  uatStatus = 'none',
-  deployEvidence = null,
-  summary,
-  deliveryExtras = { unassigned: 0, estimateHours: 0 },
-  dashboardCharts = null,
-  nextActions = [],
-  overdueCards = [],
-  inReviewCards = [],
-  overviewCards = [],
-  overviewLists = [],
-  overviewMembers = [],
-  chartWorkItemsLoading = false,
-  activity,
-  activityLoading = false,
-  activityError = false,
-  onRetryActivity,
-  activeSprint = null,
-  sprintIssueCount = 0,
-  planningPulse = { epic: 0, feature: 0 },
-  boardLoading = false,
-  sprintContextLoading = false,
-  planningContextLoading = false,
-  locale,
-  isDarkMode,
-  onOpenBoard,
-  onOpenBacklog,
-  onOpenNextAction,
-  onViewAllActivity,
-  overviewVisibility = null,
-  activityRestricted = false,
-  t,
-}) {
-  const vis = overviewVisibility || {
-    capsReady: false,
-    canViewTaskMetrics: false,
-    canViewMemberBreakdown: false,
-    canViewSprintContext: false,
-    canViewPlanningPulse: false,
-    canViewActivity: false,
-    canShowAssigneeNames: false,
-    canOpenBacklog: false,
-    canOpenBoard: false,
-  };
-  const muted = isDarkMode ? 'text-slate-400' : 'text-muted-foreground';
-  const titleCls = isDarkMode ? 'text-white' : 'text-foreground';
-  const cardCls = 'rounded-xl border border-border bg-surface p-4';
-  const statusLabel = formatHubProjectStatus(projectStatus, t);
-  const phaseLabel = t(deliveryPhaseLabelKey(deliveryPhase));
-  const attention = hubAttentionState({ overdue: summary.overdue });
-  const reviewPercent = summary.total
-    ? Math.round(((Number(summary.inReview) || 0) / Number(summary.total)) * 100)
-    : 0;
-  const estimateLabel =
-    Number(deliveryExtras.estimateHours) % 1 === 0
-      ? String(deliveryExtras.estimateHours)
-      : Number(deliveryExtras.estimateHours).toFixed(1);
-  // Unassigned chỉ hiện ở assignee donut — không tile trùng dưới KPI.
-  const extrasTiles =
-    Number(deliveryExtras.estimateHours) > 0
-      ? [[estimateLabel, t('workspace.projectHubStatEstimateTotal')]]
-      : [];
-  const showBacklogCta = Boolean(vis.canOpenBacklog);
-  const showBoardCta = Boolean(vis.canOpenBoard);
-  const ctaCount = (showBacklogCta ? 1 : 0) + (showBoardCta ? 1 : 0);
-  const showActivity = Boolean(vis.canViewActivity) && !activityRestricted;
-
-  return (
-    <div className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-4">
-      <Phase2GateBanner
-        projectId={projectId}
-        organizationId={organizationId}
-        deliveryPhase={deliveryPhase}
-        canChangePhase={canChangeDeliveryPhase}
-      />
-      <ProjectHubDeliveryPhasePanel
-        projectId={projectId}
-        deliveryPhase={deliveryPhase}
-        canChangePhase={canChangeDeliveryPhase}
-        canSignOffUat={canSignOffUat}
-        canAcceptHandover={canAcceptHandover}
-        isDarkMode={isDarkMode}
-        handoverChecklist={handoverChecklist}
-        releaseLabel={releaseLabel}
-        releaseReadyStatus={releaseReadyStatus}
-        uatStatus={uatStatus}
-        deployEvidence={deployEvidence}
-      />
-      <header className="mb-4 rounded-xl border border-border bg-surface p-3 sm:p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0 w-full">
-            <h2 className={`text-lg font-bold leading-snug break-words sm:text-xl ${titleCls}`}>
-              {board?.title || t('workspace.projectHubUntitled')}
-            </h2>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              {board?.projectCode ? (
-                <span className="rounded bg-primary/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">
-                  {board.projectCode}
-                </span>
-              ) : null}
-              {board?.methodology ? (
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground">
-                  {formatHubMethodology(board.methodology, t)}
-                </span>
-              ) : null}
-              {statusLabel ? (
-                <span className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-foreground">
-                  {statusLabel}
-                </span>
-              ) : null}
-              {phaseLabel ? (
-                <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-primary">
-                  {phaseLabel}
-                </span>
-              ) : null}
-            </div>
-            <p className={`mt-2 flex flex-wrap items-center gap-1 text-xs ${muted}`}>
-              <Calendar size={12} className="shrink-0" aria-hidden />
-              <span>
-                {t('workspace.projectHubFieldDue')}: {formatHubDate(board?.dueDate, locale)}
-              </span>
-            </p>
-            <p className={`mt-1 max-w-prose text-xs leading-relaxed ${muted}`}>
-              {t('workspace.projectHubOverviewHint')}
-            </p>
-          </div>
-          {ctaCount > 0 ? (
-            <div
-              className={
-                ctaCount > 1
-                  ? 'grid w-full grid-cols-2 gap-2 lg:flex lg:w-auto lg:shrink-0'
-                  : 'grid w-full grid-cols-1 gap-2 lg:flex lg:w-auto lg:shrink-0'
-              }
-            >
-              {showBacklogCta ? (
-                <button
-                  type="button"
-                  onClick={onOpenBacklog}
-                  aria-label={t('workspace.projectHubOpenBacklog')}
-                  className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border bg-background px-3 py-2 text-center text-xs font-semibold text-foreground hover:bg-muted"
-                >
-                  <span className="lg:hidden">{t('workspace.projectHubOpenBacklogShort')}</span>
-                  <span className="hidden lg:inline">{t('workspace.projectHubOpenBacklog')}</span>
-                </button>
-              ) : null}
-              {showBoardCta ? (
-                <button
-                  type="button"
-                  onClick={onOpenBoard}
-                  aria-label={t('workspace.projectHubOpenBoard')}
-                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-center text-xs font-semibold text-primary-foreground"
-                >
-                  <LayoutGrid size={14} className="shrink-0" aria-hidden />
-                  <span className="lg:hidden">{t('workspace.projectHubOpenBoardShort')}</span>
-                  <span className="hidden lg:inline">{t('workspace.projectHubOpenBoard')}</span>
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </header>
-
-      {vis.canViewTaskMetrics ? (
-      <section className={cardCls} aria-labelledby="overview-project-health">
-        <h3
-          id="overview-project-health"
-          className={`mb-3 text-xs font-semibold uppercase tracking-wide ${muted}`}
-        >
-          {t('workspace.projectHubProjectHealth')}
-        </h3>
-        {boardLoading ? (
-          <OverviewMetricSkeleton count={4} isDarkMode={isDarkMode} />
-        ) : (
-          <>
-            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-              {[
-                {
-                  key: 'total',
-                  value: String(summary.total),
-                  label: t('workspace.projectHubStatCards'),
-                  extra: '',
-                  tone: '',
-                  tipItems: null,
-                  tipTotal: 0,
-                  tipHeading: '',
-                },
-                {
-                  key: 'done',
-                  value: `${summary.donePercent}%`,
-                  label: t('workspace.projectHubStatDone'),
-                  extra:
-                    summary.total > 0
-                      ? t('workspace.projectHubStatDoneSub', { n: summary.done || 0 })
-                      : '',
-                  tone: summary.donePercent >= 80 ? 'success' : '',
-                  tipItems: null,
-                  tipTotal: 0,
-                  tipHeading: '',
-                },
-                {
-                  key: 'inReview',
-                  value: String(summary.inReview || 0),
-                  label: t('workspace.projectHubStatInReview'),
-                  extra: t('workspace.projectHubStatInReviewPct', { pct: reviewPercent }),
-                  tone: Number(summary.inReview) > 0 ? 'warning' : '',
-                  tipItems: inReviewCards,
-                  tipTotal: Number(summary.inReview) || 0,
-                  tipHeading: t('workspace.projectHubHealthTipInReview'),
-                },
-                {
-                  key: 'overdue',
-                  value: String(summary.overdue),
-                  label: t('workspace.projectHubStatOverdue'),
-                  extra: '',
-                  tone: attention === 'attention' ? 'destructive' : '',
-                  tipItems: overdueCards,
-                  tipTotal: Number(summary.overdue) || 0,
-                  tipHeading: t('workspace.projectHubHealthTipOverdue'),
-                },
-              ].map(({ key, value, label, extra, tone, tipItems, tipTotal, tipHeading }) => {
-                const tile = (
-                  <div
-                    className={`rounded-lg border px-2.5 py-3 text-center ${
-                      tone === 'destructive'
-                        ? 'border-destructive/50 bg-destructive/5'
-                        : tone === 'warning'
-                          ? 'border-warning/40 bg-amber-500/5'
-                          : tone === 'success'
-                            ? 'border-success/30 bg-emerald-500/5'
-                            : 'border-border bg-background'
-                    } ${tipItems?.length ? 'cursor-help' : ''}`}
-                  >
-                    <div className={`text-lg font-bold ${titleCls}`}>{value}</div>
-                    <div className={`text-[10px] leading-snug ${muted}`}>{label}</div>
-                    {extra ? <div className={`mt-0.5 text-[10px] ${muted}`}>{extra}</div> : null}
-                  </div>
-                );
-                if (!(tipItems?.length > 0)) {
-                  return <div key={key}>{tile}</div>;
-                }
-                return (
-                  <OverviewHealthTip
-                    key={key}
-                    items={tipItems}
-                    totalCount={tipTotal}
-                    heading={tipHeading}
-                    moreLabel={t('workspace.projectHubHealthTipMore', {
-                      n: Math.max(0, tipTotal - tipItems.length),
-                    })}
-                  >
-                    {({ tipId, hasItems }) => (
-                      <div
-                        tabIndex={hasItems ? 0 : undefined}
-                        aria-describedby={hasItems ? tipId : undefined}
-                      >
-                        {tile}
-                      </div>
-                    )}
-                  </OverviewHealthTip>
-                );
-              })}
-            </div>
-            {attention === 'attention' && overdueCards.length > 0 ? (
-              <OverviewHealthTip
-                className="mt-3"
-                items={overdueCards}
-                totalCount={Number(summary.overdue) || 0}
-                heading={t('workspace.projectHubHealthTipOverdue')}
-                moreLabel={t('workspace.projectHubHealthTipMore', {
-                  n: Math.max(0, (Number(summary.overdue) || 0) - overdueCards.length),
-                })}
-              >
-                {({ tipId, hasItems }) => (
-                  <div
-                    className="flex cursor-help items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive"
-                    role="status"
-                    tabIndex={hasItems ? 0 : undefined}
-                    aria-describedby={hasItems ? tipId : undefined}
-                  >
-                    <span className="h-2 w-2 shrink-0 rounded-full bg-destructive" aria-hidden />
-                    <span className="font-medium">
-                      {t('workspace.projectHubHealthAttention', { n: summary.overdue })}
-                    </span>
-                  </div>
-                )}
-              </OverviewHealthTip>
-            ) : (
-              <div
-                className={`mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
-                  attention === 'attention'
-                    ? 'border-destructive/40 bg-destructive/5 text-destructive'
-                    : 'border-success/30 bg-success/5 text-success'
-                }`}
-                role="status"
-              >
-                <span
-                  className={`h-2 w-2 shrink-0 rounded-full ${
-                    attention === 'attention' ? 'bg-destructive' : 'bg-success'
-                  }`}
-                  aria-hidden
-                />
-                <span className="font-medium">
-                  {attention === 'attention'
-                    ? t('workspace.projectHubHealthAttention', { n: summary.overdue })
-                    : t('workspace.projectHubHealthOnTrack')}
-                </span>
-              </div>
-            )}
-            {extrasTiles.length > 0 ? (
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {extrasTiles.map(([v, l]) => (
-                  <div
-                    key={l}
-                    className="rounded-lg border border-dashed border-border bg-background px-2 py-2 text-center"
-                  >
-                    <div className={`text-sm font-bold ${titleCls}`}>{v}</div>
-                    <div className={`text-[10px] ${muted}`}>{l}</div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </>
-        )}
-      </section>
-      ) : null}
-
-      {boardLoading ? (
-        <div className="mt-3">
-          <OverviewContextSkeleton isDarkMode={isDarkMode} />
-        </div>
-      ) : vis.canViewTaskMetrics && dashboardCharts ? (
-        <ProjectHubOverviewCharts
-          charts={dashboardCharts}
-          cards={overviewCards}
-          lists={overviewLists}
-          members={overviewMembers}
-          cardsLoading={chartWorkItemsLoading}
-          showAssigneeChart={vis.canViewMemberBreakdown}
-          muted={muted}
-          titleCls={titleCls}
-          cardCls={cardCls}
-          t={t}
-          onOpenCard={onOpenNextAction}
-        />
-      ) : null}
-
-      {boardLoading || !vis.canViewTaskMetrics ? null : (
-        <div className="mt-3 grid gap-3 lg:grid-cols-[1.4fr_1fr]">
-          <section className={cardCls} aria-labelledby="overview-action-center">
-            <h3
-              id="overview-action-center"
-              className={`mb-3 text-xs font-semibold uppercase tracking-wide ${muted}`}
-            >
-              {t('workspace.projectHubNextActions')}
-            </h3>
-            {nextActions.length === 0 ? (
-              <p className={`text-sm ${muted}`}>{t('workspace.projectHubNextActionsEmpty')}</p>
-            ) : (
-              <ul className="space-y-2">
-                {nextActions.map((a) => {
-                  const dueCls =
-                    a.dueTone === 'overdue'
-                      ? 'text-destructive'
-                      : a.dueTone === 'soon'
-                        ? 'text-primary'
-                        : muted;
-                  const statusText = overviewActionStatusLabel(a, t);
-                  const who = vis.canShowAssigneeNames
-                    ? a.assigneeName || t('workspace.projectHubStatUnassigned')
-                    : a.assigneeName
-                      ? t('workspace.projectHubOverviewAssigneeRestricted')
-                      : t('workspace.projectHubStatUnassigned');
-                  return (
-                    <li
-                      key={a.id}
-                      className={`rounded-md border px-2 py-1.5 last:mb-0 ${
-                        String(a.issueType || '').toLowerCase() === 'bug'
-                          ? 'border-rose-500/35 bg-rose-500/5'
-                          : a.dueTone === 'overdue'
-                            ? 'border-destructive/30 bg-destructive/5'
-                            : 'border-border/60 bg-background/50'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => onOpenNextAction?.(a.id)}
-                        className="w-full rounded-sm text-left text-sm hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                      >
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className={`text-[10px] font-semibold uppercase tracking-wide ${muted}`}>
-                            {overviewIssueTypeLabel(a.issueType, t)}
-                          </span>
-                          {a.issueKey ? (
-                            <span className="font-mono text-[10px] font-semibold text-primary">
-                              {a.issueKey}
-                            </span>
-                          ) : null}
-                        </div>
-                        <span className={`mt-0.5 block font-medium ${titleCls}`}>{a.title}</span>
-                        <span className={`mt-0.5 block text-[11px] ${muted}`}>
-                          {statusText ? `${statusText} · ${who}` : who}
-                        </span>
-                        {a.parentTitle ? (
-                          <span className={`mt-0.5 block text-[11px] ${muted}`}>
-                            {t('workspace.projectHubAttentionChildOf', {
-                              parent: a.parentTitle,
-                            })}
-                          </span>
-                        ) : a.isChild ? (
-                          <span className={`mt-0.5 block text-[11px] ${muted}`}>
-                            {t('workspace.projectHubAttentionHiddenChild')}
-                          </span>
-                        ) : null}
-                        {a.dueDate ? (
-                          <span className={`mt-0.5 block text-[11px] ${dueCls}`}>
-                            {t('workspace.projectHubActionDue', {
-                              date: formatHubDate(a.dueDate, locale),
-                            })}
-                          </span>
-                        ) : null}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-
-          <section className={cardCls} aria-labelledby="overview-delivery-snapshot">
-            <h3
-              id="overview-delivery-snapshot"
-              className={`mb-3 text-xs font-semibold uppercase tracking-wide ${muted}`}
-            >
-              {t('workspace.projectHubDeliveryPulse')}
-            </h3>
-            <dl className="space-y-2 text-sm">
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className={muted}>{t('workspace.projectHubSnapshotProgress')}</dt>
-                <dd className={`font-semibold ${titleCls}`}>{summary.donePercent}%</dd>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className={muted}>{t('workspace.projectHubFieldDue')}</dt>
-                <dd className={`font-medium ${titleCls}`}>{formatHubDate(board?.dueDate, locale)}</dd>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className={muted}>{t('workspace.projectHubVisibilityLabel')}</dt>
-                <dd className={`font-medium ${titleCls}`}>
-                  {board?.visibility === 'workspace'
-                    ? t('workspace.projectHubVisibilityWorkspace')
-                    : t('workspace.projectHubVisibilityPrivate')}
-                </dd>
-              </div>
-            </dl>
-
-            {vis.canViewSprintContext ? (
-            <div className="mt-3 border-t border-border pt-3">
-              <p className={`mb-1.5 text-[10px] font-semibold uppercase tracking-wide ${muted}`}>
-                {t('workspace.projectHubOverviewActiveSprint')}
-              </p>
-              {sprintContextLoading ? (
-                <div
-                  className={`h-16 animate-pulse rounded-lg motion-reduce:animate-none ${
-                    isDarkMode ? 'bg-white/10' : 'bg-muted'
-                  }`}
-                  aria-busy="true"
-                  aria-label={t('common.loading')}
-                />
-              ) : activeSprint ? (
-                <div className="space-y-1">
-                  <p className={`text-sm font-semibold ${titleCls}`}>
-                    {activeSprint.name || t('workspace.projectHubUntitled')}
-                  </p>
-                  <p className={`text-xs ${muted}`}>{overviewSprintStatusLabel(activeSprint, t)}</p>
-                  {activeSprint.startDate || activeSprint.endDate ? (
-                    <p className={`text-xs ${muted}`}>
-                      {t('workspace.projectHubOverviewSprintDates', {
-                        start: formatHubDate(activeSprint.startDate, locale),
-                        end: formatHubDate(activeSprint.endDate, locale),
-                      })}
-                    </p>
-                  ) : null}
-                  <p className={`text-xs ${muted}`}>
-                    {t('workspace.projectHubOverviewSprintIssues', { n: sprintIssueCount })}
-                  </p>
-                </div>
-              ) : (
-                <p className={`text-sm ${muted}`}>{t('workspace.projectHubOverviewActiveSprintEmpty')}</p>
-              )}
-            </div>
-            ) : null}
-
-            {vis.canViewPlanningPulse ? (
-            <div className="mt-3 border-t border-border pt-3">
-              <p className={`mb-1.5 text-[10px] font-semibold uppercase tracking-wide ${muted}`}>
-                {t('workspace.projectHubOverviewBacklogPulse')}
-              </p>
-              {planningContextLoading ? (
-                <div
-                  className={`h-12 animate-pulse rounded-lg motion-reduce:animate-none ${
-                    isDarkMode ? 'bg-white/10' : 'bg-muted'
-                  }`}
-                  aria-busy="true"
-                  aria-label={t('common.loading')}
-                />
-              ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    [String(planningPulse.epic || 0), t('workspace.projectHubOverviewBacklogEpics')],
-                    [String(planningPulse.feature || 0), t('workspace.projectHubOverviewBacklogFeatures')],
-                  ].map(([v, l]) => (
-                    <div key={l} className="text-center">
-                      <div className={`text-sm font-bold ${titleCls}`}>{v}</div>
-                      <div className={`text-[10px] ${muted}`}>{l}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            ) : null}
-
-            {board?.description ? (
-              <p className={`mt-3 line-clamp-3 border-t border-border pt-3 text-xs ${muted}`}>
-                {board.description}
-              </p>
-            ) : null}
-          </section>
-        </div>
-      )}
-
-      {showActivity ? (
-      <div className={`${cardCls} mt-3`}>
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <p className={`text-xs font-semibold uppercase tracking-wide ${muted}`}>
-            {t('workspace.projectHubRecentActivity')}
-          </p>
-          {!activityLoading && !activityError && activity.length > 0 ? (
-            <button
-              type="button"
-              onClick={onViewAllActivity}
-              className="text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-sm"
-            >
-              {t('workspace.projectHubActivityViewAll')}
-            </button>
-          ) : null}
-        </div>
-        {activityLoading ? (
-          <div
-            className={`h-24 animate-pulse rounded-lg motion-reduce:animate-none ${
-              isDarkMode ? 'bg-white/10' : 'bg-muted'
-            }`}
-            aria-busy="true"
-            aria-label={t('common.loading')}
-          />
-        ) : activityError ? (
-          <div className="flex flex-col items-start gap-2">
-            <p className={`text-sm ${muted}`}>{t('workspace.projectHubActivityLoadFail')}</p>
-            <button
-              type="button"
-              onClick={onRetryActivity}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold"
-            >
-              <RefreshCw size={14} aria-hidden />
-              {t('workspace.projectHubActivityRetry')}
-            </button>
-          </div>
-        ) : activity.length === 0 ? (
-          <p className={`text-sm ${muted}`}>{t('workspace.projectHubActivityEmpty')}</p>
-        ) : (
-          <ul className="space-y-1.5">
-            {activity.slice(0, 6).map((a) => (
-              <li key={a.id} className={`text-xs ${muted}`}>
-                <span className={titleCls}>{a.title}</span>
-                <span className="mt-0.5 block">
-                  {a.actorName ? (
-                    <>
-                      <span className={titleCls}>{a.actorName}</span>
-                      {a.detail || a.at ? ' · ' : ''}
-                    </>
-                  ) : null}
-                  {[a.detail, formatHubDate(a.at, locale)].filter(Boolean).join(' · ')}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      ) : null}
-    </div>
-  );
-}
-
-function FilesPanel({ files, isDarkMode, t }) {
-  const muted = isDarkMode ? 'text-slate-400' : 'text-muted-foreground';
-  const titleCls = isDarkMode ? 'text-white' : 'text-foreground';
-  return (
-    <div className="flex h-full min-h-0 flex-col px-4 py-4">
-      <h3 className={`mb-1 text-sm font-bold ${titleCls}`}>{t('workspace.projectHubTabFiles')}</h3>
-      <p className={`mb-3 text-xs ${muted}`}>{t('workspace.projectHubFilesHint')}</p>
+    <div className="flex h-full min-h-0 flex-col bg-surface px-4 py-4 sm:px-5">
+      <h3 className={HUB_TITLE}>{t('workspace.projectHubTabFiles')}</h3>
       {files.length === 0 ? (
-        <p className={`rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm ${muted}`}>
-          {t('workspace.projectHubFilesEmpty')}
-        </p>
+        <p className={HUB_EMPTY}>{t('workspace.projectHubFilesEmpty')}</p>
       ) : (
         <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
           {files.map((f) => (
@@ -823,17 +99,15 @@ function FilesPanel({ files, isDarkMode, t }) {
             >
               <FileText size={16} className="shrink-0 text-primary" />
               <div className="min-w-0 flex-1">
-                <div className={`truncate text-sm font-semibold ${titleCls}`}>{f.name}</div>
-                <div className={`truncate text-[11px] ${muted}`}>
-                  {f.cardTitle || '—'}
-                </div>
+                <div className="truncate text-sm font-semibold text-foreground">{f.name}</div>
+                <div className={`truncate text-[11px] ${HUB_MUTED}`}>{f.cardTitle || '—'}</div>
               </div>
               {f.url ? (
                 <a
                   href={f.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="shrink-0 rounded-lg border border-border p-1.5 text-muted-foreground hover:text-primary"
+                  className="shrink-0 rounded-lg border border-border p-1.5 text-muted-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <ExternalLink size={14} />
                 </a>
@@ -848,9 +122,7 @@ function FilesPanel({ files, isDarkMode, t }) {
 
 const ACTIVITY_PAGE_SIZE = 10;
 
-function ActivityPanel({ activity, locale, isDarkMode, t }) {
-  const muted = isDarkMode ? 'text-slate-400' : 'text-muted-foreground';
-  const titleCls = isDarkMode ? 'text-white' : 'text-foreground';
+function ActivityPanel({ activity, locale, t }) {
   const [page, setPage] = useState(1);
   const totalPages = Math.max(1, Math.ceil((activity.length || 0) / ACTIVITY_PAGE_SIZE) || 1);
   const safePage = Math.min(Math.max(1, page), totalPages);
@@ -865,23 +137,20 @@ function ActivityPanel({ activity, locale, isDarkMode, t }) {
   }, [page, safePage]);
 
   return (
-    <div className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto px-4 py-4">
-      <h3 className={`mb-1 text-sm font-bold ${titleCls}`}>{t('workspace.projectHubTabActivity')}</h3>
-      <p className={`mb-3 text-xs ${muted}`}>{t('workspace.projectHubActivityHint')}</p>
+    <div className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto bg-surface px-4 py-4 sm:px-5">
+      <h3 className={HUB_TITLE}>{t('workspace.projectHubTabActivity')}</h3>
       {activity.length === 0 ? (
-        <p className={`rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm ${muted}`}>
-          {t('workspace.projectHubActivityEmpty')}
-        </p>
+        <p className={HUB_EMPTY}>{t('workspace.projectHubActivityEmpty')}</p>
       ) : (
         <>
           <ul className="space-y-2">
             {paged.map((a) => (
-              <li key={a.id} className="rounded-xl border border-border bg-surface px-3 py-2.5">
-                <div className={`text-sm font-semibold ${titleCls}`}>{a.title}</div>
-                <div className={`mt-0.5 text-xs ${muted}`}>
+              <li key={a.id} className={`rounded-xl border border-border bg-surface px-3 py-2.5 ${VH_MOTION_CARD}`}>
+                <div className="text-sm font-semibold text-foreground">{a.title}</div>
+                <div className="mt-0.5 text-xs text-muted-foreground">
                   {a.actorName ? (
                     <>
-                      <span className={titleCls}>{a.actorName}</span>
+                      <span className="text-foreground">{a.actorName}</span>
                       {' · '}
                     </>
                   ) : null}
@@ -898,7 +167,7 @@ function ActivityPanel({ activity, locale, isDarkMode, t }) {
                 type="button"
                 disabled={safePage <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-40"
+                className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-40 ${VH_MOTION_BTN}`}
                 aria-label={t('workspace.projectHubActivityPrev')}
               >
                 <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
@@ -911,7 +180,7 @@ function ActivityPanel({ activity, locale, isDarkMode, t }) {
                 type="button"
                 disabled={safePage >= totalPages}
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-40"
+                className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-40 ${VH_MOTION_BTN}`}
                 aria-label={t('workspace.projectHubActivityNext')}
               >
                 {t('workspace.projectHubActivityNext')}
@@ -1024,7 +293,8 @@ export default function ProjectHubShell({
     isLoading: overviewLoading,
     refetch: refetchOverview,
   } = useProjectHubOverview(projectId, {
-    enabled: useOverviewAggregate && tab === 'overview',
+    // Overview tab needs full payload; other tabs reuse summary for header % when board cards chưa hydrate.
+    enabled: useOverviewAggregate && Boolean(projectId),
   });
   const { data: projectQueryData = null } = useProjectHubProject(projectId);
   const projectPayload = projectQueryData ?? overviewPayload?.project ?? null;
@@ -1076,8 +346,28 @@ export default function ProjectHubShell({
       return computeHubBoardSummary(cards, lists);
     }
     if (overviewPayload?.summary) return overviewPayload.summary;
+    const progressRaw = Number(
+      projectPayload?.progressPercent ?? projectPayload?.progress ?? NaN
+    );
+    if (Number.isFinite(progressRaw)) {
+      const donePercent = Math.max(0, Math.min(100, Math.round(progressRaw)));
+      return { total: 1, done: donePercent >= 100 ? 1 : 0, donePercent, overdue: 0, inReview: 0 };
+    }
+    if (
+      isProjectCompletedStatus(projectPayload?.status || resolvedBoard?.status)
+    ) {
+      return { total: 1, done: 1, donePercent: 100, overdue: 0, inReview: 0 };
+    }
     return computeHubBoardSummary(cards, lists);
-  }, [overviewPayload?.summary, cards, lists]);
+  }, [
+    overviewPayload?.summary,
+    cards,
+    lists,
+    projectPayload?.progressPercent,
+    projectPayload?.progress,
+    projectPayload?.status,
+    resolvedBoard?.status,
+  ]);
   const overdueHealthCards = useMemo(() => {
     if (Array.isArray(cards) && cards.length > 0) {
       return listHubHealthCards(cards, lists, 'overdue', { limit: 8 });
@@ -1425,13 +715,14 @@ export default function ProjectHubShell({
       if (!tid || !Number.isFinite(at)) return true;
       return !statusTwinKeys.has(`${tid}:${Math.round(at / 3000)}`);
     });
-    return filtered.map((row) => mapHubActivityItem(row, t, { locale, cards }));
+    return filtered.map((row) => mapHubActivityItem(row, t, { locale, cards, lists }));
   }, [
     apiActivity,
     derivedActivity,
     t,
     locale,
     cards,
+    lists,
     overviewVisibility.canViewActivity,
     activityRestricted,
   ]);
@@ -1567,14 +858,22 @@ export default function ProjectHubShell({
     };
   }, [projectId, needsFiles, queryClient]);
 
+  const displayProjectTitle = String(
+    projectPayload?.title ||
+      resolvedBoard?.projectTitle ||
+      (resolvedBoard?.title && !/^prj$/i.test(String(resolvedBoard.title).trim())
+        ? resolvedBoard.title
+        : '') ||
+      ''
+  ).trim();
   const hasBoard = Boolean(boardId && resolvedBoard);
   /** Boards/detail still resolving — never flash empty “select board” picker. */
   const waitingForBoard =
     !hasBoard &&
     (Boolean(loadingBoards) || (Boolean(boardId) && Boolean(loadingBoardDetail)));
-  const initials = projectInitials(resolvedBoard?.title);
-  const muted = isDarkMode ? 'text-slate-400' : 'text-muted-foreground';
-  const titleCls = isDarkMode ? 'text-white' : 'text-foreground';
+  const initials = projectInitials(displayProjectTitle || resolvedBoard?.projectCode || 'PR');
+  const muted = HUB_MUTED;
+  const titleCls = HUB_TITLE;
   const sprintsReadyForCompleteGate = sprintsHydrated;
   const hasOpenSprints = (sprints || []).some((s) => {
     const st = String(s?.status || '').toLowerCase();
@@ -1589,16 +888,10 @@ export default function ProjectHubShell({
     !hasOpenSprints;
 
   const projectStillActive = projectPayload?.isActive !== false;
-  const showArchiveProjectButton =
-    hasBoard &&
-    projectStillActive &&
-    Boolean(hubCaps.canArchiveProject) &&
-    (isProjectCompleted || Boolean(hubCaps.canArchiveWithoutComplete));
 
   const toolbarHasActions =
     Boolean(hasBoard && isProjectCompleted) ||
     showCompleteProjectButton ||
-    showArchiveProjectButton ||
     Boolean(tab === 'board' && hubCaps?.canManageSprints && activeSprint?._id);
 
   const toolbar = toolbarHasActions ? (
@@ -1617,21 +910,6 @@ export default function ProjectHubShell({
         >
           <span className="hidden sm:inline">{t('workspace.projectHubCompleteProject')}</span>
           <span className="sm:hidden">{t('workspace.projectHubCompleteProjectShort')}</span>
-        </button>
-      ) : null}
-      {showArchiveProjectButton ? (
-        <button
-          type="button"
-          onClick={() => setArchiveProjectOpen(true)}
-          title={t('workspace.projectHubArchiveProject')}
-          className={`rounded-md border px-2.5 py-1 text-[11px] font-semibold ${
-            isDarkMode
-              ? 'border-rose-400/50 bg-rose-500/15 text-rose-100 hover:bg-rose-500/25'
-              : 'border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100'
-          }`}
-        >
-          <span className="hidden sm:inline">{t('workspace.projectHubArchiveProject')}</span>
-          <span className="sm:hidden">{t('workspace.projectHubArchiveProjectShort')}</span>
         </button>
       ) : null}
       {tab === 'board' && hubCaps?.canManageSprints && activeSprint?._id ? (
@@ -1656,33 +934,31 @@ export default function ProjectHubShell({
     tab === 'changeRequests' ||
     tab === 'chat';
 
+  /** Suite sidebar + TopHeader project menu sở hữu identity — không sticky header kép. */
+  const suiteOwnsChrome = Boolean(hideTabBar);
+
   if (!hasBoard && !boardlessOpsTab) {
+    const showFallbackChrome = Boolean(onBack && !suiteOwnsChrome) || toolbarHasActions;
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <div
-          className={`flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 ${
-            isDarkMode ? 'border-white/10' : 'border-border'
-          }`}
-        >
-          {onBack ? (
-            <button
-              type="button"
-              onClick={() => onBack()}
-              className={`rounded-md p-1.5 transition ${
-                isDarkMode
-                  ? 'text-slate-400 hover:bg-white/10 hover:text-white'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              }`}
-              aria-label={t('taskBoard.backAria')}
-            >
-              <ChevronLeft size={18} />
-            </button>
-          ) : null}
-          {toolbar}
-        </div>
+        {showFallbackChrome ? (
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b border-border bg-surface px-3 py-1.5">
+            {onBack && !suiteOwnsChrome ? (
+              <button
+                type="button"
+                onClick={() => onBack()}
+                className={`mr-auto ${HUB_ICON_BTN}`}
+                aria-label={t('taskBoard.backAria')}
+              >
+                <ChevronLeft size={18} />
+              </button>
+            ) : null}
+            {toolbar}
+          </div>
+        ) : null}
         {waitingForBoard ? (
           <div className="flex min-h-[12rem] flex-1 items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin shrink-0" aria-hidden />
+            <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER} shrink-0`} aria-hidden />
             <span>{t('common.loading')}</span>
           </div>
         ) : (
@@ -1694,118 +970,88 @@ export default function ProjectHubShell({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      {/* Compact enterprise header — identity + tabs in one contained area */}
-      <header
-        className={`shrink-0 border-b ${
-          isDarkMode ? 'border-white/10 bg-[#0b1120]/90' : 'border-border bg-surface'
-        }`}
-      >
-        {/* Identity row */}
-        <div className="flex min-w-0 flex-col gap-2 px-3 pt-2.5 pb-2 sm:flex-row sm:items-center sm:gap-2.5 sm:px-4">
-          <div className="flex min-w-0 flex-1 items-center gap-2.5">
-            {onBack ? (
-              <button
-                type="button"
-                onClick={() => onBack()}
-                className={`-ml-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md p-1 transition sm:h-auto sm:w-auto ${
-                  isDarkMode
-                    ? 'text-slate-400 hover:bg-white/10 hover:text-white'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                }`}
-                aria-label={t('taskBoard.backAria')}
-              >
-                <ChevronLeft size={18} />
-              </button>
-            ) : null}
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-[10px] font-black text-primary-foreground">
-              {initials}
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <h2 className={`break-words text-sm font-bold leading-tight ${titleCls}`}>
-                {resolvedBoard?.title || t('workspace.projectHubUntitled')}
-              </h2>
-              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-                {resolvedBoard?.projectCode ? (
-                  <span
-                    className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${
-                      isDarkMode ? 'bg-primary/20 text-primary' : 'bg-primary/10 text-primary'
-                    }`}
-                  >
-                    {resolvedBoard.projectCode}
-                  </span>
-                ) : null}
-                {resolvedBoard?.methodology ? (
-                  <span
-                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                      isDarkMode ? 'bg-white/10 text-slate-200' : 'bg-muted text-muted-foreground'
-                    }`}
-                  >
-                    {formatHubMethodology(resolvedBoard.methodology, t)}
-                  </span>
-                ) : null}
-                <span
-                  className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${
-                    isDarkMode
-                      ? 'border-primary/40 bg-primary/20 text-primary'
-                      : 'border-primary/30 bg-primary/10 text-primary'
-                  }`}
+      {suiteOwnsChrome ? (
+        toolbarHasActions ? (
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 border-b border-border bg-surface px-3 py-1.5 sm:px-4">
+            {toolbar}
+          </div>
+        ) : null
+      ) : (
+        <header className={HUB_HEADER}>
+          <div className={HUB_HEADER_ROW}>
+            <div className="flex min-w-0 flex-1 items-center gap-2.5">
+              {onBack ? (
+                <button
+                  type="button"
+                  onClick={() => onBack()}
+                  className={`-ml-1 ${HUB_ICON_BTN}`}
+                  aria-label={t('taskBoard.backAria')}
                 >
-                  {t(deliveryPhaseLabelKey(overviewDeliveryPhase))}
-                </span>
-                <span className={`max-w-full text-[11px] leading-tight sm:truncate ${muted}`}>
-                  {[
-                    formatHubDate(resolvedBoard?.dueDate, locale) !== '—'
-                      ? formatHubDate(resolvedBoard?.dueDate, locale)
-                      : null,
-                    resolvedBoard?.visibility === 'workspace'
-                      ? t('workspace.projectHubVisibilityWorkspace')
-                      : null,
-                    t('workspace.projectHubStatDonePct', { pct: summary.donePercent }),
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </span>
+                  <ChevronLeft size={18} />
+                </button>
+              ) : null}
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-[10px] font-black text-primary-foreground">
+                {initials}
+              </div>
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <h2 className={`break-words leading-tight ${titleCls}`}>
+                  {displayProjectTitle || t('workspace.projectHubUntitled')}
+                </h2>
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                  {resolvedBoard?.projectCode ? (
+                    <span className={HUB_BADGE_CODE}>{resolvedBoard.projectCode}</span>
+                  ) : null}
+                  {resolvedBoard?.methodology ? (
+                    <span className={HUB_BADGE_META}>
+                      {formatHubMethodology(resolvedBoard.methodology, t)}
+                    </span>
+                  ) : null}
+                  <span className={HUB_BADGE_PHASE}>
+                    {t(deliveryPhaseLabelKey(overviewDeliveryPhase))}
+                  </span>
+                  <span className={`max-w-full text-[11px] leading-tight sm:truncate ${muted}`}>
+                    {[
+                      formatHubDate(resolvedBoard?.dueDate, locale) !== '—'
+                        ? formatHubDate(resolvedBoard?.dueDate, locale)
+                        : null,
+                      resolvedBoard?.visibility === 'workspace'
+                        ? t('workspace.projectHubVisibilityWorkspace')
+                        : null,
+                      t('workspace.projectHubStatDonePct', { pct: summary.donePercent }),
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </div>
               </div>
             </div>
+            {toolbar}
           </div>
-          {toolbar}
-        </div>
-
-        {/* Tab bar — underline style (hidden when suite sidebar owns nav) */}
-        {!hideTabBar ? (
-        <nav
-          className="flex gap-0 overflow-x-auto overscroll-x-contain px-3 sm:px-4"
-          aria-label={t('workspace.projectHubNavAria')}
-          style={{ scrollbarWidth: 'none' }}
-        >
-          {visibleTabs.map((item) => {
-            const active = tab === item.id;
-            const disabled = isSummaryOnly && item.id !== 'overview';
-            return (
-              <button
-                key={item.id}
-                type="button"
-                disabled={disabled}
-                onClick={() => !disabled && setTab(item.id)}
-                className={`min-h-11 shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-[11px] font-semibold transition-colors ${
-                  disabled
-                    ? 'cursor-not-allowed border-transparent text-muted-foreground/40'
-                    : active
-                    ? isDarkMode
-                      ? 'border-primary text-white'
-                      : 'border-primary text-primary'
-                    : isDarkMode
-                      ? 'border-transparent text-slate-400 hover:text-slate-200'
-                      : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {t(item.labelKey)}
-              </button>
-            );
-          })}
-        </nav>
-        ) : null}
-      </header>
+          <nav
+            className="flex gap-0 overflow-x-auto overscroll-x-contain px-3 sm:px-4"
+            aria-label={t('workspace.projectHubNavAria')}
+            style={{ scrollbarWidth: 'none' }}
+          >
+            {visibleTabs.map((item) => {
+              const active = tab === item.id;
+              const disabled = isSummaryOnly && item.id !== 'overview';
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => !disabled && setTab(item.id)}
+                  className={
+                    disabled ? HUB_TAB_DISABLED : active ? HUB_TAB_ACTIVE : HUB_TAB_IDLE
+                  }
+                >
+                  {t(item.labelKey)}
+                </button>
+              );
+            })}
+          </nav>
+        </header>
+      )}
 
       {isSummaryOnly ? (
         <div className="border-b border-border bg-amber-500/10 px-4 py-2 text-xs text-amber-900 dark:text-amber-100">
@@ -1815,22 +1061,10 @@ export default function ProjectHubShell({
 
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         {tab === 'overview' ? (
-          <OverviewPanel
+          <ProjectHubOverviewPanel
             board={resolvedBoard}
             projectStatus={overviewProjectStatus}
             deliveryPhase={overviewDeliveryPhase}
-            projectId={projectId}
-            organizationId={
-              String(projectPayload?.organizationId || resolvedBoard?.organizationId || organizationId || '').trim()
-            }
-            canChangeDeliveryPhase={Boolean(hubCaps?.canChangeDeliveryPhase)}
-            canSignOffUat={Boolean(hubCaps?.canSignOffUat)}
-            canAcceptHandover={Boolean(hubCaps?.canAcceptHandover)}
-            handoverChecklist={projectPayload?.handoverChecklist || null}
-            releaseLabel={projectPayload?.releaseLabel || ''}
-            releaseReadyStatus={projectPayload?.releaseReadyStatus || 'none'}
-            uatStatus={projectPayload?.uatStatus || 'none'}
-            deployEvidence={projectPayload?.deployEvidence || null}
             summary={summary}
             deliveryExtras={deliveryExtras}
             dashboardCharts={dashboardCharts}
@@ -1908,7 +1142,7 @@ export default function ProjectHubShell({
         ) : null}
         {tab === 'planning' && hideTabBar && !capsReady ? (
           <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
             <span>{t('common.loading')}</span>
           </div>
         ) : null}
@@ -1999,10 +1233,10 @@ export default function ProjectHubShell({
           !sprintsHydrated || sprintsFetching ? (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-4 py-12 text-center">
               <Loader2
-                className={`h-5 w-5 animate-spin ${isDarkMode ? 'text-slate-300' : 'text-muted-foreground'}`}
+                className={`h-5 w-5 ${VH_MOTION_SPINNER} text-muted-foreground`}
                 aria-hidden
               />
-              <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-muted-foreground'}`}>
+              <p className="text-xs text-muted-foreground">
                 {t('common.loading')}
               </p>
             </div>
@@ -2010,10 +1244,10 @@ export default function ProjectHubShell({
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{boardKanban}</div>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 py-12 text-center">
-              <p className={`text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-foreground'}`}>
+              <p className="text-sm font-semibold text-foreground">
                 {t('workspace.projectHubBoardLockedTitle')}
               </p>
-              <p className={`max-w-md text-xs ${isDarkMode ? 'text-slate-400' : 'text-muted-foreground'}`}>
+              <p className="max-w-md text-xs text-muted-foreground">
                 {t('workspace.projectHubBoardLockedHint')}
               </p>
               {hubCaps.canViewBacklog ? (
@@ -2046,7 +1280,7 @@ export default function ProjectHubShell({
         ) : null}
         {tab === 'changeRequests' && hideTabBar && !capsReady ? (
           <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
             <span>{t('common.loading')}</span>
           </div>
         ) : null}
@@ -2153,13 +1387,13 @@ export default function ProjectHubShell({
         ) : null}
         {tab === 'members' && hideTabBar && !capsReady ? (
           <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
             <span>{t('common.loading')}</span>
           </div>
         ) : null}
-        {tab === 'files' && hubCaps.canViewFiles ? <FilesPanel files={files} isDarkMode={isDarkMode} t={t} /> : null}
+        {tab === 'files' && hubCaps.canViewFiles ? <FilesPanel files={files} t={t} /> : null}
         {tab === 'activity' && hubCaps.canViewActivityTab ? (
-          <ActivityPanel activity={activity} locale={locale} isDarkMode={isDarkMode} t={t} />
+          <ActivityPanel activity={activity} locale={locale} t={t} />
         ) : null}
         {tab === 'reports' &&
         isClosedProjectStatus(projectPayload?.status) &&
@@ -2167,7 +1401,7 @@ export default function ProjectHubShell({
           <Suspense
             fallback={
               <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
+                <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
                 <span>{t('common.loading')}</span>
               </div>
             }
@@ -2182,7 +1416,7 @@ export default function ProjectHubShell({
         ) : null}
         {tab === 'activity' && hideTabBar && !capsReady ? (
           <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
             <span>{t('common.loading')}</span>
           </div>
         ) : null}
@@ -2225,7 +1459,7 @@ export default function ProjectHubShell({
         ) : null}
         {tab === 'settings' && hideTabBar && !capsReady ? (
           <div className="flex min-h-[8rem] items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            <Loader2 className={`h-4 w-4 ${VH_MOTION_SPINNER}`} aria-hidden />
             <span>{t('common.loading')}</span>
           </div>
         ) : null}
@@ -2367,7 +1601,7 @@ export default function ProjectHubShell({
         ) : null}
         {overviewWorkIssue ? (
           <WorkItemDetail
-            key={String(overviewWorkIssue?._id || overviewWorkIssue?.id || 'overview-detail')}
+            key="overview-work-item-detail"
             open
             chrome="drawer"
             drawerLayout="overlay"

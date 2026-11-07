@@ -22,12 +22,15 @@ import { normalizeRoleDisplayName } from '../../utils/adminRbacUtils';
 import { adminUserHubLink } from '../../utils/adminHubLinks';
 import { useAdminActionGate } from '../../hooks/useAdminActionGate';
 import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
+import { motion } from 'motion/react';
 import useModalA11y from '../Shared/useModalA11y';
 import CapabilityReviewPanel from './CapabilityReviewPanel';
-import useMotionPresence from '../../motion/useMotionPresence';
-import { VH_MOTION_TAB_PANEL, VH_PRESENCE_DRAWER_RIGHT } from '../../motion/classes';
-import { VH_MOTION_OVERLAY_MS } from '../../motion/tokens';
+import MotionPresence from '../../motion/primitives/MotionPresence';
+import TabPanelMotion from '../../motion/primitives/TabPanelMotion';
+import { motionBackdrop, motionDrawerRight } from '../../motion/overlayMotion';
+import useOverlayScrollLock from '../../motion/useOverlayScrollLock';
 import { adminPrimaryBtnClass, adminSecondaryBtnClass } from './adminUserPanelUi';
+
 
 const TABS = [
   { id: 'info', labelKey: 'adminUsers.tabInfo' },
@@ -143,10 +146,9 @@ export default function AdminUserDetailDrawer({
   const panelId = (id) => `${baseId}-panel-${id}`;
 
   const isVisible = Boolean(open && member);
-  const { mounted, phase } = useMotionPresence(isVisible, {
-    durationMs: VH_MOTION_OVERLAY_MS,
-  });
+  const { release } = useOverlayScrollLock(isVisible);
   useModalA11y({ isOpen: isVisible, onClose, containerRef: asideRef, initialFocusRef: closeButtonRef });
+
 
   const userId = member ? memberUserId(member) : '';
   const name = member ? memberDisplayName(member) : '';
@@ -228,22 +230,30 @@ export default function AdminUserDetailDrawer({
     event.preventDefault();
   };
 
-  if (!mounted || !member) return null;
+  if (!member) return null;
 
   return (
-    <div className="fixed inset-0 z-[10030] flex justify-end">
-      <div
-        className="absolute inset-0 bg-black/40 vh-motion-respect motion-safe:animate-fade-in-fast motion-reduce:animate-none"
+    <MotionPresence open={isVisible} onExitComplete={release}>
+    <motion.div
+      key="admin-user-drawer"
+      className="fixed inset-0 z-[10030] flex justify-end vh-motion-respect"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <motion.div
+        className="absolute inset-0 bg-black/40"
         aria-hidden="true"
         onClick={onClose}
+        {...motionBackdrop}
       />
-      <aside
+      <motion.aside
         ref={asideRef}
-        className={`relative flex h-full w-full max-w-md flex-col border-l border-border bg-card shadow-2xl ${VH_PRESENCE_DRAWER_RIGHT}`}
-        data-motion-phase={phase || 'enter'}
+        className="relative flex h-full w-full max-w-md flex-col border-l border-border bg-card shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        {...motionDrawerRight}
       >
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div className="flex min-w-0 items-center gap-3">
@@ -306,14 +316,15 @@ export default function AdminUserDetailDrawer({
         </div>
 
         <div
-          key={tab}
           id={panelId(tab)}
           role="tabpanel"
           aria-labelledby={tabId(tab)}
           tabIndex={0}
-          className={`min-h-0 flex-1 overflow-y-auto px-5 py-4 focus-visible:outline-none ${VH_MOTION_TAB_PANEL}`}
+          className="min-h-0 flex-1 overflow-y-auto px-5 py-4 focus-visible:outline-none"
         >
+          <TabPanelMotion activeKey={tab}>
           {tab === 'info' ? (
+
             <dl className="space-y-3 text-sm">
               {employeeCodeFailed ? (
                 <InlineRetryAlert
@@ -523,6 +534,7 @@ export default function AdminUserDetailDrawer({
               </Link>
             </div>
           ) : null}
+          </TabPanelMotion>
         </div>
 
         <div className="flex flex-wrap gap-2 border-t border-border px-5 py-3">
@@ -536,7 +548,8 @@ export default function AdminUserDetailDrawer({
             {t('adminDomains.accounts.detail')}
           </Link>
         </div>
-      </aside>
-    </div>
+      </motion.aside>
+    </motion.div>
+    </MotionPresence>
   );
 }

@@ -139,6 +139,38 @@ export function kindChipClass(kind) {
   return `${CHIP_BASE} ${tone}`;
 }
 
+/** Short chip labels — keep BG/FR/UC codes; localize long EN kind words. */
+const KIND_LABEL_KEYS = Object.freeze({
+  SCOPE: 'workspace.phase1KindChip_SCOPE',
+  INTERFACE: 'workspace.phase1KindChip_INTERFACE',
+  GLOSSARY: 'workspace.phase1KindChip_GLOSSARY',
+  ASSUMPTION: 'workspace.phase1KindChip_ASSUMPTION',
+  ACTOR: 'workspace.phase1KindChip_ACTOR',
+  ARCHITECTURE: 'workspace.phase1KindChip_ARCHITECTURE',
+  RESOURCE: 'workspace.phase1KindChip_RESOURCE',
+  DEPENDENCY: 'workspace.phase1KindChip_DEPENDENCY',
+  SCHEDULE: 'workspace.phase1KindChip_SCHEDULE',
+  MILESTONE: 'workspace.phase1KindChip_MILESTONE',
+  RELEASE: 'workspace.phase1KindChip_RELEASE',
+  RISK: 'workspace.phase1KindChip_RISK',
+  WBS: 'workspace.phase1KindChip_WBS',
+});
+
+/**
+ * @param {string} [kind]
+ * @param {(path: string) => string} [t]
+ */
+export function formatPhase1KindLabel(kind, t) {
+  const key = normKind(kind);
+  if (!key) return '';
+  const path = KIND_LABEL_KEYS[key];
+  if (path && typeof t === 'function') {
+    const label = t(path);
+    if (label && label !== path) return label;
+  }
+  return key;
+}
+
 /**
  * DEC P1-F — Tech review depth on FR + UC (optional NFR technical).
  * @param {string} [kind]

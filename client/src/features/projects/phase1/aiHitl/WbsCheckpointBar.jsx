@@ -100,10 +100,10 @@ export default function WbsCheckpointBar({
       data-testid="wbs-checkpoint-bar"
     >
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+        <h3 className="text-sm font-semibold text-foreground">
           {labelOf(t, 'aiHitl.wbsCheckpoint.title', 'Checkpoint WBS')}
         </h3>
-        <span className="text-xs text-slate-600 dark:text-slate-300">
+        <span className="text-xs text-muted-foreground">
           {baselineId
             ? `Baseline: ${baselineId}`
             : waiting
@@ -113,12 +113,15 @@ export default function WbsCheckpointBar({
                 : null}
         </span>
         {manifest?.planRevisionId ? (
-          <span className="text-xs text-slate-500">Plan: {manifest.planRevisionId}</span>
+          <span className="text-xs text-muted-foreground">Plan: {manifest.planRevisionId}</span>
         ) : null}
       </div>
 
       {staleBadges.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5" aria-label="Artifact stale">
+        <div
+          className="flex flex-wrap gap-1.5"
+          aria-label={labelOf(t, 'requirements.aiHitlWbsCheckpointStaleAria', 'Hạng mục cần xem lại')}
+        >
           {staleBadges.map((b) => (
             <span
               key={b.kind}
@@ -131,7 +134,7 @@ export default function WbsCheckpointBar({
       ) : null}
 
       {events.length > 0 ? (
-        <ul className="text-xs text-slate-600 dark:text-slate-300 space-y-0.5">
+        <ul className="text-xs text-muted-foreground space-y-0.5">
           {events.map((ev) => (
             <li key={ev.eventId || ev.requestId}>
               {ev.recordedAt ? `${ev.recordedAt} · ` : ''}
@@ -144,24 +147,24 @@ export default function WbsCheckpointBar({
         </ul>
       ) : null}
 
-      <label className="block text-xs text-slate-600 dark:text-slate-300">
+      <label className="block text-xs text-muted-foreground">
         {labelOf(t, 'aiHitl.wbsCheckpoint.reason', 'Lý do chỉnh sửa / xác nhận')}
         <input
           type="text"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          className="mt-0.5 w-full rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
+          className="mt-0.5 w-full rounded border border-border bg-surface px-2 py-1 text-sm"
           placeholder=""
         />
       </label>
 
-      <label className="block text-xs text-slate-600 dark:text-slate-300">
+      <label className="block text-xs text-muted-foreground">
         {labelOf(t, 'aiHitl.wbsCheckpoint.editNote', 'Ghi chú lưu chỉnh sửa (không chạy lại tool)')}
         <input
           type="text"
           value={editNote}
           onChange={(e) => setEditNote(e.target.value)}
-          className="mt-0.5 w-full rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1 text-sm"
+          className="mt-0.5 w-full rounded border border-border bg-surface px-2 py-1 text-sm"
           placeholder="Mô tả field đã sửa trên UI (audit)"
         />
       </label>
@@ -192,7 +195,7 @@ export default function WbsCheckpointBar({
                 : [],
             })
           }
-          className="vh-motion-btn rounded px-3 py-1.5 text-xs font-medium border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 disabled:opacity-50"
+          className="vh-motion-btn rounded px-3 py-1.5 text-xs font-medium border border-border bg-surface disabled:opacity-50"
           data-testid="wbs-cta-save-edit"
         >
           {busy === 'save_edit'

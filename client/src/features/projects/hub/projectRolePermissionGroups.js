@@ -69,16 +69,22 @@ export const PROJECT_ROLE_PERMISSION_GROUPS = Object.freeze([
     keys: ['repository:view', 'repository:push', 'repository:merge'],
   },
   {
-    id: 'wiki_meeting_release',
-    title: 'Wiki / Meeting / Release',
+    id: 'collab',
+    title: 'Chat / Calendar / Documents',
     keys: [
       'wiki:view',
       'wiki:edit',
       'meeting:view',
       'meeting:create',
-      'release:view',
-      'release:create',
+      'files:view',
+      'files:upload',
+      'files:delete',
     ],
+  },
+  {
+    id: 'wiki_meeting_release',
+    title: 'Release',
+    keys: ['release:view', 'release:create'],
   },
   {
     id: 'board',
@@ -87,16 +93,8 @@ export const PROJECT_ROLE_PERMISSION_GROUPS = Object.freeze([
   },
   {
     id: 'files_members_settings',
-    title: 'Files / Members / Settings',
-    keys: [
-      'files:view',
-      'files:upload',
-      'files:delete',
-      'members:view',
-      'members:manage',
-      'settings:view',
-      'settings:update',
-    ],
+    title: 'Members / Settings',
+    keys: ['members:view', 'members:manage', 'settings:view', 'settings:update'],
   },
   {
     id: 'change_request',

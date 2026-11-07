@@ -54,7 +54,7 @@ export function scrollLeftForZoomAnchor(scrollLeft, pointerX, oldPx, newPx) {
 }
 
 export const TIMELINE_SCROLL_EDGE_PX = 80;
-export const TIMELINE_ROW_PX = 48;
+export const TIMELINE_ROW_PX = 40;
 export const TIMELINE_MIN_BAR_PX = 8;
 /** Bar tối thiểu theo scale — tháng/quý tránh vệt mỏng bị đè. */
 export function timelineMinBarPx(scale, pxPerUnit) {
@@ -64,8 +64,11 @@ export function timelineMinBarPx(scale, pxPerUnit) {
   if (scale === 'months') return Math.max(22, Math.round(unit * 0.14));
   return TIMELINE_MIN_BAR_PX;
 }
-/** Bar đủ rộng mới đặt label ngoài phải (tránh 1-day trông lệch cột). */
-export const TIMELINE_BAR_LABEL_MIN_PX = 80;
+/**
+ * Bar đủ rộng mới đặt label ngoài phải.
+ * Ngưỡng cao hơn → ưu tiên chữ trong bar, Gantt bên phải bớt nhiễu title lặp.
+ */
+export const TIMELINE_BAR_LABEL_MIN_PX = 120;
 /** Cột weeks: hiện "Thứ X N"; hẹp hơn → chỉ số ngày; rất hẹp → chỉ Monday. */
 export const TIMELINE_DAY_LABEL_FULL_MIN_PX = 36;
 export const TIMELINE_DAY_LABEL_NUM_MIN_PX = 16;
