@@ -1,20 +1,10 @@
 /**
- * Curated paths — BFF + dashboard report resource.
+ * Curated paths — dashboard report + org documents overview.
  */
 
 const { buildOperation, pathParam } = require('../components/op.helpers');
 
 module.exports = {
-  '/api/bootstrap': {
-    get: buildOperation({
-      operationId: 'getBootstrap',
-      tags: ['BFF'],
-      summary: 'Bootstrap session / app shell',
-      description: 'Aggregate dữ liệu khởi động client qua Gateway BFF.',
-      requireNotFound: false,
-      successExample: { success: true, data: { user: {}, organizations: [] } },
-    }),
-  },
   '/api/reports/v1/dashboard/me': {
     get: buildOperation({
       operationId: 'getDashboardMe',

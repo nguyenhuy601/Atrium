@@ -5,8 +5,6 @@ const { buildTrustedGatewayHeaders } = require('@enterprise/shared/middleware/ga
 const FRIEND_SERVICE_URL = String(process.env.FRIEND_SERVICE_URL || '').trim().replace(/\/+$/, '');
 if (!FRIEND_SERVICE_URL) throw new Error('Thiếu biến môi trường: FRIEND_SERVICE_URL');
 
-const CACHE_TTL_SEC = Number(process.env.DM_RELATIONSHIP_CACHE_TTL_SEC || 90);
-
 function relationshipCacheKey(senderId, peerId) {
   const a = String(senderId || '').trim();
   const b = String(peerId || '').trim();
@@ -16,33 +14,6 @@ function relationshipCacheKey(senderId, peerId) {
 function isLazyEnsureEnabled() {
   /** Default false after friend graph → derived org roster (ensure-accepted is no-op). */
   return String(process.env.DM_LAZY_ENSURE_FRIENDSHIP || 'false').toLowerCase() === 'true';
-}
-
-async function readRelationshipCache(senderId, peerId) {
-  const redis = getRedisClient();
-  if (!redis) return null;
-  try {
-    const raw = await redis.get(relationshipCacheKey(senderId, peerId));
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-/** Chỉ cache blocked — không cache `none` (chặn lazy heal / auto-friend trễ). */
-async function writeRelationshipCache(senderId, peerId, rel) {
-  const redis = getRedisClient();
-  if (!redis || !rel || rel.status !== 'blocked') return;
-  try {
-    await redis.setex(
-      relationshipCacheKey(senderId, peerId),
-      CACHE_TTL_SEC,
-      JSON.stringify({ status: rel.status, blockerId: rel.blockerId || null })
-    );
-  } catch {
-    /* ignore cache errors */
-  }
 }
 
 async function clearRelationshipCache(senderId, peerId) {
@@ -65,14 +36,6 @@ function throwFromRelationshipStatus(rel, peerId) {
     return rel;
   }
 
-  if (st === 'blocked') {
-    const err = new Error('Cannot send message to this user');
-    err.statusCode = 403;
-    err.code = 'dm_blocked';
-    err.blockerId = rel?.blockerId ? String(rel.blockerId) : null;
-    throw err;
-  }
-
   const err = new Error('Can only message accepted friends');
   err.statusCode = 403;
   err.code = 'dm_not_friends';
@@ -82,7 +45,6 @@ function throwFromRelationshipStatus(rel, peerId) {
 
 /**
  * Heal Friendship khi auto-friend lúc xếp phòng bị miss (Directory DM).
- * Không ghi đè blocked (friend-service ensureAccepted).
  */
 async function tryLazyEnsureFriendship(senderId, peerId) {
   if (!isLazyEnsureEnabled()) return false;
@@ -151,10 +113,10 @@ async function fetchRelationship({ peerId, authorizationHeader, senderId }) {
 }
 
 /**
- * Chỉ cho phép gửi DM khi quan hệ accepted (friend-service).
- * Lazy ensure khi chưa accepted (trừ blocked) — bù auto-friend miss.
+ * Chỉ cho phép gửi DM khi quan hệ accepted (derived org roster).
+ * Lazy ensure khi chưa accepted — bù auto-friend miss.
  * @param {{ peerId: string, authorizationHeader?: string, senderId?: string }} opts
- * @throws {{ statusCode, code, message, blockerId? }}
+ * @throws {{ statusCode, code, message }}
  */
 async function assertDmCanSend({ peerId, authorizationHeader, senderId }) {
   if (String(process.env.DM_REQUIRE_FRIENDSHIP || 'true').toLowerCase() === 'false') {
@@ -170,17 +132,9 @@ async function assertDmCanSend({ peerId, authorizationHeader, senderId }) {
     throw err;
   }
 
-  if (sid) {
-    const cached = await readRelationshipCache(sid, fid);
-    // Chỉ tin cache blocked. Không tin cache none — để lazy heal chạy được.
-    if (cached && cached.status === 'blocked') {
-      return throwFromRelationshipStatus(cached, fid);
-    }
-  }
-
   let rel = await fetchRelationship({ peerId: fid, authorizationHeader, senderId: sid });
 
-  if (sid && rel.status !== 'accepted' && rel.status !== 'blocked') {
+  if (sid && rel.status !== 'accepted') {
     const healed = await tryLazyEnsureFriendship(sid, fid);
     if (healed) {
       await clearRelationshipCache(sid, fid);
@@ -188,9 +142,6 @@ async function assertDmCanSend({ peerId, authorizationHeader, senderId }) {
     }
   }
 
-  if (sid) {
-    await writeRelationshipCache(sid, fid, rel);
-  }
   return throwFromRelationshipStatus(rel, fid);
 }
 
@@ -201,7 +152,6 @@ function dmErrorToJson(err) {
     message: err.message || 'Forbidden',
     code,
     errorCode: err.errorCode || String(code).toUpperCase(),
-    ...(err.blockerId ? { blockerId: err.blockerId } : {}),
   };
 }
 

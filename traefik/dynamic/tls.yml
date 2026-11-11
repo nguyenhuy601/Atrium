@@ -1,0 +1,7 @@
+# Mounted into Traefik at /etc/traefik/dynamic/tls.yml
+# Local: put mkcert files at ./certs/ (see docs/edge-traefik-split-domain.md)
+#   mkcert -cert-file certs/cert.pem -key-file certs/key.pem atrium.dev api.atrium.dev localhost 127.0.0.1
+tls:
+  certificates:
+    - certFile: /certs/cert.pem
+      keyFile: /certs/key.pem

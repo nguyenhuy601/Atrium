@@ -110,7 +110,7 @@ const routeActionMap = {
   'GET /api/friends': 'friend:read',
   'POST /api/friends': 'friend:write',
 
-  // Organization BFF (sau permission middleware — org-service kiểm tra membership)
+  // Organization REST (sau permission middleware — org-service kiểm tra membership)
   'GET /api/organizations/:orgId/my-profile': 'organization:read',
   'GET /api/organizations/:orgId/documents-overview': 'organization:read',
 
@@ -166,7 +166,6 @@ const noPermissionRoutes = [
   '/api/users/me',
   '/api/users/avatar',
   '/api/users/me/capability/cv',
-  '/api/bootstrap',
   // Dashboard summary — report-service (JWT only; không ép task:read)
   '/api/reports/v1/dashboard/me',
   // Friend routes không cần server context
@@ -662,8 +661,8 @@ function isDelegatedRoleManageRoute(req, action) {
 
 /** Các path client thực tế — smoke test không được `unmapped`. */
 const AUDITED_CLIENT_API_PATHS = [
-  ['GET', '/api/bootstrap'],
   ['GET', '/api/reports/v1/dashboard/me'],
+  ['GET', '/api/projects/proj1/overview'],
   ['GET', '/api/users/me'],
   ['GET', '/api/users/search'],
   ['GET', '/api/users/abc123'],

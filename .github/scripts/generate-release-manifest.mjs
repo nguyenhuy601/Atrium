@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Generate Atrium release manifest (17 Swarm app services).
+ * Generate Atrium release manifest from .github/swarm-app-images.json catalog
+ * (app microservices + SPA client — count = catalog.length).
  *
  * Usage:
  *   node .github/scripts/generate-release-manifest.mjs \
@@ -11,7 +12,7 @@
  *     [--fixture path/to/partial.json] \
  *     [--out path/to/manifest.json]
  *
- * built.json: { "api-gateway": "sha256:abc...", ... }  (digest only or full repo@digest)
+ * built.json: { "api-gateway": "sha256:abc...", "client": "sha256:...", ... }
  * fixture: partial services overlay for local tests (no registry)
  */
 import fs from 'node:fs';

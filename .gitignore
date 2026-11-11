@@ -143,3 +143,6 @@ docker-compose.override.yml
 # Plan Mode local drafts (repo chỉ track vài plan đã chốt)
 .cursor/plans/*.plan.md
 !.cursor/plans/.gitkeep
+
+# Local secret rotation backups (never commit)
+env-backup-*/

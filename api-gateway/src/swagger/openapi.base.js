@@ -21,7 +21,6 @@ function readGatewayPackageVersion() {
 
 const MODULE_TAGS = [
   { name: 'Auth', description: 'Đăng nhập, token, profile auth' },
-  { name: 'BFF', description: 'Gateway BFF aggregate' },
   { name: 'Users', description: 'User profile, avatar, CV' },
   { name: 'Friends', description: 'Friend graph' },
   { name: 'Organizations', description: 'Org, Master Data, HR positions, org roles' },

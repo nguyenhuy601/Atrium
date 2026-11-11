@@ -30,7 +30,7 @@
     },
     "services": {
       "type": "object",
-      "minProperties": 17,
+      "minProperties": 12,
       "additionalProperties": {
         "type": "object",
         "required": ["repository", "tag", "digest"],

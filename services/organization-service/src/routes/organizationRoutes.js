@@ -49,6 +49,7 @@ router.get('/invitations', memberController.getMyInvitations);
 router.post('/invitations/:invitationId/respond', memberController.respondToInvitation);
 router.post('/', organizationController.createOrganization);
 
+router.get('/:orgId/my-profile', organizationController.getOrgMyProfile);
 router.get('/:orgId/shell', organizationController.getOrgShell);
 router.get('/:orgId/documents-overview', organizationController.getDocumentsOverview);
 router.get('/:orgId/structure', organizationController.getOrganizationStructure);

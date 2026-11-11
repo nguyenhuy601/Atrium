@@ -4,7 +4,6 @@ const authMiddleware = require('../middlewares/auth.middleware');
 const permissionMiddleware = require('../middlewares/permission.middleware');
 const proxyMiddleware = require('../middlewares/proxy.middleware');
 const { searchLimiter } = require('../middlewares/rateLimiters');
-const { publicBffRouter, orgBffRouter } = require('../bff');
 
 router.get('/metrics', (req, res) => {
   res.json({
@@ -19,14 +18,8 @@ router.get('/metrics', (req, res) => {
 router.use(authMiddleware);
 router.use(searchLimiter);
 
-// BFF — bootstrap / dashboard (trước permission)
-router.use(publicBffRouter);
-
 // Apply permission middleware để kiểm tra quyền truy cập
 router.use(permissionMiddleware);
-
-// BFF org router (hiện empty — documents-overview đi REST proxy)
-router.use(orgBffRouter);
 
 // Apply proxy middleware cho tất cả routes
 // Dùng router.use() với path pattern để match tất cả routes

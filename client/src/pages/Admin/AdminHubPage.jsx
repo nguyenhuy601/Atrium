@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { Link, Navigate, useLocation } from 'react-router-dom';
 import {
   Activity,
   BarChart3,
@@ -25,6 +25,7 @@ import { useGrantScopes } from '../../hooks/useGrantScopes';
 import { useAppStrings } from '../../locales/appStrings';
 import { useCompanyAdminContext } from './CompanyAdminLayout';
 import { VH_MOTION_CARD } from '../../motion/classes';
+import { isManageRoutePath, surfaceAdminPath } from '../../utils/adminManagePath';
 
 const DOMAIN_ICONS = {
   Users,
@@ -43,10 +44,12 @@ const DOMAIN_ICONS = {
 
 export default function AdminHubPage() {
   const { t } = useAppStrings();
+  const location = useLocation();
   const { memberCount, orgId } = useCompanyAdminContext();
   const { isSystemAdmin } = useCompanyAdminAccess();
   const { hasGrant, scopeOf } = useGrantScopes(orgId);
-  const { loading, messages, pendingCount, usersHref } = useAdminHubInsights(orgId);
+  const surface = isManageRoutePath(location.pathname) ? 'manage' : 'admin';
+  const { loading, messages, pendingCount, usersHref } = useAdminHubInsights(orgId, { surface });
   const { markNavigating } = useAdminNavLoading();
   const domains = useMemo(
     () =>
@@ -74,12 +77,14 @@ export default function AdminHubPage() {
       <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {domains.map((domain) => {
           const Icon = DOMAIN_ICONS[domain.icon] || LayoutGrid;
-          const leafPath =
+          const leafPath = surfaceAdminPath(
             firstAllowedAdminLeafPath(domain, {
               hasGrant,
               scopeOf,
               isSystemAdmin: Boolean(isSystemAdmin),
-            }) || domain.path;
+            }) || domain.path,
+            surface
+          );
           return (
             <Link
               key={domain.id}
@@ -111,7 +116,9 @@ export default function AdminHubPage() {
   );
 }
 
-/** Redirect bookmark cũ /app/admin/overview → hub. */
+/** Redirect bookmark cũ /app/admin/overview → hub (giữ surface manage/admin). */
 export function AdminOverviewRedirect() {
-  return <Navigate to="/admin" replace />;
+  const location = useLocation();
+  const hub = isManageRoutePath(location.pathname) ? '/manage' : '/admin';
+  return <Navigate to={hub} replace />;
 }

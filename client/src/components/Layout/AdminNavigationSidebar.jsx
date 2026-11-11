@@ -35,15 +35,18 @@ import {
   splitNavSectionItems,
 } from '../../config/adminDomainsConfig';
 import { useShellLayout } from '../../context/ShellLayoutContext';
+import { useWorkspaceSuite, SUITE } from '../../context/WorkspaceSuiteContext';
 import { useAppStrings } from '../../locales/appStrings';
 import useCompanyAdminAccess from '../../hooks/useCompanyAdminAccess';
 import { useEffectiveMasterGrants } from '../../hooks/useEffectiveMasterGrants';
 import { useAdminNavLoading } from '../../hooks/useAdminShellLoading';
 import useOrgStructureLevels from '../../hooks/useOrgStructureLevels';
 import {
+  canActAdmin,
   filterAdminDomainByGrant,
   firstAllowedAdminLeafPath,
   listAdminDomainsForActor,
+  RBAC_GRANT,
 } from '../../config/rbacUiGrantMap';
 import OrgStructureSetupModal from '../../features/adminOrgStructure/OrgStructureSetupModal';
 import SidebarPositionFooter from './SidebarPositionFooter';
@@ -53,6 +56,8 @@ import { VH_NAV_CHEVRON } from '../../motion/classes';
 import MotionPresence from '../../motion/primitives/MotionPresence';
 import MotionMenu from '../../motion/primitives/MotionMenu';
 import { motionPopover } from '../../motion/overlayMotion';
+import { getDefaultPathForSuite } from '../../utils/suitePathUtils';
+import { surfaceAdminPath } from '../../utils/adminManagePath';
 
 import {
   FIGMA_SIDEBAR,
@@ -63,6 +68,7 @@ import {
   FIGMA_SIDEBAR_NAV,
   FIGMA_SIDEBAR_SECTION_LABEL,
   FIGMA_SIDEBAR_SUITE_STRIP,
+  SUITE_COLORS,
   figmaNavItemBg,
   figmaNavItemClass,
 } from './figmaShellClasses';
@@ -228,13 +234,13 @@ function AdminDomainPickerMenu({ open, domains, selectedDomain, onSelect, onClos
   );
 }
 
-function AdminNavItem({ item, collapsed, isActive, badge = 0, onNavigate }) {
+function AdminNavItem({ item, collapsed, isActive, badge = 0, onNavigate, href }) {
   const { t } = useAppStrings();
   const label = t(item.labelKey);
 
   return (
     <Link
-      to={item.path}
+      to={href || item.path}
       onClick={() => {
         if (!isActive) onNavigate?.();
       }}
@@ -265,7 +271,7 @@ function AdminNavItem({ item, collapsed, isActive, badge = 0, onNavigate }) {
   );
 }
 
-function AdminNavActionGroup({ items, labelKey, collapsed, isActivePath, badgeForItem, onNavigate }) {
+function AdminNavActionGroup({ items, labelKey, collapsed, isActivePath, badgeForItem, onNavigate, hrefOf }) {
   const { t } = useAppStrings();
   const rootRef = useRef(null);
   const listId = useId();
@@ -335,6 +341,7 @@ function AdminNavActionGroup({ items, labelKey, collapsed, isActivePath, badgeFo
             <AdminNavItem
               key={item.id}
               item={item}
+              href={hrefOf?.(item.path) || item.path}
               collapsed={false}
               isActive={isActivePath(item)}
               badge={badgeForItem(item)}
@@ -349,6 +356,7 @@ function AdminNavActionGroup({ items, labelKey, collapsed, isActivePath, badgeFo
               <AdminNavItem
                 key={item.id}
                 item={item}
+                href={hrefOf?.(item.path) || item.path}
                 collapsed={false}
                 isActive={isActivePath(item)}
                 badge={badgeForItem(item)}
@@ -362,7 +370,7 @@ function AdminNavActionGroup({ items, labelKey, collapsed, isActivePath, badgeFo
   );
 }
 
-function renderNavRows({ items, collapsed, isActivePath, badgeForItem, onNavigate }) {
+function renderNavRows({ items, collapsed, isActivePath, badgeForItem, onNavigate, hrefOf }) {
   return splitNavSectionItems(items).map((row) => {
     if (row.type === 'group') {
       return (
@@ -374,6 +382,7 @@ function renderNavRows({ items, collapsed, isActivePath, badgeForItem, onNavigat
           isActivePath={isActivePath}
           badgeForItem={badgeForItem}
           onNavigate={onNavigate}
+          hrefOf={hrefOf}
         />
       );
     }
@@ -381,6 +390,7 @@ function renderNavRows({ items, collapsed, isActivePath, badgeForItem, onNavigat
       <AdminNavItem
         key={row.item.id}
         item={row.item}
+        href={hrefOf?.(row.item.path) || row.item.path}
         collapsed={collapsed}
         isActive={isActivePath(row.item)}
         badge={badgeForItem(row.item)}
@@ -399,6 +409,7 @@ function AdminNavSectionGroup({
   isActivePath,
   badgeForItem,
   onNavigate,
+  hrefOf,
 }) {
   const { t } = useAppStrings();
   const hasActive = section.items.some((item) => isActivePath(item));
@@ -409,7 +420,7 @@ function AdminNavSectionGroup({
         {!collapsed && section.labelKey ? (
           <div className={FIGMA_SIDEBAR_SECTION_LABEL}>{t(section.labelKey)}</div>
         ) : null}
-        {renderNavRows({ items: section.items, collapsed, isActivePath, badgeForItem, onNavigate })}
+        {renderNavRows({ items: section.items, collapsed, isActivePath, badgeForItem, onNavigate, hrefOf })}
       </div>
     );
   }
@@ -440,22 +451,28 @@ function AdminNavSectionGroup({
         className="mb-1 ml-1.5 border-l border-red-500/20 pl-1"
       >
         <div className="mt-0.5 space-y-px">
-          {renderNavRows({ items: section.items, collapsed, isActivePath, badgeForItem, onNavigate })}
+          {renderNavRows({ items: section.items, collapsed, isActivePath, badgeForItem, onNavigate, hrefOf })}
         </div>
       </NavCollapse>
     </div>
   );
 }
 
-export default function AdminNavigationSidebar() {
+export default function AdminNavigationSidebar({ surface = 'admin' } = {}) {
   const { t } = useAppStrings();
   const location = useLocation();
   const navigate = useNavigate();
   const { mobileNavOpen, closeMobileNav } = useShellLayout();
   const { markNavigating } = useAdminNavLoading();
+  const { navigateToSuite } = useWorkspaceSuite();
   const { isSystemAdmin, orgId, adminSuiteNav } = useCompanyAdminAccess();
+  const manageSurface = surface === 'manage';
+  const hrefOf = useCallback(
+    (path) => surfaceAdminPath(path || '/admin', manageSurface ? 'manage' : 'admin'),
+    [manageSurface]
+  );
   const adminSuiteLabel = t(adminSuiteNav.labelKey);
-  const adminSuitePath = adminSuiteNav.path || '/admin';
+  const adminSuitePath = hrefOf(adminSuiteNav.path || '/admin');
   const { hasGrant, scopeOf } = useEffectiveMasterGrants(orgId);
 
   const [collapsed, setCollapsed] = useState(() => {
@@ -465,7 +482,12 @@ export default function AdminNavigationSidebar() {
       return false;
     }
   });
+  const [showSuitePicker, setShowSuitePicker] = useState(false);
   const [expandedSectionByDomain, setExpandedSectionByDomain] = useState({});
+  const allowedSuites = useMemo(
+    () => (manageSurface ? ['communicate', 'company', 'projects', 'manage'] : ['admin']),
+    [manageSurface]
+  );
 
   const grantCtx = useMemo(
     () => ({ hasGrant, scopeOf, isSystemAdmin: Boolean(isSystemAdmin) }),
@@ -489,13 +511,25 @@ export default function AdminNavigationSidebar() {
     }
   });
 
+  const canViewStructure = canActAdmin(RBAC_GRANT.STRUCTURE_VIEW, grantCtx);
+  const canUpdateStructure = canActAdmin(RBAC_GRANT.STRUCTURE_UPDATE, grantCtx);
+
   const {
     schemaLevels: orgStructureLevels,
     setupCompleted: orgStructureSetupCompleted,
+    error: orgStructureLevelsError,
+    isForbidden: orgStructureLevelsForbidden,
     reload: reloadOrgStructureLevels,
   } = useOrgStructureLevels(orgId, {
-    enabled: Boolean(orgId) && selectedDomainId === 'org-structure',
+    // Không gọi API levels khi thiếu structure.view (tránh 403 ồn + modal giả).
+    enabled: Boolean(orgId) && selectedDomainId === 'org-structure' && canViewStructure,
   });
+
+  // Thiếu view / 403: coi như đã qua bước setup để lọc section (dept vẫn hiện theo grant).
+  const orgStructureFilterSetupCompleted =
+    !canViewStructure || orgStructureLevelsForbidden || Boolean(orgStructureLevelsError)
+      ? true
+      : orgStructureSetupCompleted === true;
 
   const enrichDomain = useCallback(
     (raw) => {
@@ -503,12 +537,12 @@ export default function AdminNavigationSidebar() {
       const leveled =
         raw.id === 'org-structure'
           ? applyOrgLevelFilterToDomain(raw, orgStructureLevels, {
-              setupCompleted: orgStructureSetupCompleted === true,
+              setupCompleted: orgStructureFilterSetupCompleted,
             })
           : raw;
       return filterAdminDomainByGrant(leveled, grantCtx);
     },
-    [orgStructureLevels, orgStructureSetupCompleted, grantCtx]
+    [orgStructureLevels, orgStructureFilterSetupCompleted, grantCtx]
   );
 
   /** Cùng nguồn với Trung tâm quản trị — domain còn mục sau lọc grant. */
@@ -518,13 +552,13 @@ export default function AdminNavigationSidebar() {
         visibleDomains.map((raw) =>
           raw.id === 'org-structure'
             ? applyOrgLevelFilterToDomain(raw, orgStructureLevels, {
-                setupCompleted: orgStructureSetupCompleted === true,
+                setupCompleted: orgStructureFilterSetupCompleted,
               })
             : raw
         ),
         grantCtx
       ),
-    [visibleDomains, orgStructureLevels, orgStructureSetupCompleted, grantCtx]
+    [visibleDomains, orgStructureLevels, orgStructureFilterSetupCompleted, grantCtx]
   );
 
   useEffect(() => {
@@ -550,9 +584,9 @@ export default function AdminNavigationSidebar() {
     if (!raw) return raw;
     if (raw.id !== 'org-structure') return raw;
     return applyOrgLevelFilterToDomain(raw, orgStructureLevels, {
-      setupCompleted: orgStructureSetupCompleted === true,
+      setupCompleted: orgStructureFilterSetupCompleted,
     });
-  }, [visibleDomains, selectedDomainId, orgStructureLevels, orgStructureSetupCompleted]);
+  }, [visibleDomains, selectedDomainId, orgStructureLevels, orgStructureFilterSetupCompleted, selectableDomains]);
 
   const isActivePath = (item) => {
     const base = String(item.path || '').split('?')[0].replace(/\/+$/, '');
@@ -580,7 +614,10 @@ export default function AdminNavigationSidebar() {
     const next = !collapsed;
     setCollapsed(next);
     localStorage.setItem(COLLAPSE_KEY, JSON.stringify(next));
+    if (next) setShowSuitePicker(false);
   };
+
+  const suitePickerOpen = manageSurface && showSuitePicker && !collapsed;
 
   const handleDomainSelect = useCallback(
     (domain) => {
@@ -590,9 +627,9 @@ export default function AdminNavigationSidebar() {
       if (normalizeAdminPath(leafPath) !== currentPath) {
         markNavigating();
       }
-      navigate(leafPath);
+      navigate(hrefOf(leafPath));
     },
-    [currentPath, grantCtx, markNavigating, navigate]
+    [currentPath, grantCtx, hrefOf, markNavigating, navigate]
   );
 
   const toggleNavSection = (sectionId) => {
@@ -633,25 +670,53 @@ export default function AdminNavigationSidebar() {
           >
             {!collapsed ? (
               <>
-                <Link
-                  to={adminSuitePath}
-                  onClick={() => {
-                    if (currentPath !== adminSuitePath) markNavigating();
-                  }}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2 py-1 transition hover:opacity-90"
-                  style={{
-                    background: `${ADMIN_COLOR}18`,
-                    borderColor: `${ADMIN_COLOR}22`,
-                  }}
-                >
-                  <div className="h-[5px] w-[5px] shrink-0 rounded-full" style={{ background: ADMIN_COLOR }} />
-                  <span
-                    className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left text-[0.6875rem] font-bold uppercase tracking-wider"
-                    style={{ color: ADMIN_COLOR }}
+                {manageSurface ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowSuitePicker((s) => !s)}
+                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 transition"
+                    style={{
+                      background: `${ADMIN_COLOR}18`,
+                      borderColor: `${ADMIN_COLOR}22`,
+                    }}
+                    aria-haspopup="menu"
+                    aria-expanded={suitePickerOpen}
+                    title={t('nav.switchSuite')}
                   >
-                    {adminSuiteLabel}
-                  </span>
-                </Link>
+                    <div className="h-[5px] w-[5px] shrink-0 rounded-full" style={{ background: ADMIN_COLOR }} />
+                    <span
+                      className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left text-[0.6875rem] font-bold uppercase tracking-wider"
+                      style={{ color: ADMIN_COLOR }}
+                    >
+                      {adminSuiteLabel}
+                    </span>
+                    <ChevronsRight
+                      size={12}
+                      className={`${VH_NAV_CHEVRON} ${suitePickerOpen ? 'rotate-90' : 'rotate-0'}`}
+                      style={{ color: ADMIN_COLOR }}
+                    />
+                  </button>
+                ) : (
+                  <Link
+                    to={adminSuitePath}
+                    onClick={() => {
+                      if (currentPath !== normalizeAdminPath(adminSuitePath)) markNavigating();
+                    }}
+                    className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2 py-1 transition hover:opacity-90"
+                    style={{
+                      background: `${ADMIN_COLOR}18`,
+                      borderColor: `${ADMIN_COLOR}22`,
+                    }}
+                  >
+                    <div className="h-[5px] w-[5px] shrink-0 rounded-full" style={{ background: ADMIN_COLOR }} />
+                    <span
+                      className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left text-[0.6875rem] font-bold uppercase tracking-wider"
+                      style={{ color: ADMIN_COLOR }}
+                    >
+                      {adminSuiteLabel}
+                    </span>
+                  </Link>
+                )}
                 <button
                   type="button"
                   onClick={toggleCollapsed}
@@ -679,6 +744,72 @@ export default function AdminNavigationSidebar() {
               </button>
             )}
           </div>
+
+          <MotionPresence open={suitePickerOpen}>
+            <motion.div
+              key="manage-suite-picker"
+              className="absolute left-2 right-2 top-[calc(100%+4px)] z-[200] overflow-hidden rounded-xl border border-white/10 bg-[#0D0D1A] shadow-2xl vh-motion-respect"
+              role="menu"
+              {...motionPopover}
+            >
+              <div className="px-2.5 pb-1 pt-2 text-[0.575rem] font-bold uppercase tracking-widest text-white/25">
+                {t('nav.chooseSpace')}
+              </div>
+              {allowedSuites.map((sId) => {
+                const isCurrent = sId === 'manage';
+                const labels = {
+                  label: sId === 'manage' ? adminSuiteLabel : t(`nav.suite.${sId}.label`),
+                  sublabel: t(`nav.suite.${sId}.sublabel`),
+                };
+                const sc = SUITE_COLORS[sId] || ADMIN_COLOR;
+                return (
+                  <button
+                    key={sId}
+                    type="button"
+                    onClick={() => {
+                      const suiteMap = {
+                        communicate: SUITE.COMMUNICATE,
+                        company: SUITE.COMPANY,
+                        projects: SUITE.PROJECTS,
+                        manage: SUITE.MANAGE,
+                      };
+                      const targetSuite = suiteMap[sId];
+                      const path =
+                        sId === 'manage' ? adminSuitePath : getDefaultPathForSuite(targetSuite);
+                      navigateToSuite(targetSuite, { path });
+                      setShowSuitePicker(false);
+                    }}
+                    className="flex w-full items-center gap-2.5 border-none px-3 py-2 text-left transition duration-fast ease-enterprise motion-reduce:transition-none"
+                    style={{
+                      background: isCurrent ? `${sc}18` : 'transparent',
+                      borderLeft: `3px solid ${isCurrent ? sc : 'transparent'}`,
+                    }}
+                  >
+                    <div
+                      className="h-[7px] w-[7px] shrink-0 rounded-full"
+                      style={{ background: sc, boxShadow: isCurrent ? `0 0 6px ${sc}` : 'none' }}
+                    />
+                    <div>
+                      <div
+                        className="text-[0.7812rem]"
+                        style={{
+                          fontWeight: isCurrent ? 700 : 500,
+                          color: isCurrent ? sc : 'rgba(255,255,255,0.6)',
+                        }}
+                      >
+                        {labels.label}
+                      </div>
+                      <div className="text-[0.625rem] text-white/25">{labels.sublabel}</div>
+                    </div>
+                    {isCurrent ? (
+                      <ChevronsRight size={11} className="ml-auto" style={{ color: sc }} />
+                    ) : null}
+                  </button>
+                );
+              })}
+              <div className="h-1.5" />
+            </motion.div>
+          </MotionPresence>
         </div>
 
         <nav className={`${FIGMA_SIDEBAR_NAV} relative`}>
@@ -703,18 +834,9 @@ export default function AdminNavigationSidebar() {
               isActivePath={isActivePath}
               badgeForItem={badgeForItem}
               onNavigate={markNavigating}
+              hrefOf={hrefOf}
             />
           ))}
-
-          {!collapsed && !isSystemAdmin ? (
-            <Link
-              to="/collaborate/workspaces"
-              onClick={() => markNavigating()}
-              className="mt-2 block rounded-lg border border-dashed border-white/10 px-2.5 py-2 text-[0.75rem] text-white/45 transition hover:border-white/20 hover:text-white/70"
-            >
-              {t('companyAdmin.backToWork')}
-            </Link>
-          ) : null}
         </nav>
 
         <div className={FIGMA_SIDEBAR_FOOTER}>
@@ -724,7 +846,14 @@ export default function AdminNavigationSidebar() {
 
       <OrgStructureSetupModal
         orgId={orgId}
-        open={Boolean(orgId) && selectedDomainId === 'org-structure' && orgStructureSetupCompleted === false}
+        open={
+          Boolean(orgId) &&
+          selectedDomainId === 'org-structure' &&
+          canViewStructure &&
+          canUpdateStructure &&
+          !orgStructureLevelsError &&
+          orgStructureSetupCompleted === false
+        }
         onCompleted={async (payload) => {
           const levels = Array.isArray(payload?.levels) ? payload.levels : [];
           await reloadOrgStructureLevels();
@@ -733,7 +862,7 @@ export default function AdminNavigationSidebar() {
           const firstItem = filtered?.sections?.flatMap((s) => s.items || []).find((item) => item?.path);
           if (firstItem?.path) {
             markNavigating();
-            navigate(firstItem.path);
+            navigate(hrefOf(firstItem.path));
           }
         }}
       />

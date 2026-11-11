@@ -14,7 +14,7 @@ import {
   Shield,
 } from 'lucide-react';
 import SidebarPositionFooter from './SidebarPositionFooter';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import useUiRole from '../../hooks/useUiRole';
 import { getRoleMeta } from '../../config/roleMeta';
 import { useWorkspace } from '../../context/WorkspaceContext';
@@ -254,7 +254,6 @@ export default function FigmaNavigationSidebar({
   });
   const [showSuitePicker, setShowSuitePicker] = useState(false);
   const location = useLocation();
-  const navigate = useNavigate();
   const { t } = useAppStrings();
   const { navigateToSuite } = useWorkspaceSuite();
   const { activeWorkspace, singleOrgMode, company } = useWorkspace();
@@ -314,13 +313,15 @@ export default function FigmaNavigationSidebar({
   const { role, meta } = useUiRole();
   const isSingleCompany = singleOrgMode || readSingleOrgModeFlag();
   const { isSystemAdmin, myOrgRole, canAccessHub, adminSuiteNav } = useCompanyAdminAccess();
-  // Cửa admin: systemAdmin hoặc grant opener — nhãn/path theo persona (Enterprise / Provider / HR / Audit).
-  const showAdminSuite = Boolean(canAccessHub);
+  // Suite Quản trị (/manage): grant opener — không phải system admin (system admin chỉ /admin).
+  const showManageSuite = Boolean(canAccessHub) && !isSystemAdmin;
   const adminNavLabel = t(adminSuiteNav.labelKey);
-  const adminNavPath = adminSuiteNav.path || '/admin';
+  const adminNavPath = adminSuiteNav.path || '/manage';
   const suiteLabels = {
     label:
-      suiteSegment === 'admin' ? adminNavLabel : t(`nav.suite.${suiteSegment}.label`),
+      suiteSegment === 'manage' || suiteSegment === 'admin'
+        ? adminNavLabel
+        : t(`nav.suite.${suiteSegment}.label`),
     sublabel: t(`nav.suite.${suiteSegment}.sublabel`),
   };
   // Approvers include IC project roles (TL/QA) — inbox ACL is server-side (canAct / requester)
@@ -378,13 +379,13 @@ export default function FigmaNavigationSidebar({
           badge: 0,
         },
       ];
-      if (showAdminSuite) {
+      if (showManageSuite) {
         items.push({
           key: 'company-admin',
           icon: Shield,
           label: adminNavLabel,
           externalNavigate: true,
-          onClick: () => navigate(adminNavPath),
+          onClick: () => navigateToSuite(SUITE.MANAGE, { path: adminNavPath }),
           path: adminNavPath,
           badge: 0,
         });
@@ -429,13 +430,13 @@ export default function FigmaNavigationSidebar({
             badge: 0,
           },
         ];
-        if (showAdminSuite) {
+        if (showManageSuite) {
           items.push({
             key: 'company-admin',
             icon: Shield,
             label: adminNavLabel,
             externalNavigate: true,
-            onClick: () => navigate(adminNavPath),
+            onClick: () => navigateToSuite(SUITE.MANAGE, { path: adminNavPath }),
             path: adminNavPath,
             badge: 0,
           });
@@ -501,13 +502,13 @@ export default function FigmaNavigationSidebar({
           badge: 0,
         });
       }
-      if (showAdminSuite) {
+      if (showManageSuite) {
         items.push({
           key: 'company-admin',
           icon: Shield,
           label: adminNavLabel,
           externalNavigate: true,
-          onClick: () => navigate(adminNavPath),
+          onClick: () => navigateToSuite(SUITE.MANAGE, { path: adminNavPath }),
           path: adminNavPath,
           badge: 0,
         });
@@ -526,10 +527,10 @@ export default function FigmaNavigationSidebar({
     isTeamLevel,
     isSingleCompany,
     showApprovalInbox,
-    showAdminSuite,
+    showManageSuite,
     adminNavLabel,
     adminNavPath,
-    navigate,
+    navigateToSuite,
   ]);
 
   const visibleNavItems = useMemo(
@@ -548,6 +549,7 @@ export default function FigmaNavigationSidebar({
       );
     }
     if (base === '/admin') return location.pathname === '/admin' || location.pathname.startsWith('/admin/');
+    if (base === '/manage') return location.pathname === '/manage' || location.pathname.startsWith('/manage/');
     if (base === '/collaborate/approvals' || base === '/company/approvals') {
       return (
         location.pathname === '/collaborate/approvals' ||
@@ -610,9 +612,9 @@ export default function FigmaNavigationSidebar({
 
   const allowedSuites = useMemo(() => {
     const base = ['communicate', 'company', 'projects'];
-    if (showAdminSuite) return ['communicate', 'company', 'projects', 'admin'];
+    if (showManageSuite) return ['communicate', 'company', 'projects', 'manage'];
     return base;
-  }, [showAdminSuite]);
+  }, [showManageSuite]);
   const railCollapsed = collapsed && !mobileNavOpen;
   const widthClass = railCollapsed ? FIGMA_SIDEBAR_COLLAPSED : FIGMA_SIDEBAR_EXPANDED;
   const sidebarTranslate = mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0';
@@ -707,7 +709,7 @@ export default function FigmaNavigationSidebar({
               {allowedSuites.map((sId) => {
                 const isCurrent = sId === suiteSegment;
                 const labels = {
-                  label: sId === 'admin' ? adminNavLabel : t(`nav.suite.${sId}.label`),
+                  label: sId === 'manage' ? adminNavLabel : t(`nav.suite.${sId}.label`),
                   sublabel: t(`nav.suite.${sId}.sublabel`),
                 };
                 const sc = SUITE_COLORS[sId];
@@ -722,11 +724,11 @@ export default function FigmaNavigationSidebar({
                         projects: SUITE.PROJECTS,
                         collaborate: SUITE.COMPANY,
                         me: SUITE.ME,
-                        admin: SUITE.ADMIN,
+                        manage: SUITE.MANAGE,
                       };
                       const targetSuite = suiteMap[sId];
                       const path =
-                        sId === 'admin' ? adminNavPath : getDefaultPathForSuite(targetSuite);
+                        sId === 'manage' ? adminNavPath : getDefaultPathForSuite(targetSuite);
                       navigateToSuite(targetSuite, { path });
                       setShowSuitePicker(false);
                     }}

@@ -2,16 +2,17 @@ import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../context/AuthContext';
 import { useWorkspace } from '../../context/WorkspaceContext';
-import {
-  getLastBootstrapShellPayload,
-  loadBootstrapShell,
-} from '../../services/bootstrapService';
+import { fetchOrganizationsMy } from '../../hooks/queries/fetchers';
 import { fetchDashboardSummary } from '../../services/dashboardService';
 import { queryKeys } from '../../lib/queryKeys';
 import { STALE_TIME_DASHBOARD_MS } from '../../lib/queryClient';
+import {
+  readSingleOrgModeFlag,
+  writeBootstrapCompanyFlags,
+} from '../../utils/singleCompanyMode';
 
 /**
- * Đồng bộ company từ bootstrap sau khi đăng nhập (single-org).
+ * Đồng bộ company từ GET /organizations/my sau khi đăng nhập (single-org).
  * Prefetch dashboard/me (lite→full) ngay sau auth — Overview lần đầu thường HIT/LITE đã ấm.
  */
 export default function BootstrapCompanySync() {
@@ -24,13 +25,18 @@ export default function BootstrapCompanySync() {
     let cancelled = false;
     (async () => {
       try {
-        let boot = getLastBootstrapShellPayload();
-        if (!boot) {
-          boot = await loadBootstrapShell();
-        }
-        if (!cancelled && boot) applyBootstrapCompany(boot);
+        const organizations = await fetchOrganizationsMy();
+        if (cancelled) return;
+        queryClient.setQueryData(queryKeys.organizations.my(), organizations, {
+          updatedAt: Date.now(),
+        });
+        const company = organizations[0] || null;
+        const singleOrgMode = readSingleOrgModeFlag();
+        const payload = { organizations, company, singleOrgMode };
+        writeBootstrapCompanyFlags(payload);
+        applyBootstrapCompany(payload);
       } catch {
-        /* bootstrap retry on next navigation */
+        /* org sync retry on next navigation */
       }
       if (cancelled) return;
       void queryClient.prefetchQuery({

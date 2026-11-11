@@ -66,6 +66,7 @@ jobs:
             docker:
               - 'api-gateway/Dockerfile'
               - 'services/*/Dockerfile'
+              - 'client/Dockerfile'
               - '.github/swarm-app-images.json'
               - '.github/workflows/ci.yml'
               - '.github/workflows/cd.yml'
@@ -178,9 +179,13 @@ jobs:
       - name: ESLint
         working-directory: client
         run: npm run lint
+      - name: Locale parity
+        working-directory: client
+        run: npm run check:locale
       - name: Vite build
         working-directory: client
         env:
+          # Compile smoke only — runtime SPA image uses split-host ARG (RULE-02).
           VITE_API_URL: /api
         run: npm run build
 
@@ -257,7 +262,8 @@ jobs:
           FORCE_SWARM_APP: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
         run: |
           set -euo pipefail
-          mapfile -t SWARM_APP < <(node -e 'require("./.github/swarm-app-images.json").forEach(x=>{if(x.image!=="api-gateway")console.log(x.image)})')
+          # RULE-05: only packages under services/ (exclude api-gateway + client SPA).
+          mapfile -t SWARM_APP < <(node -e 'require("./.github/swarm-app-images.json").forEach(x=>{if(x.image!=="api-gateway"&&x.image!=="client")console.log(x.image)})')
           TARGETS=()
           if [[ "${FORCE_SWARM_APP}" == "true" ]]; then
             TARGETS=("${SWARM_APP[@]}")
@@ -308,7 +314,8 @@ jobs:
           needs.changes.outputs.docker == 'true' ||
           needs.changes.outputs.shared == 'true' ||
           needs.changes.outputs.api_gateway == 'true' ||
-          needs.changes.outputs.services == 'true'
+          needs.changes.outputs.services == 'true' ||
+          needs.changes.outputs.client == 'true'
         )
       ) || (
         needs.changes.outputs.is_main_publish == 'true' && (
@@ -316,6 +323,7 @@ jobs:
           needs.changes.outputs.shared == 'true' ||
           needs.changes.outputs.api_gateway == 'true' ||
           needs.changes.outputs.services == 'true' ||
+          needs.changes.outputs.client == 'true' ||
           github.event.inputs.force_all_images == 'true' ||
           github.event_name == 'workflow_dispatch'
         )
@@ -337,10 +345,9 @@ jobs:
           IS_MAIN: ${{ needs.changes.outputs.is_main_publish }}
           EVENT_NAME: ${{ github.event_name }}
           FORCE_ALL_INPUT: ${{ github.event.inputs.force_all_images || 'false' }}
-          SHARED_CHANGED: ${{ needs.changes.outputs.shared }}
-          DOCKER_CHANGED: ${{ needs.changes.outputs.docker }}
           PR_BASE: ${{ github.event.pull_request.base.sha || '' }}
           BEFORE: ${{ github.event.before || '' }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           EVENT_ARG=pr
@@ -359,8 +366,31 @@ jobs:
             fi
           fi
           EXTRA=()
-          if [[ "${FORCE_ALL_INPUT}" == "true" || "${SHARED_CHANGED}" == "true" || "${DOCKER_CHANGED}" == "true" ]]; then
+          # Only explicit force_all — shared/docker path uses script FORCE_SHARED_DOCKER (RULE-04).
+          if [[ "${FORCE_ALL_INPUT}" == "true" ]]; then
             EXTRA+=(--force-all)
+          fi
+          # RULE-03: main publish — bootstrap catalog keys missing from previous release.
+          if [[ "${IS_MAIN}" == "true" ]]; then
+            mkdir -p prev-manifest
+            PREV_TAG="$(gh release list --limit 20 --json tagName,isDraft \
+              --jq '[.[] | select(.isDraft==false) | .tagName] | map(select(startswith("atrium-R"))) | .[0] // empty' 2>/dev/null || true)"
+            BOOTSTRAP=""
+            if [[ -n "${PREV_TAG}" ]] && gh release download "${PREV_TAG}" --pattern release-manifest.json --dir prev-manifest 2>/dev/null; then
+              BOOTSTRAP="$(node -e '
+                const cat = require("./.github/swarm-app-images.json");
+                const m = JSON.parse(require("fs").readFileSync("prev-manifest/release-manifest.json","utf8"));
+                const miss = cat.filter((r) => !m.services?.[r.image]?.digest).map((r) => r.image);
+                process.stdout.write(miss.join(","));
+              ')"
+            else
+              BOOTSTRAP="$(node -e 'require("./.github/swarm-app-images.json").forEach((r,i,a)=>process.stdout.write(r.image+(i<a.length-1?",":"")))')"
+              echo "No previous atrium-R* manifest — bootstrap all catalog images"
+            fi
+            if [[ -n "${BOOTSTRAP}" ]]; then
+              echo "bootstrap-missing=${BOOTSTRAP}"
+              EXTRA+=(--bootstrap-missing "${BOOTSTRAP}")
+            fi
           fi
           ARGS=(--event "${EVENT_ARG}" --head HEAD --github-output)
           [[ -n "${BASE}" ]] && ARGS+=(--base "${BASE}")
@@ -384,12 +414,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+      - name: Resolve build-args (RULE-02)
+        id: ba
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          if [[ "${IMAGE}" == "client" ]]; then
+            {
+              echo "args<<EOF"
+              echo "VITE_API_URL=https://api.atrium.dev/api"
+              echo "VITE_SOCKET_URL=https://api.atrium.dev"
+              echo "VITE_SOCKET_USE_GATEWAY=true"
+              echo "VITE_VOICE_SIGNAL_URL=https://api.atrium.dev"
+              echo "VITE_VOICE_SIGNAL_PATH=/voice-socket"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
       - uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.context || '.' }}
           file: ${{ matrix.dockerfile }}
           push: false
           tags: atrium-${{ matrix.image }}:ci
+          build-args: ${{ steps.ba.outputs.args }}
           cache-from: type=gha,scope=ci-${{ matrix.image }}
           cache-to: type=gha,mode=min,scope=ci-${{ matrix.image }}
 
@@ -420,15 +470,35 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve build-args (RULE-02)
+        id: ba
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          if [[ "${IMAGE}" == "client" ]]; then
+            {
+              echo "args<<EOF"
+              echo "VITE_API_URL=https://api.atrium.dev/api"
+              echo "VITE_SOCKET_URL=https://api.atrium.dev"
+              echo "VITE_SOCKET_USE_GATEWAY=true"
+              echo "VITE_VOICE_SIGNAL_URL=https://api.atrium.dev"
+              echo "VITE_VOICE_SIGNAL_PATH=/voice-socket"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build & push (one shot)
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.context || '.' }}
           file: ${{ matrix.dockerfile }}
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/atrium/${{ matrix.image }}:${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/atrium/${{ matrix.image }}:latest
+          build-args: ${{ steps.ba.outputs.args }}
           cache-from: type=gha,scope=ci-${{ matrix.image }}
           cache-to: type=gha,mode=min,scope=ci-${{ matrix.image }}
       - name: Resolve digest

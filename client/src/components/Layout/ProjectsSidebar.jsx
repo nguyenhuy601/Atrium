@@ -471,11 +471,11 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
   const { t } = useAppStrings();
   const { navigateToSuite } = useWorkspaceSuite();
   const { mobileNavOpen, closeMobileNav, showHeaderLoading, hideHeaderLoading } = useShellLayout();
-  // Cửa admin khi systemAdmin hoặc grantScopes — nhãn/path theo persona.
-  const { canAccessHub, adminSuiteNav } = useCompanyAdminAccess();
-  const showAdminSuite = Boolean(canAccessHub);
+  // Suite Quản trị (/manage) khi có grant — system admin không dùng shell Projects.
+  const { canAccessHub, isSystemAdmin, adminSuiteNav } = useCompanyAdminAccess();
+  const showManageSuite = Boolean(canAccessHub) && !isSystemAdmin;
   const adminNavLabel = t(adminSuiteNav.labelKey);
-  const adminNavPath = adminSuiteNav.path || '/admin';
+  const adminNavPath = adminSuiteNav.path || '/manage';
   const { projectId: projectIdParam, module: moduleParam, planningModule } = useParams();
   const [searchParams] = useSearchParams();
   const { company, activeWorkspace } = useWorkspace();
@@ -679,9 +679,9 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
 
   const allowedSuites = useMemo(() => {
     const base = ['communicate', 'company', 'projects'];
-    if (showAdminSuite) return ['communicate', 'company', 'projects', 'admin'];
+    if (showManageSuite) return ['communicate', 'company', 'projects', 'manage'];
     return base;
-  }, [showAdminSuite]);
+  }, [showManageSuite]);
 
   const railCollapsed = collapsed && !mobileNavOpen;
   const widthClass = railCollapsed ? FIGMA_SIDEBAR_COLLAPSED : FIGMA_SIDEBAR_EXPANDED;
@@ -875,7 +875,7 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
               {allowedSuites.map((sId) => {
                 const isCurrent = sId === 'projects';
                 const labels = {
-                  label: sId === 'admin' ? adminNavLabel : t(`nav.suite.${sId}.label`),
+                  label: sId === 'manage' ? adminNavLabel : t(`nav.suite.${sId}.label`),
                   sublabel: t(`nav.suite.${sId}.sublabel`),
                 };
                 const sc = SUITE_COLORS[sId] || suiteColor;
@@ -884,7 +884,7 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
                   company: SUITE.COMPANY,
                   projects: SUITE.PROJECTS,
                   me: SUITE.ME,
-                  admin: SUITE.ADMIN,
+                  manage: SUITE.MANAGE,
                 };
                 return (
                   <button
@@ -893,7 +893,7 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
                     onClick={() => {
                       const targetSuite = suiteMap[sId];
                       const path =
-                        sId === 'admin' ? adminNavPath : getDefaultPathForSuite(targetSuite);
+                        sId === 'manage' ? adminNavPath : getDefaultPathForSuite(targetSuite);
                       navigateToSuite(targetSuite, { path });
                       setShowSuitePicker(false);
                     }}

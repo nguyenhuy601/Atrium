@@ -6,6 +6,7 @@ export const SUITE_COLORS = {
   company: '#10B981',
   projects: '#8B5CF6',
   me: '#F59E0B',
+  manage: '#DC2626',
   admin: '#DC2626',
 };
 
@@ -15,6 +16,7 @@ export const SUITE_SEGMENT = {
   company: 'company',
   projects: 'projects',
   me: 'me',
+  manage: 'manage',
   admin: 'admin',
 };
 

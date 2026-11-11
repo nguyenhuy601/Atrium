@@ -11,7 +11,6 @@ import {
   readSingleOrgModeFlag,
   resolveCompanyFromBootstrap,
 } from '../utils/singleCompanyMode';
-import { clearBootstrapShellCache } from '../services/bootstrapService';
 
 const LAST_WORKSPACE_SLUG_KEY = 'atrium:last-workspace-slug';
 const WORKSPACE_CLEARED_EVENT = 'atrium:workspace-cleared';
@@ -22,7 +21,6 @@ export function notifyWorkspaceClearedOnLogout() {
   window.localStorage.removeItem(LAST_WORKSPACE_SLUG_KEY);
   writeStoredLastOrganizationId('');
   clearCompanySnapshot();
-  clearBootstrapShellCache();
   window.dispatchEvent(new Event(WORKSPACE_CLEARED_EVENT));
 }
 

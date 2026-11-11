@@ -837,6 +837,46 @@ exports.getDocumentsOverview = async (req, res, next) => {
   }
 };
 
+/** Identity + placement + scope nhẹ cho sidebar / personal overview (không kèm structure tree). */
+exports.getOrgMyProfile = async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const { orgId } = req.params;
+    if (!userId) {
+      return orgUnauthorized(res);
+    }
+    const access = await resolveOrgAccess(userId, orgId);
+    if (!access.ok) {
+      return orgAccessDenied(res);
+    }
+
+    const { buildOrgMyProfile } = require('../services/orgMyProfile.service');
+    const {
+      weakEtagFromPayload,
+      etagMatches,
+    } = require('../utils/orgMyProfileHelpers');
+
+    const data = await buildOrgMyProfile({
+      userId,
+      orgId,
+      access,
+      include: req.query?.include,
+    });
+
+    const etag = weakEtagFromPayload(data);
+    res.set('ETag', etag);
+    res.set('Cache-Control', 'private, max-age=0, must-revalidate');
+
+    if (etagMatches(req.get('If-None-Match'), etag)) {
+      return res.status(304).end();
+    }
+
+    return res.json({ status: 'success', data });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 /** Gom structure + ACL kênh + task scope + badge thông báo org — một request khi vào workspace. */
 exports.getOrgShell = async (req, res, next) => {
   try {

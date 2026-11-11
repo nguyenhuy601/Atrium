@@ -79,7 +79,7 @@ function buildRejectedError(errorLike, fallbackKey = 'errors.generic') {
    /api/friends/* → organization-service (derived roster)
 ======================================== */
 
-// Same-origin /api qua Nginx (https://atrium.dev) hoặc Vite proxy — không hardcode :3000.
+// Absolute VITE_API_URL (https://api.$DOMAIN/api) hoặc relative /api (Vite proxy / same-origin).
 const API_URL = resolveApiBaseUrl();
 
 /* ========================================

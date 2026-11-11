@@ -1,4 +1,4 @@
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import AdminNavigationSidebar from './AdminNavigationSidebar';
 import JoinOrganizationModal from './JoinOrganizationModal';
 import NetworkOfflineBanner from './NetworkOfflineBanner';
@@ -14,15 +14,19 @@ import PageMotion from '../../motion/PageMotion';
 import FetchBar from '../../motion/primitives/FetchBar';
 import { FIGMA_SHELL_BODY, FIGMA_SHELL_MAIN, FIGMA_SHELL_ROOT } from './figmaShellClasses';
 import { getDefaultPathForSuite, SUITE, writeStoredSuite } from '../../utils/suitePathUtils';
+import { toManageRoutePath } from '../../utils/adminManagePath';
 
-
+/**
+ * Phân hệ Admin hạ tầng (`/admin`) — chỉ systemRole=admin.
+ * User được cấp grant cấu hình → chuyển sang suite `/manage`.
+ */
 function AdminShellLayoutInner() {
+  const location = useLocation();
   const { headerLoadingLabel } = useShellLayout();
   const { isSystemAdmin, orgId } = useCompanyAdminAccess();
   const { hasGrant, scopeOf, loading, error } = useGrantScopes(orgId);
   const headerLoading = headerLoadingLabel != null;
-  const canEnter =
-    isSystemAdmin || hasAnyAdminNavGrant(hasGrant, scopeOf, getVisibleAdminDomains());
+  const hasManageGrant = hasAnyAdminNavGrant(hasGrant, scopeOf, getVisibleAdminDomains());
 
   if (!isSystemAdmin && orgId && error) {
     return <div className={FIGMA_SHELL_ROOT} />;
@@ -37,11 +41,6 @@ function AdminShellLayoutInner() {
             <div className="mx-auto max-w-6xl space-y-4 px-4 py-6">
               <div className="h-8 w-56 animate-pulse rounded-md bg-muted" />
               <div className="h-4 w-80 max-w-full animate-pulse rounded bg-muted/70" />
-              <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {Array.from({ length: 8 }).map((_, idx) => (
-                  <div key={`admin-skel-${idx}`} className="h-24 animate-pulse rounded-xl bg-muted/60" />
-                ))}
-              </div>
             </div>
           </div>
         </div>
@@ -49,8 +48,12 @@ function AdminShellLayoutInner() {
     );
   }
 
-  if (!canEnter) {
-    return <Navigate to={getDefaultPathForSuite(SUITE.COLLABORATE)} replace />;
+  if (!isSystemAdmin) {
+    if (hasManageGrant) {
+      const target = toManageRoutePath(`${location.pathname}${location.search || ''}`);
+      return <Navigate to={target} replace />;
+    }
+    return <Navigate to={getDefaultPathForSuite(SUITE.COMPANY)} replace />;
   }
 
   writeStoredSuite(SUITE.ADMIN);
@@ -64,13 +67,12 @@ function AdminShellLayoutInner() {
       <FetchBar active={headerLoading} />
       <ShellCommandPalette />
       <div className={FIGMA_SHELL_BODY}>
-        <AdminNavigationSidebar />
+        <AdminNavigationSidebar surface="admin" />
         <div className={FIGMA_SHELL_MAIN}>
           <PageMotion className="min-h-0 flex-1">
             <Outlet />
           </PageMotion>
         </div>
-
       </div>
     </div>
   );

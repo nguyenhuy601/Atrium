@@ -18,9 +18,6 @@ const http = require('http');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const app = require('./app');
 const { services } = require('./config/services');
-const { connectBffRedis } = require('./bff/cache');
-
-connectBffRedis();
 
 /** Production: chạy sau reverse proxy TLS (HTTPS/Nginx) — đặt TRUST_PROXY=1 trong api-gateway/.env để rate-limit đếm đúng client IP. */
 if (process.env.TRUST_PROXY === '1') {

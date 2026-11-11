@@ -90,8 +90,8 @@ export { useSocket };
    SOCKET SERVER URL
    - Dev: mặc định cùng origin Vite (5173) + proxy /socket.io → :3017 (vite.config.js). VITE_SOCKET_URL không dùng trừ khi VITE_SOCKET_USE_GATEWAY=true.
    - VITE_SOCKET_DIRECT_URL: nối thẳng socket-service (vd. http://127.0.0.1:3017), bỏ qua proxy Vite.
-   - VITE_SOCKET_URL + VITE_SOCKET_USE_GATEWAY: test Socket qua API Gateway trong dev.
-   - Production: VITE_SOCKET_URL hoặc mặc định http://localhost:3000
+   - VITE_SOCKET_URL + VITE_SOCKET_USE_GATEWAY: Socket qua API Gateway (split-host: https://api.atrium.dev).
+   - Production / edge: đặt VITE_SOCKET_URL=https://api.$DOMAIN (không dùng apex FE origin).
    - Namespace /chat → khớp socket-service (io.of('/chat'))
 ======================================== */
 const DIRECT_RAW = import.meta.env.VITE_SOCKET_DIRECT_URL;
@@ -121,10 +121,14 @@ function getDevSocketBaseUrl() {
   return window.location.origin;
 }
 
-/** Socket qua gateway — same-origin (Nginx https://atrium.dev), không :3000 trên host LAN. */
+/**
+ * Socket qua gateway — ưu tiên VITE_SOCKET_URL / voice / absolute API (api.$DOMAIN),
+ * không mặc định apex FE khi đã cấu hình split-host.
+ */
 function getAutoGatewayBaseUrl() {
-  const fromBrowser = resolveAppOrigin();
-  if (fromBrowser) return fromBrowser;
+  if (GATEWAY_URL) return GATEWAY_URL.replace(/\/+$/, '');
+  const fromEnv = resolveAppOrigin();
+  if (fromEnv) return fromEnv;
   if (typeof window === 'undefined' || !window.location) {
     return `http://127.0.0.1:${DEV_GATEWAY_PORT || '3000'}`;
   }
@@ -135,9 +139,9 @@ function getAutoGatewayBaseUrl() {
 
 const SOCKET_BASE_URL =
   DIRECT ||
-  (USE_GATEWAY_SOCKET && !GATEWAY_URL ? getAutoGatewayBaseUrl() : '') ||
-  (import.meta.env.DEV && !USE_GATEWAY_SOCKET ? getDevSocketBaseUrl() : '') ||
   GATEWAY_URL ||
+  (USE_GATEWAY_SOCKET ? getAutoGatewayBaseUrl() : '') ||
+  (import.meta.env.DEV && !USE_GATEWAY_SOCKET ? getDevSocketBaseUrl() : '') ||
   getAutoGatewayBaseUrl() ||
   (import.meta.env.DEV ? 'http://127.0.0.1:3017' : 'http://localhost:3000');
 

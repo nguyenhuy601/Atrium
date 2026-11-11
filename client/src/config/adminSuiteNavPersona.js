@@ -1,6 +1,7 @@
 /**
- * Nhãn + path mặc định mục Sidebar admin theo persona grant (không hardcode email).
+ * Nhãn + path mặc định mục Sidebar admin/manage theo persona grant (không hardcode email).
  * Ưu tiên: Provider → Enterprise IT → Audit → HR → fallback org.
+ * Provider (systemAdmin) → `/admin`; persona grant → `/manage`.
  */
 
 import { RBAC_GRANT, adminScopeOpensPage } from './rbacUiGrantMap.js';
@@ -13,9 +14,14 @@ export const ADMIN_SUITE_PERSONA = Object.freeze({
   ORG: 'org',
 });
 
-const ADMIN_HUB_PATH = '/admin';
-const ADMIN_USERS_PATH = '/admin/users';
-const ADMIN_AUDIT_PATH = '/admin/audit';
+function hubPaths(isSystemAdmin) {
+  const root = isSystemAdmin ? '/admin' : '/manage';
+  return {
+    hub: root,
+    users: `${root}/users`,
+    audit: `${root}/audit`,
+  };
+}
 
 function grantOpensAdminPage(hasGrant, scopeOf, key) {
   if (typeof hasGrant !== 'function' || !hasGrant(key)) return false;
@@ -32,11 +38,13 @@ export function resolveAdminSuiteNavPersona({
   hasGrant,
   scopeOf,
 } = {}) {
+  const paths = hubPaths(Boolean(isSystemAdmin));
+
   if (isSystemAdmin) {
     return {
       persona: ADMIN_SUITE_PERSONA.PROVIDER,
       labelKey: 'nav.adminSuiteProvider',
-      path: ADMIN_HUB_PATH,
+      path: paths.hub,
     };
   }
 
@@ -44,7 +52,7 @@ export function resolveAdminSuiteNavPersona({
     return {
       persona: ADMIN_SUITE_PERSONA.ENTERPRISE,
       labelKey: 'nav.adminSuiteEnterprise',
-      path: ADMIN_HUB_PATH,
+      path: paths.hub,
     };
   }
 
@@ -52,7 +60,7 @@ export function resolveAdminSuiteNavPersona({
     return {
       persona: ADMIN_SUITE_PERSONA.AUDIT,
       labelKey: 'nav.adminSuiteAudit',
-      path: ADMIN_AUDIT_PATH,
+      path: paths.audit,
     };
   }
 
@@ -63,14 +71,14 @@ export function resolveAdminSuiteNavPersona({
     return {
       persona: ADMIN_SUITE_PERSONA.HR,
       labelKey: 'nav.adminSuiteHr',
-      path: ADMIN_USERS_PATH,
+      path: paths.users,
     };
   }
 
   return {
     persona: ADMIN_SUITE_PERSONA.ORG,
     labelKey: 'nav.adminSuiteOrg',
-    path: ADMIN_HUB_PATH,
+    path: paths.hub,
   };
 }
 

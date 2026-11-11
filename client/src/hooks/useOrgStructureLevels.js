@@ -6,12 +6,15 @@ import { unwrapOrgApi } from '../utils/adminOrgStructureUtils';
 import { resolveOrgUnitCreateParents } from '../utils/orgUnitCreateParents';
 import { queryKeys } from '../lib/queryKeys';
 import { STALE_TIME_ORG_LEVELS_MS } from '../lib/queryClient';
+import { isOrgStructureLevelsForbidden } from '../utils/orgStructureLevelsAccess';
 
 /**
  * @typedef {{ levels: object[], setupCompleted: boolean, templateId: string }} OrgStructureLevelsSchema
  */
 
 const EMPTY_LEVELS = Object.freeze([]);
+
+export { isOrgStructureLevelsForbidden };
 
 export async function fetchOrgStructureLevels(orgId) {
   const res = await organizationAPI.getStructureLevels(orgId);
@@ -38,6 +41,10 @@ export function useOrgStructureLevels(orgId, options = {}) {
     queryFn: () => fetchOrgStructureLevels(id),
     enabled,
     staleTime: STALE_TIME_ORG_LEVELS_MS,
+    retry: (failureCount, error) => {
+      if (isOrgStructureLevelsForbidden(error)) return false;
+      return failureCount < 1;
+    },
   });
 
   const schemaLevels = enabled && Array.isArray(query.data?.levels) ? query.data.levels : EMPTY_LEVELS;
@@ -45,14 +52,19 @@ export function useOrgStructureLevels(orgId, options = {}) {
     () => schemaLevels.filter((l) => l && l.enabled !== false && l.key),
     [schemaLevels]
   );
+
+  // Chỉ tin setupCompleted khi GET thành công — 403/error không được suy ra «chưa setup».
   const setupCompleted = !enabled
     ? null
-    : query.isFetched
+    : query.isSuccess
       ? Boolean(query.data?.setupCompleted)
       : null;
-  const templateId = enabled ? String(query.data?.templateId || '') : '';
+
+  const templateId = enabled && query.isSuccess ? String(query.data?.templateId || '') : '';
   const loading = enabled && query.isPending;
   const ready = !enabled || query.isFetched;
+  const error = enabled ? query.error || null : null;
+  const isForbidden = isOrgStructureLevelsForbidden(error);
 
   const reload = useCallback(async () => {
     if (!id) return;
@@ -92,7 +104,8 @@ export function useOrgStructureLevels(orgId, options = {}) {
     templateId,
     loading,
     ready,
-    error: enabled ? query.error || null : null,
+    error,
+    isForbidden,
     reload,
     hasLevel,
     parentLevelKey,

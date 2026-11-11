@@ -6,9 +6,10 @@ import {
   memberUserId,
 } from '../utils/adminUserUtils';
 
-export default function useAdminHubInsights(orgId) {
+export default function useAdminHubInsights(orgId, { surface = 'admin' } = {}) {
   const { t } = useAppStrings();
   const { members, loading: membersLoading } = useAdminMembers(orgId, { view: 'admin_table' });
+  const usersRoot = surface === 'manage' ? '/manage/users' : '/admin/users';
 
   const rbacByUser = useMemo(() => {
     const map = {};
@@ -36,6 +37,6 @@ export default function useAdminHubInsights(orgId) {
     loading: membersLoading,
     pendingCount: pendingMembers.length,
     messages,
-    usersHref: '/admin/users',
+    usersHref: usersRoot,
   };
 }

@@ -1,8 +1,8 @@
 /**
  * URL frontend cho email / link mời — ưu tiên Origin/Referer từ browser,
- * sau đó X-Forwarded-* (Nginx https://atrium.dev), cuối cùng FRONTEND_URL.
+ * sau đó X-Forwarded-*, cuối cùng FRONTEND_URL / DOMAIN.
  */
-function resolveFrontendUrl(req, fallbackEnvKey = 'FRONTEND_URL') {
+function resolveFrontendUrl(req, fallbackEnvKey = 'FRONTEND_URL', env = process.env) {
   const origin = req?.headers?.origin;
   if (origin && String(origin).trim()) {
     return String(origin).trim().replace(/\/+$/, '');
@@ -33,11 +33,15 @@ function resolveFrontendUrl(req, fallbackEnvKey = 'FRONTEND_URL') {
     .split(',')[0]
     .trim();
   if (xfHost) {
-    const proto = xfProto || (xfHost.includes('atrium.dev') ? 'https' : 'http');
+    const proto = xfProto || 'https';
     return `${proto}://${xfHost}`.replace(/\/+$/, '');
   }
 
-  const fallback = process.env[fallbackEnvKey] || process.env.FRONTEND_URL || 'http://localhost:5173';
+  const fallback =
+    env[fallbackEnvKey] ||
+    env.FRONTEND_URL ||
+    (env.DOMAIN ? `https://${String(env.DOMAIN).trim()}` : '') ||
+    'http://localhost:5173';
   return String(fallback).replace(/\/+$/, '');
 }
 

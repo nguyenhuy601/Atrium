@@ -156,9 +156,10 @@ function SortableTh({ label, columnKey, activeKey, dir, onSort }) {
 /** Một org chỉ một lượt tải — effect chạy lại (StrictMode) dùng cùng promise. */
 const usersListEnrichmentInflight = new Map();
 
-function fetchUsersListEnrichment(orgId) {
+function fetchUsersListEnrichment(orgId, { includeOrgRoleAssignments = true } = {}) {
   const key = String(orgId || '').trim();
-  const pending = usersListEnrichmentInflight.get(key);
+  const cacheKey = `${key}:orgRole=${includeOrgRoleAssignments ? '1' : '0'}`;
+  const pending = usersListEnrichmentInflight.get(cacheKey);
   if (pending) return pending;
 
   const task = (async () => {
@@ -168,18 +169,20 @@ function fetchUsersListEnrichment(orgId) {
         assignmentsFailed = true;
         return null;
       }),
-      orgRoleCatalogAPI.listAssignments(key).catch(() => null),
+      includeOrgRoleAssignments
+        ? orgRoleCatalogAPI.listAssignments(key).catch(() => null)
+        : Promise.resolve(null),
       organizationAPI.listHrPositions(key).catch(() => null),
       orgRbacAPI.listAssignments(key, { status: 'active' }).catch(() => null),
     ]);
     return { structureRes, assignRes, positionRes, positionAssignRes, assignmentsFailed };
   })().finally(() => {
-    if (usersListEnrichmentInflight.get(key) === task) {
-      usersListEnrichmentInflight.delete(key);
+    if (usersListEnrichmentInflight.get(cacheKey) === task) {
+      usersListEnrichmentInflight.delete(cacheKey);
     }
   });
 
-  usersListEnrichmentInflight.set(key, task);
+  usersListEnrichmentInflight.set(cacheKey, task);
   return task;
 }
 
@@ -215,7 +218,8 @@ export default function UsersListPanel({ orgId }) {
   tRef.current = t;
   const navigate = useNavigate();
   const { organization } = useCompanyAdminContext();
-  const { can } = useAdminActionGate(orgId);
+  const { can, grantsLoading } = useAdminActionGate(orgId);
+  const canViewOrgRoleAssignments = can(RBAC_GRANT.ORG_ROLE_VIEW);
   const canInvite = can(RBAC_GRANT.EMPLOYEE_INVITE);
   const canDeleteEmployee = can(RBAC_GRANT.EMPLOYEE_DELETE);
   const { members, loading, error: membersError, loadMembers } = useAdminMembers(orgId, {
@@ -296,7 +300,7 @@ export default function UsersListPanel({ orgId }) {
   }, [filtersOpen]);
 
   useEffect(() => {
-    if (!orgId) return undefined;
+    if (!orgId || grantsLoading) return undefined;
     let cancelled = false;
     (async () => {
       try {
@@ -306,7 +310,9 @@ export default function UsersListPanel({ orgId }) {
           positionRes,
           positionAssignRes,
           assignmentsFailed,
-        } = await fetchUsersListEnrichment(orgId);
+        } = await fetchUsersListEnrichment(orgId, {
+          includeOrgRoleAssignments: canViewOrgRoleAssignments,
+        });
         // apiClient interceptor trả body ({ success, data }) — không còn axios.response.
         const body = structureRes?.data ?? structureRes;
         const assignments =
@@ -384,7 +390,7 @@ export default function UsersListPanel({ orgId }) {
     return () => {
       cancelled = true;
     };
-  }, [orgId, structureReloadKey]);
+  }, [orgId, structureReloadKey, grantsLoading, canViewOrgRoleAssignments]);
 
   const formatWhen = (value) => {
     if (!value) return '—';

@@ -22,6 +22,8 @@ import {
   effectiveOrgRoleLabel,
 } from '../../utils/effectiveOrgRoleLabel';
 import { adminInputClass, adminPrimaryBtnClass } from './adminUserPanelUi';
+import { useAdminActionGate } from '../../hooks/useAdminActionGate';
+import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
 
 const RBAC_ROLE_FILTER_ALL = 'all';
 const RBAC_ROLE_FILTER_WITH = 'withRole';
@@ -102,6 +104,8 @@ export default function AdminUserPicker({
     ? (Array.isArray(selectedUserIds) ? selectedUserIds : internalSelectedIds)
     : [];
   const { members, loading, error, loadMembers } = useAdminMembers(orgId, { view: 'directory' });
+  const { can, grantsLoading } = useAdminActionGate(orgId);
+  const canViewOrgRoleAssignments = can(RBAC_GRANT.ORG_ROLE_VIEW);
 
   const activeId = String(selectedUserId || searchParams.get('userId') || '').trim();
   const errorMessage = error
@@ -113,12 +117,14 @@ export default function AdminUserPicker({
   const orgRoleByUser = orgRoleByUserProp || loadedOrgRoleByUser;
 
   useEffect(() => {
-    if (orgRoleByUserProp || !orgId) return undefined;
+    if (orgRoleByUserProp || !orgId || grantsLoading) return undefined;
     let cancelled = false;
     (async () => {
       try {
         const [assignRes, positionAssignRes] = await Promise.all([
-          orgRoleCatalogAPI.listAssignments(orgId).catch(() => null),
+          canViewOrgRoleAssignments
+            ? orgRoleCatalogAPI.listAssignments(orgId).catch(() => null)
+            : Promise.resolve(null),
           orgRbacAPI.listAssignments(orgId, { status: 'active' }).catch(() => null),
         ]);
         // apiClient đã unwrap → { success, data }.
@@ -155,7 +161,7 @@ export default function AdminUserPicker({
     return () => {
       cancelled = true;
     };
-  }, [orgId, orgRoleByUserProp]);
+  }, [orgId, orgRoleByUserProp, grantsLoading, canViewOrgRoleAssignments]);
 
   const filtered = useMemo(() => {
     let base = members;

@@ -1,6 +1,5 @@
 const { resolveFrontendUrl } = require('./resolveFrontendUrl');
 
-const LAN_DEV_ORIGIN = 'https://atrium.dev';
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1']);
 
 function toOrigin(raw) {
@@ -20,11 +19,22 @@ function listCorsOrigins(env) {
     .filter(Boolean);
 }
 
+function defaultFrontendOrigin(env) {
+  return (
+    toOrigin(env.FRONTEND_URL) ||
+    listCorsOrigins(env)[0] ||
+    (env.DOMAIN ? `https://${String(env.DOMAIN).trim()}` : '') ||
+    'http://localhost:5173'
+  );
+}
+
 function isAllowedOrigin(origin, env) {
   if (!origin) return false;
-  if (origin === LAN_DEV_ORIGIN) return true;
   if (listCorsOrigins(env).includes(origin)) return true;
   if (origin === toOrigin(env.FRONTEND_URL)) return true;
+  if (env.DOMAIN && origin === toOrigin(`https://${String(env.DOMAIN).trim()}`)) {
+    return true;
+  }
   if (String(env.NODE_ENV || '').toLowerCase() !== 'production') {
     try {
       return LOCAL_HOSTS.has(new URL(origin).hostname);
@@ -37,12 +47,18 @@ function isAllowedOrigin(origin, env) {
 
 /**
  * Origin dùng để dựng link gửi người dùng (mời / voice / import).
- * Origin/Referer từ request chỉ được dùng khi thuộc allowlist.
+ * Origin/Referer từ request chỉ được dùng khi thuộc allowlist (CORS_ORIGIN / FRONTEND_URL / DOMAIN).
  */
 function trustedFrontendUrl(req, env = process.env) {
-  const candidate = toOrigin(resolveFrontendUrl(req));
+  const candidate = toOrigin(resolveFrontendUrl(req, 'FRONTEND_URL', env));
   if (isAllowedOrigin(candidate, env)) return candidate;
-  return toOrigin(env.FRONTEND_URL) || listCorsOrigins(env)[0] || LAN_DEV_ORIGIN;
+  return defaultFrontendOrigin(env);
 }
 
-module.exports = { trustedFrontendUrl, isAllowedOrigin, toOrigin };
+module.exports = {
+  trustedFrontendUrl,
+  isAllowedOrigin,
+  toOrigin,
+  listCorsOrigins,
+  defaultFrontendOrigin,
+};

@@ -19,6 +19,8 @@ export default function QueryStateView({
   children,
   loadingClassName = 'space-y-3 py-10',
   errorClassName = 'px-6 py-8',
+  /** Class cho khung content (ready) — dùng khi parent flex cần min-h-0/flex-1. */
+  contentClassName = '',
   skeletonLines = 4,
 }) {
   const { t } = useAppStrings();
@@ -51,7 +53,7 @@ export default function QueryStateView({
     <AnimatePresence mode="wait" initial={false}>
       <motion.div
         key="query-ready"
-        className="vh-motion-respect"
+        className={`vh-motion-respect ${contentClassName}`.trim()}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}

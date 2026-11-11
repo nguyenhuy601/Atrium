@@ -2,7 +2,7 @@
 
 Nền tảng **cộng tác nội bộ** (chat, voice/meeting, task, tài liệu, thông báo) theo mô hình **microservices** — **API Gateway** là điểm vào REST duy nhất; **React (Vite)** gọi `/api`; realtime qua **Socket.IO**; họp thoại qua **mediasoup / WebRTC**.
 
-**Dev chuẩn (LAN):** [`https://atrium.dev`](https://atrium.dev) — Nginx TLS, không mở thẳng `localhost:3000` hay host:port thô trên máy client. Chi tiết: [`docs/lan-https-atrium.dev.md`](docs/lan-https-atrium.dev.md).
+**Dev chuẩn (LAN):** [`https://atrium.dev`](https://atrium.dev) (FE) + [`https://api.atrium.dev`](https://api.atrium.dev) (API) — **Traefik** trong Swarm, không mở thẳng `localhost:3000`. Chi tiết: [`docs/edge-traefik-split-domain.md`](docs/edge-traefik-split-domain.md) (legacy Nginx: [`docs/lan-https-atrium.dev.md`](docs/lan-https-atrium.dev.md)).
 
 Đặc tả / luồng nghiệp vụ: [`docs/spec-pack/`](docs/spec-pack/), [`docs/luong nghiep vu/00-overview.md`](docs/luong%20nghiep%20vu/00-overview.md) (theo nhóm suite).
 
@@ -31,20 +31,21 @@ Atrium gom giao tiếp và làm việc của **một công ty** (và mạng lư�
 ```mermaid
 flowchart LR
   subgraph browser [Browser]
-    SPA[React_Vite]
-  end
-  subgraph edge [Edge_dev]
-    NGX[Nginx_atrium.dev]
+    SPA[React_SPA]
   end
   subgraph swarm [Docker_Swarm]
+    TR[Traefik_edge]
+    FE[web-client]
     GW[api-gateway]
     MS[auth_user_org_chat_voice_project_...]
     AIPS[ai-project-planning]
     SOCK[socket-service]
     INFRA[ollama_minio_qdrant]
   end
-  SPA -->|HTTPS_same_origin| NGX
-  NGX -->|/api_/socket.io_/uploads| GW
+  SPA -->|HTTPS_atrium.dev| TR
+  SPA -->|HTTPS_api.atrium.dev| TR
+  TR --> FE
+  TR --> GW
   GW --> MS
   GW --> AIPS
   GW -->|WS_proxy| SOCK
@@ -52,11 +53,11 @@ flowchart LR
   AIPS -.->|overlay| INFRA
 ```
 
-1. **Browser** → `https://atrium.dev` (Nginx) → gateway `:3000` (`/api`, `/socket.io`, `/uploads`, voice signaling theo cấu hình).
-2. **Gateway**: JWT → RBAC → proxy; gắn `x-gateway-internal-token`, `x-user-id`.
+1. **Browser** → Traefik (`https://atrium.dev` → `web-client`; `https://api.atrium.dev` → `api-gateway`).
+2. **Gateway**: JWT → RBAC → proxy; gắn `x-gateway-internal-token`, `x-user-id`; `TRUST_PROXY=1`.
 3. **Service**: nghiệp vụ + Mongo / Redis / RabbitMQ.
 4. **S2S**: header internal token — [`docs/security-runbook.md`](docs/security-runbook.md).
-5. **Realtime**: `chat-service` REST + queue; **`socket-service`** giữ Socket.IO `/chat` (không bind WS public từ chat-service).
+5. **Realtime**: `chat-service` REST + queue; **`socket-service`** giữ Socket.IO `/chat` (client nối `VITE_SOCKET_URL` = api host).
 
 Chi tiết: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/MIGRATION.md`](docs/MIGRATION.md).
 
@@ -92,10 +93,11 @@ Chi tiết: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/MIGRATION.md`
 
 | Thành phần | Ghi chú |
 |------------|---------|
-| **Nginx** `atrium.dev:443` | Dev LAN — [`devops/nginx/dev-https.conf`](devops/nginx/dev-https.conf) |
-| **api-gateway** `:3000` | REST + proxy Socket.IO (ingress Swarm) |
+| **Traefik** `:80`/`:443` | SoT — [`edge-stack.yml`](edge-stack.yml), Host `atrium.dev` + `api.atrium.dev` |
+| **web-client** | SPA image `atrium-client:latest` (không publish host) |
+| **api-gateway** | REST + proxy Socket.IO qua Traefik `api.atrium.dev` (không publish `:3000` mặc định) |
 | **voice-service** | Signaling + UDP mediasoup (dải port theo `.env` / stack) |
-| Service khác | Chỉ mạng overlay `atrium_enterprise-network` / `enterprise-network` |
+| Service khác | Chỉ mạng overlay `enterprise-network` |
 
 Infra HA (staging): Mongo Atlas, Redis Sentinel, Rabbit cluster — xem [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -201,7 +203,7 @@ UI admin: `/app/admin/*` (hub, users, structure, RBAC, …).
 | **`CORS_ORIGIN`** | Whitelist origin (có `https://atrium.dev` khi dev LAN) |
 | **`SINGLE_ORG_MODE`** | Một công ty / hạn chế tạo org công khai |
 
-Runbook: [`docs/security-runbook.md`](docs/security-runbook.md). Thư mục `devops/` không nằm trong git. Trước deploy, xác nhận `.env` không có `RBAC_TEST_UNLOCK=true` và secret không còn placeholder (`change-me`, `your-secret-key`).
+Runbook: [`docs/security-runbook.md`](docs/security-runbook.md). Thư mục `devops/` / `docs/` / `scripts/` không nằm trong git (local). **Rotate secret:** code chưa dual-window — cập nhật mọi file sync **cùng lúc** rồi restart cùng đợt (`node scripts/rotate-secrets.mjs --phase A|B|C`; kiểm tra `node scripts/check-env-secret-sync.mjs --vs-history --require-rotated`). `NOTIFICATION_INTERNAL_TOKEN` phải khác `GATEWAY_INTERNAL_TOKEN`. Không rotate `ENCRYPTION_MASTER_KEY` khi chưa có dual-key. Trước deploy, xác nhận `.env` không có `RBAC_TEST_UNLOCK=true` và secret không còn placeholder (`change-me`, `your-secret-key`).
 
 ---
 
@@ -225,17 +227,21 @@ bash devops/swarm/dev-enable-profile.sh          # deploy + pull model
 # hoặc: bash devops/swarm/dev-enable-profile.sh --skip-deploy
 ```
 
-### 3. Edge HTTPS + frontend
+### 3. Edge Traefik + frontend (SPA)
 
-```powershell
-# Cert + hosts — docs/lan-https-atrium.dev.md
-powershell -File devops/nginx/mkcert-setup.ps1 -HostName atrium.dev
-# Chạy Nginx (dev-https.conf), rồi:
-cd client && npm install && npm run dev
-# Mở https://atrium.dev — VITE_API_URL=/api, VITE_SOCKET_USE_GATEWAY=true, HMR qua Nginx
+Chi tiết: [`docs/edge-traefik-split-domain.md`](docs/edge-traefik-split-domain.md).
+
+```bash
+# hosts: 127.0.0.1 atrium.dev api.atrium.dev
+# Dừng host Nginx nếu đang chiếm 80/443
+mkcert -cert-file certs/cert.pem -key-file certs/key.pem atrium.dev api.atrium.dev localhost 127.0.0.1
+docker build -f client/Dockerfile -t atrium-client:latest ./client
+docker network create --driver overlay --attachable edge-public 2>/dev/null || true
+docker stack deploy -c edge-stack.yml edge
+# App stack (web-client + api-gateway labels) — sau hoặc cùng đợt deploy-stack.sh
+curl -skf https://api.atrium.dev/api/health
+# Browser: https://atrium.dev
 ```
-
-Verify: `powershell -File devops/nginx/verify-lan-https.ps1 -BaseUrl https://atrium.dev`
 
 ### Compose full stack (tuỳ chọn)
 
@@ -294,7 +300,8 @@ Hub + sơ đồ: [`docs/ai-project/README.md`](docs/ai-project/README.md) · [`d
 | [`docs/MIGRATION.md`](docs/MIGRATION.md) | Compose vs Swarm; stabilization |
 | [`docs/STRUCTURE.md`](docs/STRUCTURE.md) | Cây thư mục |
 | [`docs/README.md`](docs/README.md) | Hub `docs/` |
-| [`docs/lan-https-atrium.dev.md`](docs/lan-https-atrium.dev.md) | Dev HTTPS LAN |
+| [`docs/edge-traefik-split-domain.md`](docs/edge-traefik-split-domain.md) | Traefik edge + split host (SoT) |
+| [`docs/lan-https-atrium.dev.md`](docs/lan-https-atrium.dev.md) | Legacy Nginx LAN (retired SoT) |
 | [`docs/DOCKER-COMPOSE.md`](docs/DOCKER-COMPOSE.md) | Compose infra/core/dev |
 | [`docs/security-runbook.md`](docs/security-runbook.md) | Token, header, sau deploy |
 | [`docs/SOCKET_LB.md`](docs/SOCKET_LB.md) | Socket / LB |

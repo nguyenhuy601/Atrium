@@ -10,13 +10,13 @@ export const FIGMA_NOTIF_INNER =
   'mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col px-4 py-4 sm:px-6 sm:py-5';
 
 export const FIGMA_NOTIF_SPLIT =
-  'grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-xl border border-border bg-surface/40 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]';
+  'grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] overflow-hidden rounded-xl border border-border bg-surface/40 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]';
 
 export const FIGMA_NOTIF_LIST_PANE =
-  'min-h-0 overflow-y-auto border-border p-2 sm:p-3 lg:border-r';
+  'h-full min-h-0 overflow-y-auto border-border p-2 sm:p-3 lg:border-r';
 
 export const FIGMA_NOTIF_PREVIEW_PANE =
-  'min-h-0 overflow-y-auto border-border bg-background/50 p-4 sm:p-5';
+  'h-full min-h-0 overflow-y-auto border-border bg-background/50 p-4 sm:p-5';
 
 export const FIGMA_NOTIF_PRIMARY_TRACK =
   'inline-flex w-full max-w-full flex-wrap gap-0.5 rounded-xl border border-border bg-muted/80 p-0.5 sm:w-auto sm:flex-nowrap';
@@ -37,7 +37,7 @@ export const FIGMA_NOTIF_CHIP =
   'rounded-full border border-transparent bg-muted px-3.5 py-1.5 text-xs text-muted-foreground transition-[background-color,border-color,color,box-shadow,transform] duration-150 hover:-translate-y-0.5 hover:border-primary/20 hover:bg-accent hover:text-primary hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30';
 
 export const FIGMA_NOTIF_TYPE_ROW =
-  'flex max-w-full items-center gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
+  'flex min-w-0 max-w-full flex-1 items-center gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
 
 export const FIGMA_NOTIF_ITEM =
   'flex min-h-[44px] cursor-pointer items-start gap-2.5 rounded-lg border border-transparent px-2.5 py-2 transition-colors duration-150 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 sm:px-3';

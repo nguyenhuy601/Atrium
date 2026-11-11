@@ -87,7 +87,6 @@ async function processPayload(data) {
         receiverId: String(receiverId),
         code: dmErr.code || 'dm_forbidden',
         message: dmErr.message || 'Cannot send message',
-        ...(dmErr.blockerId ? { blockerId: String(dmErr.blockerId) } : {}),
       },
     });
     return;

@@ -246,10 +246,13 @@ jobs:
 
           Runner không gọi script trong devops/ (thư mục không có trên GitHub).
           Swarm trên máy dev, sau khi tải release-manifest.json:
+            eval "$(bash .github/scripts/export-release-manifest-env.sh ./release-manifest.json)"
+            echo "CLIENT_IMAGE=\${CLIENT_IMAGE}"   # web-client pin digest (SPA)
             ATRIUM_RELEASE_MANIFEST=./release-manifest.json SKIP_SECURITY_ENV_CHECK=1 bash devops/swarm/deploy-stack.sh
 
           Wave 2: self-hosted + ATRIUM_CD_DEV_ACTIVE=true
           EOF
+          node -e 'const m=require("./release-manifest.json"); if(!m.services?.client?.digest?.includes("@sha256:")){console.error("missing client digest"); process.exit(1)} console.log("client", m.services.client.digest)'
           if [[ "${CD_ACTIVE}" == "true" ]]; then
             echo "::error::ATRIUM_CD_DEV_ACTIVE=true nhưng job vẫn chạy trên ubuntu-latest — gắn self-hosted (Wave 2)."
             exit 1
@@ -275,7 +278,8 @@ jobs:
           === Smoke development ===
           releaseId=${RELEASE_ID} SHA=${SHA}
           1) Security env: bước CI đã kiểm tra RBAC_TEST_UNLOCK
-          2) Mở https://atrium.dev trên máy dev (script nginx không có trên runner)
+          2) Mở https://atrium.dev trên máy dev (SPA web-client từ CLIENT_IMAGE digest)
+          3) Kiểm tra /assets/* 200 sau promote FE
           EOF
 
   deploy-staging:
@@ -309,10 +313,12 @@ jobs:
 
           Runner không gọi script trong devops/.
           Swarm trên máy dev:
+            eval "$(bash .github/scripts/export-release-manifest-env.sh ./release-manifest.json)"
             ATRIUM_RELEASE_MANIFEST=./release-manifest.json SKIP_SECURITY_ENV_CHECK=1 bash devops/swarm/deploy-stack.sh
 
           Rollback: deploy lại manifest của releaseId trước (cùng lệnh, file manifest cũ)
           EOF
+          node -e 'const m=require("./release-manifest.json"); if(!m.services?.client?.digest?.includes("@sha256:")){console.error("missing client digest"); process.exit(1)}'
           if [[ "${CD_ACTIVE}" == "true" ]]; then
             echo "::error::Staging auto-deploy flag bật nhưng runner chưa self-hosted."
             exit 1
@@ -366,10 +372,12 @@ jobs:
 
           Runner không gọi script trong devops/.
           Swarm trên máy dev:
+            eval "$(bash .github/scripts/export-release-manifest-env.sh ./release-manifest.json)"
             ATRIUM_RELEASE_MANIFEST=./release-manifest.json SKIP_SECURITY_ENV_CHECK=1 bash devops/swarm/deploy-stack.sh
 
           Rollback: manifest của releaseId trước — không docker build
           EOF
+          node -e 'const m=require("./release-manifest.json"); if(!m.services?.client?.digest?.includes("@sha256:")){console.error("missing client digest"); process.exit(1)}'
           if [[ "${CD_ACTIVE}" == "true" ]]; then
             echo "::error::Prod auto-deploy flag bật nhưng runner chưa self-hosted."
             exit 1

@@ -1,11 +1,7 @@
 services:
   api-gateway:
     image: ${API_GATEWAY_IMAGE}
-    ports:
-      - target: 3000
-        published: 3000
-        protocol: tcp
-        mode: ingress
+    # Public entry = Traefik Host(api.$DOMAIN). Debug (no Traefik): docker service update --publish-add published=3000,target=3000 atrium_api-gateway
     env_file:
       - .env
       - ./api-gateway/.env
@@ -16,14 +12,28 @@ services:
       - REDIS_SENTINELS=${REDIS_SENTINELS:-}
       - REDIS_SENTINEL_NAME=${REDIS_SENTINEL_NAME:-mymaster}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-      - REDIS_USE_AUTH=${REDIS_USE_AUTH:-false}
+      - REDIS_USE_AUTH=${REDIS_USE_AUTH:-true}
       - PROJECT_SERVICE_URL=http://project-service:3009
       - REPORT_SERVICE_URL=${REPORT_SERVICE_URL:-http://report-service:3026}
       - REPORT_AGGREGATOR_MODE=${REPORT_AGGREGATOR_MODE:-c2_api}
+      - CORS_ORIGIN=${CORS_ORIGIN:-https://atrium.dev}
+      - FRONTEND_URL=${FRONTEND_URL:-https://atrium.dev}
+      - DOMAIN=${DOMAIN:-atrium.dev}
+      - TRUST_PROXY=${TRUST_PROXY:-1}
     networks:
       - enterprise-network
+      - edge-public
     deploy:
       replicas: ${API_GATEWAY_REPLICAS:-1}
+      labels:
+        - traefik.enable=true
+        - traefik.swarm.network=edge-public
+        # REST/API only — /socket.io đi socket-edge (sticky) với priority cao hơn
+        - traefik.http.routers.gateway.rule=Host(`api.${DOMAIN:-atrium.dev}`) && !PathPrefix(`/socket.io`)
+        - traefik.http.routers.gateway.entrypoints=websecure
+        - traefik.http.routers.gateway.tls=true
+        - traefik.http.routers.gateway.priority=10
+        - traefik.http.services.gateway.loadbalancer.server.port=3000
       restart_policy:
         condition: on-failure
       update_config:
@@ -36,6 +46,34 @@ services:
         reservations:
           cpus: "0.15"
           memory: 80M
+
+  # SPA (Vite build + nginx) — Host($DOMAIN) via Traefik edge stack
+  web-client:
+    image: ${CLIENT_IMAGE:-atrium-client:latest}
+    networks:
+      - enterprise-network
+      - edge-public
+    deploy:
+      replicas: ${WEB_CLIENT_REPLICAS:-1}
+      labels:
+        - traefik.enable=true
+        - traefik.swarm.network=edge-public
+        - traefik.http.routers.frontend.rule=Host(`${DOMAIN:-atrium.dev}`)
+        - traefik.http.routers.frontend.entrypoints=websecure
+        - traefik.http.routers.frontend.tls=true
+        - traefik.http.services.frontend.loadbalancer.server.port=80
+      restart_policy:
+        condition: on-failure
+      update_config:
+        parallelism: 1
+        order: start-first
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
 
   auth-service:
     image: ${AUTH_SERVICE_IMAGE}
@@ -315,7 +353,7 @@ services:
       - REDIS_SENTINELS=${REDIS_SENTINELS:-}
       - REDIS_SENTINEL_NAME=${REDIS_SENTINEL_NAME:-mymaster}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-      - REDIS_USE_AUTH=${REDIS_USE_AUTH:-false}
+      - REDIS_USE_AUTH=${REDIS_USE_AUTH:-true}
     networks:
       - enterprise-network
     deploy:
@@ -664,7 +702,7 @@ services:
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      REDIS_USE_AUTH: ${REDIS_USE_AUTH:-false}
+      REDIS_USE_AUTH: ${REDIS_USE_AUTH:-true}
       ORGANIZATION_SERVICE_URL: ${ORGANIZATION_SERVICE_URL}
       USER_SERVICE_URL: ${USER_SERVICE_URL}
       CHAT_SERVICE_URL: ${CHAT_SERVICE_URL}
@@ -758,7 +796,7 @@ services:
       - REDIS_SENTINELS=${REDIS_SENTINELS:-}
       - REDIS_SENTINEL_NAME=${REDIS_SENTINEL_NAME:-mymaster}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-      - REDIS_USE_AUTH=${REDIS_USE_AUTH:-false}
+      - REDIS_USE_AUTH=${REDIS_USE_AUTH:-true}
       - RABBITMQ_URL=${RABBITMQ_URL}
       - ENABLE_DASHBOARD_PROJECTION_CONSUMER=${ENABLE_DASHBOARD_PROJECTION_CONSUMER:-false}
     networks:
@@ -804,7 +842,7 @@ services:
           cpus: "0.20"
           memory: 96M
 
-  # Host Nginx → :3017 vào đây (sticky). socket-service chỉ overlay; S2S dùng DNS VIP.
+  # Traefik Host(api.$DOMAIN) PathPrefix(/socket.io) → đây (sticky). socket-service chỉ overlay.
   socket-edge:
     image: haproxy:2.9.14-alpine
     configs:
@@ -817,8 +855,17 @@ services:
         mode: ingress
     networks:
       - enterprise-network
+      - edge-public
     deploy:
       replicas: 1
+      labels:
+        - traefik.enable=true
+        - traefik.swarm.network=edge-public
+        - traefik.http.routers.socketio.rule=Host(`api.${DOMAIN:-atrium.dev}`) && PathPrefix(`/socket.io`)
+        - traefik.http.routers.socketio.entrypoints=websecure
+        - traefik.http.routers.socketio.tls=true
+        - traefik.http.routers.socketio.priority=100
+        - traefik.http.services.socketio.loadbalancer.server.port=3017
       restart_policy:
         condition: on-failure
       update_config:
@@ -851,7 +898,7 @@ services:
       - REDIS_SENTINELS=${REDIS_SENTINELS:-}
       - REDIS_SENTINEL_NAME=${REDIS_SENTINEL_NAME:-mymaster}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-      - REDIS_USE_AUTH=${REDIS_USE_AUTH:-false}
+      - REDIS_USE_AUTH=${REDIS_USE_AUTH:-true}
       - RABBITMQ_URL=${RABBITMQ_URL}
       - FRIEND_DM_USE_QUEUE=${FRIEND_DM_USE_QUEUE}
       - REALTIME_INTERNAL_TOKEN=${REALTIME_INTERNAL_TOKEN}
@@ -1015,6 +1062,9 @@ networks:
   enterprise-network:
     driver: overlay
     attachable: true
+  # Created by edge stack (or: docker network create -d overlay --attachable edge-public)
+  edge-public:
+    external: true
 
 volumes:
   user_service_uploads:

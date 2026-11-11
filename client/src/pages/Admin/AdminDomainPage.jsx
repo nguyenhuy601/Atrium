@@ -13,6 +13,11 @@ import { navItemIsAllowed } from '../../config/rbacUiGrantMap';
 import { useCompanyAdminContext } from './CompanyAdminLayout';
 import useCompanyAdminAccess from '../../hooks/useCompanyAdminAccess';
 import { useEffectiveMasterGrants } from '../../hooks/useEffectiveMasterGrants';
+import {
+  isManageRoutePath,
+  surfaceAdminPath,
+  toAdminConfigPath,
+} from '../../utils/adminManagePath';
 import CompanyAdminSettingsPage from './CompanyAdminSettingsPage';
 import AdminModulePlaceholderPage from './AdminModulePlaceholderPage';
 import UsersListPanel from '../../features/adminUsers/UsersListPanel';
@@ -297,7 +302,9 @@ export default function AdminDomainPage() {
   const { isSystemAdmin } = useCompanyAdminAccess();
   const { hasGrant, scopeOf } = useEffectiveMasterGrants(orgId);
   const entries = useMemo(() => collectAdminRouteEntries(ADMIN_DOMAINS), []);
-  const currentPath = String(location.pathname || '').replace(/\/+$/, '') || '/admin';
+  const manageSurface = isManageRoutePath(location.pathname);
+  const surface = manageSurface ? 'manage' : 'admin';
+  const currentConfigPath = toAdminConfigPath(location.pathname);
 
   const legacy = resolveAdminLegacyRedirect(location.pathname, location.search);
   if (legacy) {
@@ -305,10 +312,13 @@ export default function AdminDomainPage() {
     return <Navigate to={`${legacy.pathname}${search}${location.hash || ''}`} replace />;
   }
 
-  const normalizedPath = normalizeAdminPath(location.pathname);
-  if (normalizedPath !== currentPath) {
+  const normalizedConfigPath = normalizeAdminPath(location.pathname);
+  if (normalizedConfigPath !== currentConfigPath) {
     return (
-      <Navigate to={`${normalizedPath}${location.search}${location.hash}`} replace />
+      <Navigate
+        to={`${surfaceAdminPath(normalizedConfigPath, surface)}${location.search}${location.hash}`}
+        replace
+      />
     );
   }
   const match = findAdminNavItem(location.pathname);
@@ -320,9 +330,11 @@ export default function AdminDomainPage() {
       const firstAllowed = flattenAdminNavItems(domain).find((item) =>
         navItemIsAllowed(item, grantCtx)
       );
-      if (firstAllowed?.path) return <Navigate to={firstAllowed.path} replace />;
+      if (firstAllowed?.path) {
+        return <Navigate to={surfaceAdminPath(firstAllowed.path, surface)} replace />;
+      }
     }
-    return <Navigate to="/admin" replace />;
+    return <Navigate to={surfaceAdminPath('/admin', surface)} replace />;
   }
 
   const impl = match.item.implementation;
@@ -336,7 +348,7 @@ export default function AdminDomainPage() {
       isSystemAdmin,
     });
     if (decision.action === 'redirect-first-allowed' && decision.path) {
-      return <Navigate to={decision.path} replace />;
+      return <Navigate to={surfaceAdminPath(decision.path, surface)} replace />;
     }
     return <Navigate to="/company/home" replace state={{ routeDenied: 'admin' }} />;
   }

@@ -5,6 +5,9 @@ export const SUITE = {
   COMPANY: 'COMPANY',
   PROJECTS: 'PROJECTS',
   ME: 'ME',
+  /** Suite Quản trị — cấu hình org theo grant (không phải system admin). */
+  MANAGE: 'MANAGE',
+  /** Admin hạ tầng — chỉ systemRole=admin. */
   ADMIN: 'ADMIN',
   /** @deprecated Use COMPANY — kept for stored localStorage / legacy callers */
   COLLABORATE: 'COLLABORATE',
@@ -47,6 +50,7 @@ const SUITE_SEGMENT = {
   [SUITE.COMPANY]: 'company',
   [SUITE.PROJECTS]: 'projects',
   [SUITE.ME]: 'me',
+  [SUITE.MANAGE]: 'manage',
   [SUITE.ADMIN]: 'admin',
   [SUITE.COLLABORATE]: 'collaborate',
 };
@@ -56,6 +60,7 @@ const SEGMENT_TO_SUITE = {
   company: SUITE.COMPANY,
   projects: SUITE.PROJECTS,
   me: SUITE.ME,
+  manage: SUITE.MANAGE,
   admin: SUITE.ADMIN,
   /** Legacy URL segment maps to COMPANY for storage/navigation */
   collaborate: SUITE.COMPANY,
@@ -66,6 +71,7 @@ export const SUITE_DEFAULT_PATH = {
   [SUITE.COMPANY]: appPath('/company/home'),
   [SUITE.PROJECTS]: appPath('/projects'),
   [SUITE.ME]: appPath('/me/dashboard'),
+  [SUITE.MANAGE]: appPath('/manage'),
   [SUITE.ADMIN]: appPath('/admin'),
   [SUITE.COLLABORATE]: appPath('/company/home'),
 };
@@ -119,6 +125,7 @@ export function getDefaultPathForSuite(suite) {
 
 export function detectSuiteFromPath(pathname) {
   const path = stripLegacyAppPrefix(String(pathname || ''));
+  if (path.startsWith('/manage')) return SUITE.MANAGE;
   if (path.startsWith('/admin')) return SUITE.ADMIN;
   if (path.startsWith('/communicate')) return SUITE.COMMUNICATE;
   if (path.startsWith('/company')) return SUITE.COMPANY;

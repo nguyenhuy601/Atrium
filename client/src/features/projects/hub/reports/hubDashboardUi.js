@@ -4,7 +4,7 @@
  */
 
 export const REPORT_PAGE =
-  'scrollbar-overlay mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-4 overflow-y-auto bg-muted/40 p-3 sm:gap-5 sm:p-4 lg:p-6';
+  'scrollbar-overlay flex min-h-0 w-full flex-1 flex-col gap-4 overflow-y-auto bg-muted/40 p-3 sm:gap-5 sm:p-4 lg:p-6';
 
 /** White panel — 1px border, modest radius (Tabler card). */
 export const REPORT_CARD =

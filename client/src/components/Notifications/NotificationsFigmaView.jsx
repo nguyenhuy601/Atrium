@@ -279,6 +279,7 @@ export default function NotificationsFigmaView({
           onRetry={onRetryLoad}
           retryDisabled={retryLoadDisabled}
           isEmpty={totalVisible === 0}
+          contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
           empty={
             <div className="px-6 py-16 text-center">
               {(() => {
@@ -319,7 +320,13 @@ export default function NotificationsFigmaView({
             </div>
 
             {!bulkMode ? (
-              <div className={hasSelection ? 'block min-h-0' : 'hidden min-h-0 lg:block'}>
+              <div
+                className={
+                  hasSelection
+                    ? 'block h-full min-h-0 overflow-hidden'
+                    : 'hidden h-full min-h-0 overflow-hidden lg:block'
+                }
+              >
                 <NotificationPreviewPane
                   notif={selectedNotification}
                   actionKind={selectedActionKind}

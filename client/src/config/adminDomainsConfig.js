@@ -1278,7 +1278,14 @@ const LEGACY_PATH_REDIRECTS_WITH_SEARCH = {
 };
 
 export function normalizeAdminPath(pathname) {
-  const base = String(pathname || '').replace(/\/+$/, '') || '/admin';
+  let base = String(pathname || '').replace(/\/+$/, '') || '/admin';
+  // Suite Quản trị `/manage` ↔ SoT config `/admin`
+  if (base === '/manage' || base.startsWith('/manage/')) {
+    base = base === '/manage' ? '/admin' : `/admin${base.slice('/manage'.length)}`;
+  } else if (base === '/app/manage' || base.startsWith('/app/manage/')) {
+    const rest = base === '/app/manage' ? '' : base.slice('/app/manage'.length);
+    base = `/admin${rest}`;
+  }
   const mapped = LEGACY_PATH_REDIRECTS[base];
   if (mapped) {
     const q = mapped.indexOf('?');
@@ -1293,27 +1300,35 @@ export function normalizeAdminPath(pathname) {
 
 /** @returns {{ pathname: string, search: string } | null} */
 export function resolveAdminLegacyRedirect(pathname, currentSearch = '') {
-  const base = String(pathname || '').replace(/\/+$/, '') || '/admin';
+  const raw = String(pathname || '').replace(/\/+$/, '') || '/admin';
+  const onManage = raw === '/manage' || raw.startsWith('/manage/') || raw === '/app/manage' || raw.startsWith('/app/manage/');
+  const base = normalizeAdminPath(raw);
   const withSearch = LEGACY_PATH_REDIRECTS_WITH_SEARCH[base];
+  const toSurface = (adminPath) => {
+    if (!onManage) return adminPath;
+    if (adminPath === '/admin') return '/manage';
+    if (adminPath.startsWith('/admin/')) return `/manage${adminPath.slice('/admin'.length)}`;
+    return adminPath;
+  };
   if (withSearch) {
     const q = withSearch.indexOf('?');
-    if (q === -1) return { pathname: withSearch, search: '' };
-    return { pathname: withSearch.slice(0, q), search: withSearch.slice(q) };
+    if (q === -1) return { pathname: toSurface(withSearch), search: '' };
+    return { pathname: toSurface(withSearch.slice(0, q)), search: withSearch.slice(q) };
   }
   const plain = LEGACY_PATH_REDIRECTS[base];
   if (plain && plain !== base) {
     const q = plain.indexOf('?');
     if (q === -1) {
-      return { pathname: plain, search: String(currentSearch || '') };
+      return { pathname: toSurface(plain), search: String(currentSearch || '') };
     }
-    const pathname = plain.slice(0, q);
+    const nextPath = toSurface(plain.slice(0, q));
     const redirectSearch = new URLSearchParams(plain.slice(q + 1));
     const incoming = new URLSearchParams(String(currentSearch || '').replace(/^\?/, ''));
     for (const key of ['userId', 'unitId', 'meetingId', 'roleId', 'roleKey', 'title', 'channelId', 'fileId']) {
       if (incoming.has(key)) redirectSearch.set(key, incoming.get(key));
     }
     const merged = redirectSearch.toString();
-    return { pathname, search: merged ? `?${merged}` : '' };
+    return { pathname: nextPath, search: merged ? `?${merged}` : '' };
   }
   return null;
 }

@@ -25,7 +25,7 @@ export function useCompanyAdminAccess() {
     [company?.id, company?._id, activeWorkspace?._id, activeWorkspace?.id, lastOrganizationId]
   );
 
-  // Chỉ lấy systemRole từ JWT/bootstrap — không fallback sang user.role (dễ nhầm org role).
+  // Chỉ lấy systemRole từ JWT/profile — không fallback sang user.role (dễ nhầm org role).
   const systemRole = useMemo(
     () => String(user?.systemRole || '').trim().toLowerCase(),
     [user?.systemRole]

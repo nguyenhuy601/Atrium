@@ -9,5 +9,6 @@
   { "image": "ai-project-planning-service", "dockerfile": "services/ai-project-planning-service/Dockerfile" },
   { "image": "voice-service", "dockerfile": "services/voice-service/Dockerfile" },
   { "image": "notification-service", "dockerfile": "services/notification-service/Dockerfile" },
-  { "image": "socket-service", "dockerfile": "services/socket-service/Dockerfile" }
+  { "image": "socket-service", "dockerfile": "services/socket-service/Dockerfile" },
+  { "image": "client", "dockerfile": "client/Dockerfile", "context": "client" }
 ]

@@ -251,7 +251,6 @@ module.exports = function registerChatNamespace(io) {
           return socket.emit('error', {
             message: data.message || 'Gửi tin nhắn thất bại',
             code: data.code,
-            blockerId: data.blockerId,
           });
         }
         // chat-service đã emit friend:new_message / friend:sent qua emitRealtimeEvent
@@ -261,7 +260,6 @@ module.exports = function registerChatNamespace(io) {
         socket.emit('error', {
           message: data.message || err.message || 'Gửi tin nhắn thất bại',
           code: data.code,
-          blockerId: data.blockerId,
         });
       }
     });

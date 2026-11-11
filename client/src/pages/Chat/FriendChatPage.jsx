@@ -3,7 +3,6 @@ import toast from 'react-hot-toast';
 import {
   Archive,
   AtSign,
-  Ban,
   Bell,
   BellOff,
   Calendar,
@@ -308,7 +307,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
   const [dmServerSearching, setDmServerSearching] = useState(false);
   const [showArchivedRail, setShowArchivedRail] = useState(false);
   const [pinnedMessagesModalOpen, setPinnedMessagesModalOpen] = useState(false);
-  const [blockedByPeer, setBlockedByPeer] = useState(false);
   const { user } = useAuth();
   const { outboundRinging, startOutboundRinging, clearOutboundRinging } = useFriendCallSession();
   const { emit, on, off, onlineUsers, connected: socketConnected } = useSocket();
@@ -517,20 +515,15 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
   );
 
   const acceptedFriendsQuery = useFriendsList({ status: 'accepted', enabled: !landingDemo });
-  const blockedFriendsQuery = useFriendsList({ status: 'blocked', enabled: !landingDemo });
 
   const refreshFriendsCache = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: queryKeys.friends.all });
   }, [queryClient]);
 
   const mergedFriendsFromQuery = useMemo(() => {
-    const tag = (rows, relationshipStatus) =>
-      (Array.isArray(rows) ? rows : []).map((row) => ({ ...row, relationshipStatus }));
-    return [
-      ...tag(acceptedFriendsQuery.data, 'accepted'),
-      ...tag(blockedFriendsQuery.data, 'blocked'),
-    ];
-  }, [acceptedFriendsQuery.data, blockedFriendsQuery.data]);
+    const rows = Array.isArray(acceptedFriendsQuery.data) ? acceptedFriendsQuery.data : [];
+    return rows.map((row) => ({ ...row, relationshipStatus: 'accepted' }));
+  }, [acceptedFriendsQuery.data]);
 
   useEffect(() => {
     if (landingDemo) {
@@ -540,26 +533,24 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
       setMessages([]);
       return;
     }
-    if (acceptedFriendsQuery.isError || blockedFriendsQuery.isError) {
-      const err = acceptedFriendsQuery.error || blockedFriendsQuery.error;
-      toast.error(resolveApiErrorMessage(err, t('friendChat.loadFriendsFail')));
+    if (acceptedFriendsQuery.isError) {
+      toast.error(
+        resolveApiErrorMessage(acceptedFriendsQuery.error, t('friendChat.loadFriendsFail'))
+      );
       setFriends([]);
       setFriendsLoading(false);
       return;
     }
     setFriends(mergedFriendsFromQuery);
-    setFriendsLoading(acceptedFriendsQuery.isLoading || blockedFriendsQuery.isLoading);
+    setFriendsLoading(acceptedFriendsQuery.isLoading);
   }, [
     landingDemo,
     currentUserId,
     t,
     mergedFriendsFromQuery,
     acceptedFriendsQuery.isLoading,
-    blockedFriendsQuery.isLoading,
     acceptedFriendsQuery.isError,
-    blockedFriendsQuery.isError,
     acceptedFriendsQuery.error,
-    blockedFriendsQuery.error,
   ]);
 
   useEffect(() => {
@@ -608,7 +599,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
             : '';
       const subtitle = title || t('friendChat.dmSubtitle');
       const id = u?._id || u?.userId || u?.id || f.id;
-      const isBlockedByMe = String(f.relationshipStatus || '') === 'blocked';
       /** Luôn unique để tránh cảnh báo key khi thiếu user (id trùng undefined). */
       const listKey =
         id != null && id !== ''
@@ -635,7 +625,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         avatar: u?.avatar || null,
         status: String(u?.status || 'offline').toLowerCase(),
         subtitle,
-        isBlockedByMe,
         _presenceKeys: uniqueKeys,
       };
     });
@@ -648,7 +637,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         avatar: directoryOpenPeer.avatar || null,
         status: 'offline',
         subtitle: t('friendChat.directoryPeerSubtitle'),
-        isBlockedByMe: false,
         _presenceKeys: [dirId],
       });
     }
@@ -657,7 +645,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         ? rows.filter((r) => {
             const id = String(r.id || '');
             if (dirId && id === dirId) return true;
-            if (r.isBlockedByMe) return true;
             return deptColleagueIds.has(id);
           })
         : rows;
@@ -674,9 +661,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         lastIsMine: Boolean(snippet?.isMine),
       };
       /** Khi socket đã nối: chỉ tin danh sách online từ server (khớp Dashboard). */
-      if (rest.isBlockedByMe) {
-        return { ...withSnippet, status: 'offline' };
-      }
       if (socketConnected) {
         return { ...withSnippet, status: inLiveList ? 'online' : 'offline' };
       }
@@ -771,7 +755,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     if (railFilterTab === RAIL_FILTER.UNREAD) {
       return list.filter((f) => {
         const fid = String(f.id || '');
-        const unreadCount = f.isBlockedByMe ? 0 : fid ? Number(unreadByPeer[fid] || 0) : 0;
+        const unreadCount = fid ? Number(unreadByPeer[fid] || 0) : 0;
         return unreadCount > 0;
       });
     }
@@ -792,7 +776,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     () =>
       viewFriendsEnriched.reduce((sum, f) => {
         const fid = String(f.id || '');
-        if (!fid || f.isBlockedByMe) return sum;
+        if (!fid) return sum;
         return sum + Number(unreadByPeer[fid] || 0);
       }, 0),
     [viewFriendsEnriched, unreadByPeer]
@@ -1056,7 +1040,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         /* soft-open bên dưới */
       }
       if (cancelled) return;
-      // Directory DN: vẫn mở hội thoại theo userId; gửi tin vẫn qua assertDmCanSend (auto-friend / block).
+      // Directory DN: vẫn mở hội thoại theo userId; gửi tin vẫn qua assertDmCanSend (roster accepted).
       setDirectoryOpenPeer({
         id: routedDmUserId,
         name: routedDmDisplayName || t('common.user'),
@@ -1095,7 +1079,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     setDmScope(DM_SCOPE.ALL);
     setPeerTyping(false);
     setDmServerSearchResults(null);
-    setBlockedByPeer(false);
   }, [selectedFriendId]);
 
   useEffect(() => {
@@ -1113,21 +1096,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     return () => clearTimeout(timer);
   }, [message, selectedFriendId, landingDemo]);
 
-  const onDmSendRejected = useCallback(
-    (payload) => {
-      const code = payload?.code;
-      if (code === 'dm_blocked') {
-        const blockerId = payload?.blockerId ? String(payload.blockerId) : '';
-        if (blockerId && blockerId !== String(currentUserId || '')) {
-          setBlockedByPeer(true);
-        }
-      } else if (code === 'dm_unblocked') {
-        setBlockedByPeer(false);
-      }
-    },
-    [currentUserId]
-  );
-
   const { notifyTyping, refreshUnread, armSendTimeout } = useFriendDmRealtime({
     landingDemo,
     on,
@@ -1141,7 +1109,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     setPeerTyping,
     pendingSendsRef,
     t,
-    onDmSendRejected,
   });
 
   const retrySend = useCallback(
@@ -1185,12 +1152,10 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     if (!selectedFriendId) return null;
     return viewFriendsEnriched.find((f) => f.id === selectedFriendId) || null;
   }, [viewFriendsEnriched, selectedFriendId]);
-  const isCurrentFriendBlocked = Boolean(currentFriend?.isBlockedByMe);
-  const isDmComposerLocked = isCurrentFriendBlocked || blockedByPeer;
 
   // Gửi tin nhắn qua socket-service (realtime) + optimistic UI
   const handleSend = async () => {
-    if (!selectedFriendId || !message.trim() || isDmComposerLocked || landingDemo) return;
+    if (!selectedFriendId || !message.trim() || landingDemo) return;
 
     const text = message.trim();
     const tempId = `temp-${Date.now()}`;
@@ -1555,7 +1520,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         setUploadProgress(null);
       }
     },
-    [selectedFriendId, currentUserId, t, setBlockedByPeer]
+    [selectedFriendId, currentUserId, t]
   );
 
   useEffect(
@@ -2016,8 +1981,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
                 const fid = String(f.id || '');
                 const isMuted = fid ? mutedFriendIds.includes(fid) : false;
                 const isPinned = fid ? pinnedFriendIds.includes(fid) : false;
-                const isBlocked = Boolean(f.isBlockedByMe);
-                const unreadCount = isBlocked ? 0 : fid ? Number(unreadByPeer[fid] || 0) : 0;
+                const unreadCount = fid ? Number(unreadByPeer[fid] || 0) : 0;
                 const hasUnread = unreadCount > 0;
                 return (
                   <button
@@ -2048,12 +2012,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
                           {isMuted && (
                             <BellOff className={`h-3 w-3 shrink-0 ${emptyText}`} aria-hidden />
                           )}
-                          {isBlocked && (
-                            <Ban
-                              className="h-3 w-3 shrink-0 text-destructive"
-                              aria-label={t('friendChat.blockedRailLabel')}
-                            />
-                          )}
                         </div>
                         {f.lastAt ? (
                           <span className={FIGMA_CHAT_RAIL_TIME}>
@@ -2063,11 +2021,9 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
                       </div>
                       <div className="mt-0.5 flex items-center justify-between gap-1">
                         <p className={hasUnread ? FIGMA_CHAT_RAIL_PREVIEW_UNREAD : FIGMA_CHAT_RAIL_PREVIEW}>
-                          {isBlocked
-                            ? t('friendChat.blockedRailLabel')
-                            : f.lastPreview
-                              ? `${f.lastIsMine ? t('friendChat.railYouPrefix') : ''}${f.lastPreview}`
-                              : f.subtitle}
+                          {f.lastPreview
+                            ? `${f.lastIsMine ? t('friendChat.railYouPrefix') : ''}${f.lastPreview}`
+                            : f.subtitle}
                         </p>
                         <div className="flex shrink-0 items-center gap-1">
                           {unreadCount > 0 && (
@@ -2202,7 +2158,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
                       <button
                         type="button"
                         onClick={() => startFriendCall('audio')}
-                        disabled={Boolean(outboundRinging?.callId) || isDmComposerLocked}
+                        disabled={Boolean(outboundRinging?.callId)}
                         className={FIGMA_CHAT_ICON_BTN_PHONE}
                         aria-label={t('friendChat.callAudio')}
                       >
@@ -2213,7 +2169,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
                       <button
                         type="button"
                         onClick={() => startFriendCall('video')}
-                        disabled={Boolean(outboundRinging?.callId) || isDmComposerLocked}
+                        disabled={Boolean(outboundRinging?.callId)}
                         className={FIGMA_CHAT_ICON_BTN_VIDEO}
                         aria-label={t('friendChat.callVideo')}
                       >
@@ -2331,28 +2287,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
                     ) : null}
                   </div>
                 </div>
-                {blockedByPeer && !isCurrentFriendBlocked ? (
-                  <div
-                    className={`mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
-                      isDarkMode
-                        ? 'border-amber-500/35 bg-amber-500/10 text-amber-100'
-                        : 'border-amber-200 bg-amber-50 text-amber-900'
-                    }`}
-                  >
-                    <span className="min-w-0 flex-1">{t('friendChat.blockedByPeerBanner')}</span>
-                  </div>
-                ) : null}
-                {isCurrentFriendBlocked ? (
-                  <div
-                    className={`mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
-                      isDarkMode
-                        ? 'border-rose-500/35 bg-rose-500/10 text-rose-100'
-                        : 'border-rose-200 bg-rose-50 text-rose-900'
-                    }`}
-                  >
-                    <span className="min-w-0 flex-1">{t('friendChat.blockedBanner')}</span>
-                  </div>
-                ) : null}
               </header>
               <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
                 <div
@@ -2784,18 +2718,14 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
                     }
                   }}
                   placeholder={
-                    isDmComposerLocked
-                      ? blockedByPeer
-                        ? t('friendChat.composerBlockedByPeer')
-                        : t('friendChat.composerBlocked')
-                      : uploadProgress != null
-                        ? t('friendChat.sendingFile')
-                        : currentFriend
-                          ? t('friendChat.placeholderDm', { name: currentFriend.name })
-                          : t('friendChat.placeholderPick')
+                    uploadProgress != null
+                      ? t('friendChat.sendingFile')
+                      : currentFriend
+                        ? t('friendChat.placeholderDm', { name: currentFriend.name })
+                        : t('friendChat.placeholderPick')
                   }
-                  disabled={!selectedFriendId || uploadProgress != null || isDmComposerLocked}
-                  sendDisabled={!message.trim() || isDmComposerLocked}
+                  disabled={!selectedFriendId || uploadProgress != null}
+                  sendDisabled={!message.trim()}
                   sendLabel={t('friendChat.send')}
                   leadingItems={[
                     {
@@ -2834,7 +2764,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
                       key: 'send',
                       title: t('friendChat.send'),
                       content: <Send className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden />,
-                      disabled: !message.trim() || isDmComposerLocked || uploadProgress != null || !selectedFriendId,
+                      disabled: !message.trim() || uploadProgress != null || !selectedFriendId,
                       className: composerSendBtn,
                       onClick: handleSend,
                     },

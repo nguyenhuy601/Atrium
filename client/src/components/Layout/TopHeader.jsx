@@ -75,6 +75,16 @@ function getSuiteMeta(t, adminSuiteNav) {
       gradEnd: '#FBBF24',
       bgGlow: 'rgba(245,158,11,0.12)',
     },
+    [SUITE.MANAGE]: {
+      label: adminLabel,
+      shortLabel: adminLabel,
+      sublabel: t('nav.suite.manage.sublabel'),
+      Icon: Shield,
+      color: '#DC2626',
+      gradStart: '#B91C1C',
+      gradEnd: '#DC2626',
+      bgGlow: 'rgba(220,38,38,0.12)',
+    },
     [SUITE.ADMIN]: {
       label: adminLabel,
       shortLabel: adminLabel,

@@ -7,6 +7,7 @@ import CommunicateSidebar from './components/Layout/CommunicateSidebar';
 import CompanySuiteLayout from './components/Layout/CompanySuiteLayout';
 import ProjectsSidebar from './components/Layout/ProjectsSidebar';
 import AdminShellLayout from './components/Layout/AdminShellLayout';
+import ManageShellLayout from './components/Layout/ManageShellLayout';
 import LegacyWorkspaceRedirect from './components/Layout/LegacyWorkspaceRedirect';
 import LegacyPathRedirect from './components/Layout/LegacyPathRedirect';
 import LegacyAppPrefixRedirect from './components/Layout/LegacyAppPrefixRedirect';
@@ -204,7 +205,29 @@ function App() {
           }
         />
 
-        {/* Admin suite */}
+        {/* Suite Quản trị — grant-gated (`/manage`), cùng panel với admin domains */}
+        <Route
+          path="/manage"
+          element={
+            <Protected>
+              <ManageShellLayout />
+            </Protected>
+          }
+        >
+          <Route element={<CompanyAdminLayout />}>
+            <Route index element={<AdminHubPage />} />
+            <Route path="overview" element={<Navigate to="/manage" replace />} />
+            <Route path="people" element={<Navigate to="/manage/users" replace />} />
+            <Route path="approvals" element={<Navigate to="/manage/users" replace />} />
+            <Route path="general" element={<Navigate to="/manage/system-config" replace />} />
+            <Route path="structure" element={<Navigate to="/manage/system-config?tab=structure" replace />} />
+            <Route path="roles" element={<Navigate to="/manage/rbac/roles" replace />} />
+            <Route path="policy" element={<Navigate to="/manage/system-config/policy" replace />} />
+            <Route path=":domain/*" element={<AdminDomainPage />} />
+          </Route>
+        </Route>
+
+        {/* Admin hạ tầng — chỉ systemRole=admin; user grant bị redirect → /manage */}
         <Route
           path="/admin"
           element={

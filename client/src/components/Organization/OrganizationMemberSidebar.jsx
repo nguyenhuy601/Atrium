@@ -243,7 +243,7 @@ function OrganizationMemberSidebar({
     assignedRoleNames: [],
     quickMessage: '',
   });
-  /** Xóa thành viên / Chặn — dùng modal thay cho window.confirm (tránh tiêu đề localhost) */
+  /** Xóa thành viên — dùng modal thay cho window.confirm (tránh tiêu đề localhost) */
   const [memberConfirm, setMemberConfirm] = useState(null);
   /** Tab panel phải — mặc định danh sách thành viên */
   const [sidebarTab, setSidebarTab] = useState('people');
@@ -870,21 +870,17 @@ function OrganizationMemberSidebar({
   );
 
   const confirmMemberAction = useCallback(async () => {
-    if (!memberConfirm?.member) return;
+    if (!memberConfirm?.member || memberConfirm.type !== 'remove') return;
     const m = memberConfirm.member;
     try {
-      if (memberConfirm.type === 'remove') {
-        if (!organizationId || !m?.userId) return;
-        await organizationAPI.removeMember(organizationId, m.userId);
-        toast.success(t('organizations.toastMemberRemoved'));
-        onMemberRemoved?.();
-      } else {
-        toast.error(t('organizations.toastBlockFail'));
-      }
+      if (!organizationId || !m?.userId) return;
+      await organizationAPI.removeMember(organizationId, m.userId);
+      toast.success(t('organizations.toastMemberRemoved'));
+      onMemberRemoved?.();
     } catch (err) {
-      const fallback =
-        memberConfirm.type === 'remove' ? t('organizations.toastRemoveFail') : t('organizations.toastBlockFail');
-      toast.error(resolveApiErrorMessage(err, { t, fallback }));
+      toast.error(
+        resolveApiErrorMessage(err, { t, fallback: t('organizations.toastRemoveFail') })
+      );
     }
   }, [memberConfirm, organizationId, onMemberRemoved, t]);
 
@@ -1737,23 +1733,11 @@ function OrganizationMemberSidebar({
         isOpen={memberConfirm != null}
         onClose={() => setMemberConfirm(null)}
         onConfirm={confirmMemberAction}
-        title={
-          memberConfirm?.type === 'remove'
-            ? t('organizations.confirmRemoveMemberTitle')
-            : t('organizations.confirmBlockUserTitle')
-        }
-        message={
-          memberConfirm?.type === 'remove'
-            ? t('organizations.confirmRemoveMemberMsg', {
-                name: memberConfirm?.member?.displayName || t('organizations.memberFallbackRemove'),
-              })
-            : t('organizations.confirmBlockUserMsg', {
-                name: memberConfirm?.member?.displayName || t('organizations.memberFallbackBlock'),
-              })
-        }
-        confirmText={
-          memberConfirm?.type === 'remove' ? t('common.delete') : t('organizations.confirmBlockBtn')
-        }
+        title={t('organizations.confirmRemoveMemberTitle')}
+        message={t('organizations.confirmRemoveMemberMsg', {
+          name: memberConfirm?.member?.displayName || t('organizations.memberFallbackRemove'),
+        })}
+        confirmText={t('common.delete')}
         cancelText={t('nav.cancel')}
       />
     </div>

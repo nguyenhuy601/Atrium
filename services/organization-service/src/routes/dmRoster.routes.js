@@ -16,8 +16,6 @@ router.get('/pending', goneGraph);
 router.post('/request', goneGraph);
 router.post('/:friendId/accept', goneGraph);
 router.post('/:friendId/reject', goneGraph);
-router.post('/:friendId/block', goneGraph);
-router.post('/:friendId/unblock', goneGraph);
 
 router.get('/', getFriends);
 router.get('/:friendId/relationship', getRelationship);

@@ -23,7 +23,6 @@ export function useFriendDmRealtime({
   setPeerTyping,
   pendingSendsRef,
   t,
-  onDmSendRejected,
 }) {
   const typingStopTimerRef = useRef(null);
   const markReadInFlightRef = useRef(false);
@@ -184,18 +183,12 @@ export function useFriendDmRealtime({
           )
         );
       }
-      onDmSendRejected?.(errPayload);
     };
 
     const handleSocketError = (err) => {
       const code = err?.code;
       let toastMsg = resolveApiErrorMessage(err, { t, fallback: t('friendChat.sendFail') });
-      if (code === 'dm_blocked') {
-        toastMsg =
-          err?.blockerId && String(err.blockerId) !== myIdStr
-            ? t('friendChat.blockedByPeerBanner')
-            : t('friendChat.dmBlocked');
-      } else if (code === 'dm_not_friends') {
+      if (code === 'dm_not_friends') {
         toastMsg = t('friendChat.dmNotFriends');
       }
       toast.error(toastMsg);
@@ -212,33 +205,6 @@ export function useFriendDmRealtime({
         return;
       }
       handleSocketError(payload);
-    };
-
-    const handleFriendBlocked = (payload) => {
-      if (!payload || String(payload.blockedId) !== myIdStr) return;
-      if (
-        selectedFriendId &&
-        String(payload.blockerId) === String(selectedFriendId)
-      ) {
-        onDmSendRejected?.({
-          code: 'dm_blocked',
-          blockerId: payload.blockerId,
-          message: t('friendChat.blockedByPeerBanner'),
-        });
-      }
-    };
-
-    const handleFriendUnblocked = (payload) => {
-      if (!payload) return;
-      const peer =
-        String(payload.blockerId) === myIdStr
-          ? payload.blockedId
-          : String(payload.blockedId) === myIdStr
-            ? payload.blockerId
-            : null;
-      if (peer && selectedFriendId && String(peer) === String(selectedFriendId)) {
-        onDmSendRejected?.({ code: 'dm_unblocked', blockerId: null });
-      }
     };
 
     const handleMessagesRead = (payload) => {
@@ -288,8 +254,6 @@ export function useFriendDmRealtime({
     on('friend:new_message', handleNewMessage);
     on('friend:sent', handleSentMessage);
     on('friend:send_failed', handleSendFailed);
-    on('friend:blocked', handleFriendBlocked);
-    on('friend:unblocked', handleFriendUnblocked);
     on('error', handleSocketError);
     on('friend:messages_read', handleMessagesRead);
     on('friend:typing_start', handleTypingStart);
@@ -303,8 +267,6 @@ export function useFriendDmRealtime({
       off('friend:new_message', handleNewMessage);
       off('friend:sent', handleSentMessage);
       off('friend:send_failed', handleSendFailed);
-      off('friend:blocked', handleFriendBlocked);
-      off('friend:unblocked', handleFriendUnblocked);
       off('error', handleSocketError);
       off('friend:messages_read', handleMessagesRead);
       off('friend:typing_start', handleTypingStart);
@@ -327,7 +289,6 @@ export function useFriendDmRealtime({
     pendingSendsRef,
     markConversationRead,
     refreshUnread,
-    onDmSendRejected,
     t,
   ]);
 

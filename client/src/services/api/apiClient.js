@@ -66,7 +66,7 @@ import { toastNetworkAware } from '../../lib/network/toastNetworkAware.js';
 
 ensureNetworkControllerStarted();
 
-// Đồng bộ với services/api.js — https://atrium.dev luôn dùng /api same-origin.
+// Đồng bộ với services/api.js — absolute api host hoặc /api.
 const API_URL = resolveApiBaseUrl();
 
 // Create axios instance

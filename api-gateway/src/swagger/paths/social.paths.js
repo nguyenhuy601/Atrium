@@ -38,21 +38,8 @@ module.exports = {
       operationId: 'listFriends',
       tags: ['Friends'],
       summary: 'List friends',
-      description: 'Danh sách bạn bè. Query status=blocked để lấy blocked list.',
+      description: 'Danh sách roster DM derived từ org (luôn relationshipStatus accepted). Graph block/pending đã retire.',
       requireNotFound: false,
-      parameters: [
-        {
-          name: 'status',
-          in: 'query',
-          required: false,
-          description: 'Filter: accepted | pending | blocked',
-          schema: {
-            type: 'string',
-            enum: ['accepted', 'pending', 'blocked'],
-            example: 'accepted',
-          },
-        },
-      ],
       successExample: { success: true, data: [] },
     }),
   },
