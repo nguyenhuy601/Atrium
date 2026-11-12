@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { useAppStrings } from '../../locales/appStrings';
 import AdminOrgUnitOpsHubShell from '../../components/Admin/AdminOrgUnitOpsHubShell';
 import useAdminOrgStructure from '../../hooks/useAdminOrgStructure';
+import { useAdminActionGate } from '../../hooks/useAdminActionGate';
+import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
 import TeamEditPanel from './TeamEditPanel';
 import TeamArchivePanel from './TeamArchivePanel';
 import TeamMembersPanel from './TeamMembersPanel';
@@ -16,20 +18,30 @@ const TAB_DEPT = 'department';
 
 export default function TeamManageHubPanel({ orgId }) {
   const { t } = useAppStrings();
+  const { can, grantsLoading } = useAdminActionGate(orgId);
+  const canUpdateTeam = can(RBAC_GRANT.TEAM_UPDATE);
   const { teams, loading, error, loadStructure } = useAdminOrgStructure(orgId, {
     includeInactive: true,
   });
 
-  const tabs = useMemo(
-    () => [
+  const tabs = useMemo(() => {
+    if (!canUpdateTeam) return [];
+    return [
       { id: TAB_EDIT, label: t('adminDomains.orgStructure.teamEdit') },
       { id: TAB_ARCHIVE, label: t('adminDomains.orgStructure.teamArchive') },
       { id: TAB_MEMBERS, label: t('adminDomains.orgStructure.teamMembers') },
       { id: TAB_LEADER, label: t('adminDomains.orgStructure.teamLeader') },
       { id: TAB_DEPT, label: t('adminDomains.orgStructure.teamDept') },
-    ],
-    [t]
-  );
+    ];
+  }, [t, canUpdateTeam]);
+
+  if (!grantsLoading && !canUpdateTeam) {
+    return (
+      <p className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+        {t('adminOrg.grantDenied')}
+      </p>
+    );
+  }
 
   return (
     <AdminOrgUnitOpsHubShell
@@ -38,7 +50,7 @@ export default function TeamManageHubPanel({ orgId }) {
       tabs={tabs}
       defaultTab={TAB_EDIT}
       items={teams}
-      loading={loading}
+      loading={loading || grantsLoading}
       error={error}
       onRetry={() => loadStructure()}
       pickerHint={t('adminOrg.teamEditPickerHint')}

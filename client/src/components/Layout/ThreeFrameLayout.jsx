@@ -28,7 +28,6 @@ function parseRightWidthToPx(rightWidth) {
  * Site phải: resize + double-click reset; parent truyền right=null để collapse.
  */
 const ThreeFrameLayout = ({
-  landingDemo = false,
   left,
   center,
   right = null,
@@ -46,7 +45,7 @@ const ThreeFrameLayout = ({
   const shell = appShellBg(isDarkMode);
   const rightPanel = threeFrameRightPanel(isDarkMode);
   const embeddedSuiteLayout = left === false;
-  const navLeft = embeddedSuiteLayout ? null : (left ?? <NavigationSidebar landingDemo={landingDemo} />);
+  const navLeft = embeddedSuiteLayout ? null : (left ?? <NavigationSidebar />);
   const baseRightW = useMemo(() => parseRightWidthToPx(rightWidth), [rightWidth]);
   const maxRightW = Math.max(baseRightW, ORG_RIGHT_PANEL_MAX_W);
   const minRightW = ORG_RIGHT_PANEL_MIN_W;

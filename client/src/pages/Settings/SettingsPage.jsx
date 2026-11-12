@@ -3,17 +3,10 @@ import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { ConfirmDialog, GradientButton } from '../../components/Shared';
 import roleAPI from '../../services/api/roleAPI';
-import userService from '../../services/userService';
-import authService from '../../services/authService';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useAppStrings } from '../../locales/appStrings';
 import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
-import { mergeAuthUserFromProfile, unwrapApiData } from '../../utils/helpers';
-import { pickAvatarValue } from '../../utils/avatarDisplay';
-import { invalidateProtectedAvatarCache } from '../../utils/protectedMediaFetch';
-import { getJwtEmail } from '../../utils/tokenStorage';
-import UserAvatar from '../../components/Shared/UserAvatar';
 import { FIGMA_PAGE_SHELL } from '../../components/Layout/figmaPageClasses';
 import SettingsFigmaLayout from '../../components/Settings/SettingsFigmaLayout';
 import useUiRole from '../../hooks/useUiRole';
@@ -21,12 +14,10 @@ import { settingsTabsForRole } from '../../config/roleMeta';
 import SettingsRbacMatrix from '../../components/Settings/SettingsRbacMatrix';
 import SettingsApiKeysPanel from '../../components/Settings/SettingsApiKeysPanel';
 import CapabilityProfilePanel from '../../components/Settings/CapabilityProfilePanel';
+import SettingsProfilePanel from '../../components/Settings/SettingsProfilePanel';
 import { FIGMA_SETTINGS_CARD, FIGMA_SETTINGS_INPUT } from '../../components/Settings/figmaSettingsClasses';
 import { hasBackendCapability } from '../../config/backendCapabilities';
 import { useOrganizationsMy } from '../../hooks/queries/useOrganizationsMy';
-import useUserMe from '../../hooks/useUserMe';
-import { useQueryClient } from '@tanstack/react-query';
-import { queryKeys } from '../../lib/queryKeys';
 
 const isValidMongoObjectId = (s) =>
   typeof s === 'string' && /^[a-fA-F0-9]{24}$/.test(s);
@@ -40,14 +31,9 @@ const NOTIF_LABEL_KEYS = {
   'mobile-push': 'notifPush',
 };
 
-const SHOW_ROLE_DEBUG_SWITCHER =
-  import.meta.env.DEV && import.meta.env.VITE_ENABLE_UI_ROLE_DEBUG === 'true';
-
 function SettingsPage() {
   const { t, locale } = useAppStrings();
-  const { user, updateUser } = useAuth();
-  const queryClient = useQueryClient();
-  const { me: meProfile } = useUserMe({ enabled: Boolean(user?.id || user?.userId || user?._id) });
+  const { user } = useAuth();
   const orgsQuery = useOrganizationsMy({ enabled: Boolean(user) });
   const { isDarkMode, toggleTheme, fontScale, setFontScale } = useTheme();
   const [activeTab, setActiveTab] = useState('general');
@@ -77,11 +63,6 @@ function SettingsPage() {
     website: 'https://atrium.com',
     contactEmail: 'contact@atrium.com',
   });
-  const [userProfileForm, setUserProfileForm] = useState({
-    fullName: '',
-    phone: '',
-    email: '',
-  });
   const [apiKeys, setApiKeys] = useState([
     { id: 'k1', name: 'Production API Key', created: '15/12/2025', lastUsed: '2h ago', value: 'vh_prod_xxxxxxxxxxxx' },
     { id: 'k2', name: 'Development API Key', created: '10/01/2026', lastUsed: '1d ago', value: 'vh_dev_xxxxxxxxxxxx' },
@@ -104,10 +85,6 @@ function SettingsPage() {
     onlineStatus: 'everyone',
     directMessagePermission: 'everyone',
   });
-  const [avatarUrl, setAvatarUrl] = useState('');
-  const [avatarCacheBust, setAvatarCacheBust] = useState(null);
-  const [avatarUploading, setAvatarUploading] = useState(false);
-  const [profileSaving, setProfileSaving] = useState(false);
   const [roles, setRoles] = useState([
     { id: 'r1', name: 'Administrator', members: 3, permissions: 'Full access', color: 'from-red-500 to-orange-500', icon: '👑' },
     { id: 'r2', name: 'Department lead', members: 4, permissions: 'Manage department', color: 'from-cyan-600 to-teal-600', icon: '👔' },
@@ -159,36 +136,12 @@ function SettingsPage() {
 
   useEffect(() => {
     const orgData = localStorage.getItem('settings:organization');
-    const userProfileData = localStorage.getItem('settings:userProfile');
     const apiKeyData = localStorage.getItem('settings:apiKeys');
     const integrationData = localStorage.getItem('settings:integrations');
     const notificationData = localStorage.getItem('settings:notifications');
     const privacyData = localStorage.getItem('settings:privacy');
-    const avatarData = localStorage.getItem('settings:avatar');
 
     if (orgData) setOrganizationForm(JSON.parse(orgData));
-    if (userProfileData) {
-      try {
-        const parsed = JSON.parse(userProfileData);
-        setUserProfileForm((prev) => ({
-          ...prev,
-          fullName:
-            typeof parsed?.fullName === 'string' && parsed.fullName.trim()
-              ? parsed.fullName.trim()
-              : prev.fullName,
-          phone:
-            typeof parsed?.phone === 'string' && parsed.phone.trim()
-              ? parsed.phone.trim()
-              : prev.phone,
-          email:
-            typeof parsed?.email === 'string' && parsed.email.trim()
-              ? parsed.email.trim()
-              : prev.email || getJwtEmail(),
-        }));
-      } catch {
-        /* ignore */
-      }
-    }
     if (apiKeyData) setApiKeys(JSON.parse(apiKeyData));
     if (integrationData) setIntegrations(JSON.parse(integrationData));
     if (notificationData) {
@@ -219,8 +172,6 @@ function SettingsPage() {
         /* ignore */
       }
     }
-    const storedAvatar = pickAvatarValue(avatarData);
-    if (storedAvatar && !storedAvatar.startsWith('data:')) setAvatarUrl(storedAvatar);
   }, []);
 
   const fetchRoles = async () => {
@@ -248,43 +199,6 @@ function SettingsPage() {
   };
 
   useEffect(() => {
-    if (!user) return;
-    setUserProfileForm((prev) => ({
-      ...prev,
-      fullName:
-        user?.displayName || user?.fullName || user?.name || prev.fullName || t('settingsPage.userFallback'),
-      phone: user?.phone || user?.phoneNumber || user?.mobile || prev.phone || '',
-      email: user?.email || prev.email || getJwtEmail() || '',
-    }));
-  }, [user, t]);
-
-  /** Bootstrap BFF không gửi phone — hydrate từ shared GET /users/me */
-  useEffect(() => {
-    if (!meProfile || typeof meProfile !== 'object') return;
-    const phoneValue = String(meProfile.phone || meProfile.phoneNumber || meProfile.mobile || '').trim();
-    setUserProfileForm((prev) => ({
-      ...prev,
-      fullName: meProfile.displayName || meProfile.fullName || meProfile.name || prev.fullName,
-      phone:
-        phoneValue ||
-        prev.phone ||
-        user?.phone ||
-        user?.phoneNumber ||
-        user?.mobile ||
-        '',
-      email: meProfile.email || prev.email || user?.email || getJwtEmail() || '',
-    }));
-    updateUser(
-      mergeAuthUserFromProfile(user, {
-        ...meProfile,
-        ...(phoneValue ? { phone: phoneValue } : {}),
-      })
-    );
-    const fromMe = pickAvatarValue(meProfile.avatar || meProfile.avatarUrl);
-    if (fromMe) setAvatarUrl(fromMe);
-  }, [meProfile]);
-
-  useEffect(() => {
     localStorage.setItem('settings:apiKeys', JSON.stringify(apiKeys));
   }, [apiKeys]);
 
@@ -301,16 +215,6 @@ function SettingsPage() {
   }, [privacySettings]);
 
   useEffect(() => {
-    if (!avatarUrl || String(avatarUrl).startsWith('data:')) return;
-    localStorage.setItem('settings:avatar', avatarUrl);
-  }, [avatarUrl]);
-
-  useEffect(() => {
-    const fromUser = pickAvatarValue(user?.avatar || user?.avatarUrl);
-    if (fromUser) setAvatarUrl(fromUser);
-  }, [user?.avatar, user?.avatarUrl]);
-
-  useEffect(() => {
     const nextTab = userRole === 'admin' ? 'general' : 'profile';
     setActiveTab(nextTab);
   }, [userRole]);
@@ -318,43 +222,6 @@ function SettingsPage() {
   const handleSaveOrganization = () => {
     localStorage.setItem('settings:organization', JSON.stringify(organizationForm));
     toast.success(t('settingsPage.toastSaveOrg'));
-  };
-
-  const handleSaveUserProfile = async () => {
-    if (profileSaving) return;
-    const nextEmail = String(userProfileForm.email || '').trim().toLowerCase();
-    const currentEmail = String(user?.email || '').trim().toLowerCase();
-    const payload = {
-      displayName: String(userProfileForm.fullName || '').trim(),
-      phone: String(userProfileForm.phone || '').trim(),
-    };
-    setProfileSaving(true);
-    try {
-      if (nextEmail && nextEmail !== currentEmail) {
-        await authService.requestEmailChange(nextEmail);
-      }
-      const res = await userService.updateProfile(payload);
-      const saved = unwrapApiData(res) || res?.data || res;
-      updateUser(mergeAuthUserFromProfile(user, { ...payload, ...saved }));
-      queryClient.setQueryData(queryKeys.user.me(), (prev) =>
-        prev && typeof prev === 'object' ? { ...prev, ...payload, ...saved } : saved
-      );
-      setUserProfileForm((prev) => ({
-        ...prev,
-        fullName: payload.displayName || prev.fullName,
-        phone: saved?.phone || payload.phone || prev.phone,
-      }));
-      localStorage.setItem('settings:userProfile', JSON.stringify(userProfileForm));
-      if (nextEmail && nextEmail !== currentEmail) {
-        toast.success(t('settingsPage.toastEmailChangeRequested'));
-      } else {
-        toast.success(t('settingsPage.toastSaveProfile'));
-      }
-    } catch (error) {
-      toast.error(resolveApiErrorMessage(error, { t, fallback: t('errors.generic') }));
-    } finally {
-      setProfileSaving(false);
-    }
   };
 
   const handleCopyApiKey = async (keyValue) => {
@@ -402,38 +269,6 @@ function SettingsPage() {
     setNotificationSettings((prev) => prev.map((item) => (
       item.id === settingId ? { ...item, checked: !item.checked } : item
     )));
-  };
-
-  const handleAvatarChange = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    if (!String(file.type || '').startsWith('image/')) {
-      toast.error(t('profileModal.imageOnly'));
-      return;
-    }
-    const profileUserId = user?.userId || user?.id || user?._id;
-    try {
-      setAvatarUploading(true);
-      const res = await userService.uploadAvatar(file);
-      const updated = unwrapApiData(res);
-      const nextUrl = pickAvatarValue(updated?.avatar || updated?.avatarUrl);
-      if (!nextUrl) {
-        toast.error(t('profileModal.avatarUrlMissing'));
-        return;
-      }
-      const bust = Date.now();
-      invalidateProtectedAvatarCache({ userId: profileUserId, cacheBust: bust });
-      setAvatarCacheBust(bust);
-      setAvatarUrl(nextUrl);
-      updateUser(mergeAuthUserFromProfile(user, { ...updated, avatar: nextUrl }, { avatarBust: bust }));
-      queryClient.invalidateQueries({ queryKey: queryKeys.friends.all });
-      toast.success(t('settingsPage.toastAvatar'));
-    } catch (error) {
-      toast.error(resolveApiErrorMessage(error, { t, fallback: t('profileModal.avatarUploadFail') }));
-    } finally {
-      setAvatarUploading(false);
-    }
   };
 
   const handleExportAuditLog = () => {
@@ -623,75 +458,7 @@ function SettingsPage() {
       userRoleLabel={uiRoleMeta.label}
       tabs={figmaSettingsTabs}
     >
-      {figmaTab === 'profile' && (
-        <div className="max-w-xl space-y-6">
-          <div>
-            <h2 className="mb-1 font-display text-xl font-bold text-foreground">{t('settingsPage.profileTitle')}</h2>
-            <p className="text-sm text-muted-foreground">{t('settingsPage.pageSubtitleUser')}</p>
-          </div>
-          <div className={`${FIGMA_SETTINGS_CARD} space-y-4`}>
-            <div className="flex items-center gap-5">
-              <UserAvatar
-                avatar={avatarUrl || user?.avatar || null}
-                userId={user?.userId || user?.id || user?._id}
-                name={userProfileForm.fullName || user?.displayName || user?.name}
-                size="2xl"
-                cacheBust={avatarCacheBust || user?.avatarCacheKey || undefined}
-              />
-              <label className={`inline-flex ${avatarUploading ? 'pointer-events-none opacity-60' : 'cursor-pointer'}`}>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  disabled={avatarUploading}
-                  onChange={handleAvatarChange}
-                />
-                <span className="motion-safe:transition-colors motion-reduce:transition-none rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">
-                  {avatarUploading ? t('profileModal.changeAvatarUploading') : t('settingsPage.changeAvatar')}
-                </span>
-              </label>
-            </div>
-            <div>
-              <label className="mb-2 block text-sm font-medium text-foreground">{t('settingsPage.fullName')}</label>
-              <input
-                type="text"
-                value={userProfileForm.fullName}
-                onChange={(e) => setUserProfileForm((prev) => ({ ...prev, fullName: e.target.value }))}
-                className={`${FIGMA_SETTINGS_INPUT} motion-safe:transition-colors motion-reduce:transition-none`}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-foreground">{t('settingsPage.email')}</label>
-                <input
-                  type="email"
-                  value={userProfileForm.email}
-                  onChange={(e) => setUserProfileForm((prev) => ({ ...prev, email: e.target.value }))}
-                  className={`${FIGMA_SETTINGS_INPUT} motion-safe:transition-colors motion-reduce:transition-none`}
-                />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-medium text-foreground">{t('settingsPage.phone')}</label>
-                <input
-                  type="tel"
-                  value={userProfileForm.phone}
-                  onChange={(e) => setUserProfileForm((prev) => ({ ...prev, phone: e.target.value }))}
-                  className={`${FIGMA_SETTINGS_INPUT} motion-safe:transition-colors motion-reduce:transition-none`}
-                />
-              </div>
-            </div>
-            <GradientButton
-              variant="primary"
-              onClick={handleSaveUserProfile}
-              aria-busy={profileSaving}
-              disabled={profileSaving}
-              className="motion-safe:transition-colors motion-reduce:transition-none"
-            >
-              {t('settingsPage.saveChanges')}
-            </GradientButton>
-          </div>
-        </div>
-      )}
+      {figmaTab === 'profile' && <SettingsProfilePanel />}
 
       {figmaTab === 'capability' && <CapabilityProfilePanel />}
 

@@ -1,20 +1,24 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Search, SlidersHorizontal, UserPlus } from 'lucide-react';
+import { Search, UserPlus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import AdminUserActionsMenu from '../../components/adminUsers/AdminUserActionsMenu';
 import AdminUserDetailDrawer from '../../components/adminUsers/AdminUserDetailDrawer';
 import {
+  ADMIN_LIST_PAGE_SIZE,
   AdminDenseMobileList,
+  AdminDenseTableCard,
+  AdminDenseTableScroll,
+  AdminListFilterPopover,
+  AdminListPagination,
+  AdminListSearchInput,
+  AdminPillBadge,
   adminDenseRowClass,
   adminFilterSelectClass,
-  adminHoverRowClass,
-  adminListIconBtnClass,
   adminPrimaryBtnClass,
   adminSecondaryBtnClass,
 } from '../../components/adminUsers/adminUserPanelUi';
 import { VH_MOTION_BTN } from '../../motion/classes';
-import MotionMenu from '../../motion/primitives/MotionMenu';
 import { useCompanyAdminContext } from '../../pages/Admin/CompanyAdminLayout';
 import { organizationAPI } from '../../services/api/organizationAPI';
 import { orgRbacAPI } from '../../services/api/orgRbacAPI';
@@ -43,49 +47,35 @@ import { orgRoleCatalogAPI } from '../../services/api/orgRoleCatalogAPI';
 import { useAdminActionGate } from '../../hooks/useAdminActionGate';
 import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
 
-/** Số dòng mỗi trang trên danh sách admin users. */
-const USERS_LIST_PAGE_SIZE = 10;
-const CAP_BADGE = {
-  pending_hr: 'bg-warning-bg text-warning ring-1 ring-warning',
-  verified: 'bg-success-bg text-success ring-1 ring-success',
-  rejected: 'bg-error-bg text-destructive ring-1 ring-destructive',
-  draft: 'bg-muted text-muted-foreground ring-1 ring-border',
-};
-
-const STATUS_BADGE = {
-  active: 'bg-success-bg text-success ring-1 ring-success',
-  locked: 'bg-warning-bg text-warning ring-1 ring-warning',
-  inactive: 'bg-muted text-muted-foreground ring-1 ring-border',
-  mustChangePassword: 'bg-info-bg text-info ring-1 ring-info',
-};
-
 const FILTER_SELECT_CLASS = adminFilterSelectClass();
 
-const LIST_ICON_BTN_CLASS = adminListIconBtnClass();
+const STATUS_VARIANT = {
+  active: 'success',
+  locked: 'warning',
+  inactive: 'muted',
+  mustChangePassword: 'info',
+};
+
+const CAP_VARIANT = {
+  pending_hr: 'warning',
+  verified: 'success',
+  rejected: 'error',
+  draft: 'muted',
+};
 
 function CapabilityStatusBadge({ status, t }) {
   const key = ['pending_hr', 'verified', 'rejected'].includes(status) ? status : 'draft';
-  return (
-    <span
-      className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${CAP_BADGE[key]}`}
-    >
-      {t(`settingsCapability.status.${key}`)}
-    </span>
-  );
+  return <AdminPillBadge variant={CAP_VARIANT[key]}>{t(`settingsCapability.status.${key}`)}</AdminPillBadge>;
 }
 
 function StatusBadge({ member, t }) {
   const key = memberStatusKey(member);
   return (
-    <span
-      className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${STATUS_BADGE[key] || STATUS_BADGE.active}`}
-    >
-      {memberStatusLabel(member, t)}
-    </span>
+    <AdminPillBadge variant={STATUS_VARIANT[key] || 'success'}>{memberStatusLabel(member, t)}</AdminPillBadge>
   );
 }
 
-function UsersTableSkeletonRows({ rows = USERS_LIST_PAGE_SIZE }) {
+function UsersTableSkeletonRows({ rows = ADMIN_LIST_PAGE_SIZE }) {
   return Array.from({ length: rows }, (_, rowIdx) => (
     <tr key={`sk-${rowIdx}`} className="border-b border-border">
       {Array.from({ length: 8 }, (_, colIdx) => (
@@ -108,13 +98,9 @@ function OrgRoleCell({ rows, emptyLabel }) {
   return (
     <div className="flex max-w-[180px] flex-wrap gap-1">
       {rows.map((row) => (
-        <span
-          key={row.id}
-          className="inline-flex rounded-full bg-primary-subtle px-2 py-0.5 text-[10px] font-medium text-primary ring-1 ring-border"
-          title={row.scopeName || undefined}
-        >
+        <AdminPillBadge key={row.id} variant="primary" className="text-[10px]" title={row.scopeName || undefined}>
           {row.label}
-        </span>
+        </AdminPillBadge>
       ))}
     </div>
   );
@@ -235,9 +221,8 @@ export default function UsersListPanel({ orgId }) {
   const [sortKey, setSortKey] = useState('name');
   const [sortDir, setSortDir] = useState('asc');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(ADMIN_LIST_PAGE_SIZE);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const filtersRef = useRef(null);
-  const filtersButtonRef = useRef(null);
   const [structureMaps, setStructureMaps] = useState({ departments: new Map(), teams: new Map() });
   const [structureLoadFailed, setStructureLoadFailed] = useState(false);
   const [structureReloadKey, setStructureReloadKey] = useState(0);
@@ -273,31 +258,11 @@ export default function UsersListPanel({ orgId }) {
 
   useEffect(() => {
     setPage(1);
-  }, [orgId, debouncedQuery, roleFilter, statusFilter, capabilityFilter, scopeFilter, sortKey, sortDir]);
+  }, [orgId, debouncedQuery, roleFilter, statusFilter, capabilityFilter, scopeFilter, sortKey, sortDir, pageSize]);
 
   useEffect(() => {
     setCapabilityOverrides({});
   }, [orgId]);
-
-  useEffect(() => {
-    if (!filtersOpen) return undefined;
-    const onDoc = (e) => {
-      if (filtersRef.current && !filtersRef.current.contains(e.target)) {
-        setFiltersOpen(false);
-      }
-    };
-    const onKey = (e) => {
-      if (e.key !== 'Escape') return;
-      setFiltersOpen(false);
-      filtersButtonRef.current?.focus();
-    };
-    document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDoc);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [filtersOpen]);
 
   useEffect(() => {
     if (!orgId || grantsLoading) return undefined;
@@ -481,13 +446,13 @@ export default function UsersListPanel({ orgId }) {
     [filtered, sortKey, sortDir]
   );
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / USERS_LIST_PAGE_SIZE) || 1);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize) || 1);
   const safePage = Math.min(Math.max(1, page), totalPages);
 
   const pageItems = useMemo(() => {
-    const start = (safePage - 1) * USERS_LIST_PAGE_SIZE;
-    return sorted.slice(start, start + USERS_LIST_PAGE_SIZE);
-  }, [sorted, safePage]);
+    const start = (safePage - 1) * pageSize;
+    return sorted.slice(start, start + pageSize);
+  }, [sorted, safePage, pageSize]);
 
   const handleSortColumn = (columnKey) => {
     if (sortKey === columnKey) {
@@ -538,7 +503,7 @@ export default function UsersListPanel({ orgId }) {
             {organization?.name ? `${organization.name} · ` : ''}
             {t('adminUsers.listCount', { n: sorted.length, total: members.length })}
             {' · '}
-            {t('adminUsers.listPageSizeHint', { size: USERS_LIST_PAGE_SIZE })}
+            {t('adminUsers.listPageSizeHint', { size: pageSize })}
           </p>
         </div>
         {canInvite ? (
@@ -555,120 +520,85 @@ export default function UsersListPanel({ orgId }) {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="search"
+            <AdminListSearchInput
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('adminUsers.searchPlaceholder')}
-              aria-label={t('adminUsers.searchPlaceholder')}
-              maxLength={120}
-              className={`${adminFilterSelectClass()} py-2.5 pl-9 pr-3`}
             />
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative" ref={filtersRef}>
-              <button
-                ref={filtersButtonRef}
-                type="button"
-                aria-expanded={filtersOpen}
-                aria-controls="users-list-filters"
-                aria-haspopup="dialog"
-                onClick={() => setFiltersOpen((open) => !open)}
-                className={adminSecondaryBtnClass('px-3 py-2.5 active:bg-muted')}
-              >
-                <SlidersHorizontal className="h-4 w-4" aria-hidden />
-                {t('adminUsers.filters')}
-                {activeFilterCount ? (
-                  <span
-                    className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[11px] font-semibold text-primary-foreground"
-                    title={t('adminUsers.filtersActive', { n: activeFilterCount })}
-                  >
-                    {activeFilterCount}
-                  </span>
-                ) : null}
-              </button>
-              <MotionMenu
-                open={filtersOpen}
-                menuKey="users-list-filters"
-                role="dialog"
-                id="users-list-filters"
-                aria-label={t('adminUsers.filters')}
-                className="absolute right-0 z-20 mt-2 w-[min(calc(100vw-2rem),20rem)] space-y-2 rounded-xl border border-border bg-card p-3 shadow-lg"
-              >
-                  <select
-                    value={roleFilter}
-                    onChange={(e) => setRoleFilter(e.target.value)}
-                    className={FILTER_SELECT_CLASS}
-                    aria-label={t('adminUsers.filterRoleAria')}
-                  >
-                    <option value="">{t('adminUsers.filterAllRoles')}</option>
-                    <option value="admin">{t('adminUsers.roleAdmin')}</option>
-                    <option value="member">{t('adminUsers.roleMember')}</option>
-                  </select>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className={FILTER_SELECT_CLASS}
-                    aria-label={t('adminUsers.filterStatusAria')}
-                  >
-                    <option value="">{t('adminUsers.filterAllStatus')}</option>
-                    <option value="active">{t('adminUsers.statusActive')}</option>
-                    <option value="locked">{t('adminUsers.statusLocked')}</option>
-                    <option value="inactive">{t('adminUsers.statusInactive')}</option>
-                    <option value="mustChangePassword">{t('adminUsers.statusMustChangePassword')}</option>
-                  </select>
-                  <select
-                    value={capabilityFilter}
-                    onChange={(e) => setCapabilityFilter(e.target.value)}
-                    className={FILTER_SELECT_CLASS}
-                    aria-label={t('adminUsers.filterCapability')}
-                  >
-                    <option value="">{t('adminUsers.filterAllCapability')}</option>
-                    <option value="pending_hr">{t('adminUsers.filterCapPending')}</option>
-                    <option value="verified">{t('adminUsers.filterCapVerified')}</option>
-                    <option value="rejected">{t('adminUsers.filterCapRejected')}</option>
-                    <option value="draft">{t('adminUsers.filterCapDraft')}</option>
-                  </select>
-                  <select
-                    value={scopeFilter}
-                    onChange={(e) => setScopeFilter(e.target.value)}
-                    className={FILTER_SELECT_CLASS}
-                    aria-label={t('adminUsers.filterScopeAria')}
-                  >
-                    <option value="">{t('adminUsers.filterAllScopes')}</option>
-                    {scopeOptions.map((opt) => (
-                      <option key={opt.id} value={opt.id}>
-                        {opt.type === 'team' ? `${t('adminUsers.colTeam')} · ${opt.label}` : opt.label}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={`${sortKey}:${sortDir}`}
-                    onChange={(e) => {
-                      const [k, d] = String(e.target.value || 'name:asc').split(':');
-                      setSortKey(k === 'employeeCode' || k === 'email' ? k : 'name');
-                      setSortDir(d === 'desc' ? 'desc' : 'asc');
-                    }}
-                    className={FILTER_SELECT_CLASS}
-                    aria-label={t('adminUsers.sortBy')}
-                  >
-                    <option value="name:asc">{t('adminUsers.sortNameAz')}</option>
-                    <option value="name:desc">{t('adminUsers.sortNameZa')}</option>
-                    <option value="employeeCode:asc">{t('adminUsers.sortCodeAz')}</option>
-                    <option value="employeeCode:desc">{t('adminUsers.sortCodeZa')}</option>
-                  </select>
-                  {activeFilterCount ? (
-                    <button
-                      type="button"
-                      onClick={clearListFilters}
-                      className={adminHoverRowClass('w-full rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring')}
-                    >
-                      {t('adminUsers.filtersClear')}
-                    </button>
-                  ) : null}
-              </MotionMenu>
-            </div>
-          </div>
+          <AdminListFilterPopover
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            activeCount={activeFilterCount}
+            label={t('adminUsers.filters')}
+            activeTitle={t('adminUsers.filtersActive', { n: activeFilterCount })}
+            clearLabel={t('adminUsers.filtersClear')}
+            onClear={clearListFilters}
+            menuKey="users-list-filters"
+          >
+            <select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className={FILTER_SELECT_CLASS}
+              aria-label={t('adminUsers.filterRoleAria')}
+            >
+              <option value="">{t('adminUsers.filterAllRoles')}</option>
+              <option value="admin">{t('adminUsers.roleAdmin')}</option>
+              <option value="member">{t('adminUsers.roleMember')}</option>
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className={FILTER_SELECT_CLASS}
+              aria-label={t('adminUsers.filterStatusAria')}
+            >
+              <option value="">{t('adminUsers.filterAllStatus')}</option>
+              <option value="active">{t('adminUsers.statusActive')}</option>
+              <option value="locked">{t('adminUsers.statusLocked')}</option>
+              <option value="inactive">{t('adminUsers.statusInactive')}</option>
+              <option value="mustChangePassword">{t('adminUsers.statusMustChangePassword')}</option>
+            </select>
+            <select
+              value={capabilityFilter}
+              onChange={(e) => setCapabilityFilter(e.target.value)}
+              className={FILTER_SELECT_CLASS}
+              aria-label={t('adminUsers.filterCapability')}
+            >
+              <option value="">{t('adminUsers.filterAllCapability')}</option>
+              <option value="pending_hr">{t('adminUsers.filterCapPending')}</option>
+              <option value="verified">{t('adminUsers.filterCapVerified')}</option>
+              <option value="rejected">{t('adminUsers.filterCapRejected')}</option>
+              <option value="draft">{t('adminUsers.filterCapDraft')}</option>
+            </select>
+            <select
+              value={scopeFilter}
+              onChange={(e) => setScopeFilter(e.target.value)}
+              className={FILTER_SELECT_CLASS}
+              aria-label={t('adminUsers.filterScopeAria')}
+            >
+              <option value="">{t('adminUsers.filterAllScopes')}</option>
+              {scopeOptions.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.type === 'team' ? `${t('adminUsers.colTeam')} · ${opt.label}` : opt.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={`${sortKey}:${sortDir}`}
+              onChange={(e) => {
+                const [k, d] = String(e.target.value || 'name:asc').split(':');
+                setSortKey(k === 'employeeCode' || k === 'email' ? k : 'name');
+                setSortDir(d === 'desc' ? 'desc' : 'asc');
+              }}
+              className={FILTER_SELECT_CLASS}
+              aria-label={t('adminUsers.sortBy')}
+            >
+              <option value="name:asc">{t('adminUsers.sortNameAz')}</option>
+              <option value="name:desc">{t('adminUsers.sortNameZa')}</option>
+              <option value="employeeCode:asc">{t('adminUsers.sortCodeAz')}</option>
+              <option value="employeeCode:desc">{t('adminUsers.sortCodeZa')}</option>
+            </select>
+          </AdminListFilterPopover>
         </div>
       </div>
 
@@ -688,7 +618,7 @@ export default function UsersListPanel({ orgId }) {
         </div>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <AdminDenseTableCard className="min-h-0 flex-1">
         {showMembersError ? (
           <div role="alert" className="flex flex-col items-center gap-3 px-4 py-10 text-center">
             <p className="text-sm text-muted-foreground">{t('companyAdmin.loadMembersFail')}</p>
@@ -702,7 +632,7 @@ export default function UsersListPanel({ orgId }) {
           </div>
         ) : (
           <>
-            <div className="min-h-0 flex-1 overflow-auto">
+            <AdminDenseTableScroll>
               {showMembersSkeleton ? (
                 <div className="space-y-2 p-3 md:hidden" aria-hidden>
                   {Array.from({ length: 4 }, (_, idx) => (
@@ -723,17 +653,17 @@ export default function UsersListPanel({ orgId }) {
                     const roleLabel = (orgRoleByUser[id] || []).map((row) => row.label).filter(Boolean).join(', ');
                     const positionLabel = positionByUser[id] || '';
                     return (
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        <span className="min-w-0 truncate">{memberEmail(m)}</span>
-                        <span className="min-w-0 truncate text-muted-foreground">
+                      <span className="block min-w-0">
+                        <span className="block truncate">{memberEmail(m)}</span>
+                        <span className="mt-0.5 block truncate">
                           {roleLabel || t('adminUsers.orgRoleNone')}
                           {' · '}
                           {positionLabel || t('adminUsers.positionNone')}
                         </span>
-                        <StatusBadge member={m} t={t} />
                       </span>
                     );
                   }}
+                  renderBadge={(m) => <StatusBadge member={m} t={t} />}
                   renderActions={(m) => (
                     <AdminUserActionsMenu
                       member={m}
@@ -870,37 +800,28 @@ export default function UsersListPanel({ orgId }) {
                   {t('adminUsers.noUsers')}
                 </p>
               ) : null}
-            </div>
+            </AdminDenseTableScroll>
             {showTableBody && sorted.length > 0 ? (
-              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3">
-                <button
-                  type="button"
-                  disabled={safePage <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className={LIST_ICON_BTN_CLASS}
-                  aria-label={t('adminUsers.listPrev')}
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
-                  {t('adminUsers.listPrev')}
-                </button>
-                <span className="text-xs text-muted-foreground" aria-live="polite">
-                  {t('adminUsers.listPage', { page: safePage, total: totalPages })}
-                </span>
-                <button
-                  type="button"
-                  disabled={safePage >= totalPages}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  className={LIST_ICON_BTN_CLASS}
-                  aria-label={t('adminUsers.listNext')}
-                >
-                  {t('adminUsers.listNext')}
-                  <ChevronRight className="h-3.5 w-3.5" aria-hidden />
-                </button>
-              </div>
+              <AdminListPagination
+                page={safePage}
+                totalPages={totalPages}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                onPageSizeChange={(size) => {
+                  setPageSize(size);
+                  setPage(1);
+                }}
+                labels={{
+                  prev: t('adminUsers.listPrev'),
+                  next: t('adminUsers.listNext'),
+                  pageLabel: t('adminUsers.listPage', { page: safePage, total: totalPages }),
+                  pageSizeAria: t('adminUsers.listPageSizeHint', { size: pageSize }),
+                }}
+              />
             ) : null}
           </>
         )}
-      </div>
+      </AdminDenseTableCard>
 
       <AdminUserDetailDrawer
         orgId={orgId}

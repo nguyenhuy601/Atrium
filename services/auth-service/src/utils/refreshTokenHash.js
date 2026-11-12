@@ -22,7 +22,17 @@ function refreshTokenMatches(userAuth, incomingRaw) {
   return timingSafeStringEquals(stored, hashRefreshToken(incoming));
 }
 
+/** So khớp previous refresh trong cửa sổ grace (hash hoặc plaintext legacy). */
+function previousRefreshTokenMatches(userAuth, incomingRaw) {
+  const stored = String(userAuth?.previousRefreshToken || '').trim();
+  const incoming = String(incomingRaw || '').trim();
+  if (!stored || !incoming) return false;
+  if (timingSafeStringEquals(stored, incoming)) return true;
+  return timingSafeStringEquals(stored, hashRefreshToken(incoming));
+}
+
 module.exports = {
   hashRefreshToken,
   refreshTokenMatches,
+  previousRefreshTokenMatches,
 };

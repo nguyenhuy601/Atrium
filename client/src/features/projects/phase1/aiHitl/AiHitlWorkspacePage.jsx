@@ -379,7 +379,7 @@ export default function AiHitlWorkspacePage({ projectId, organizationId, onPromo
   /** Exclude zombie wall-timeout so poll / canRerunHow unlock. */
   const howInFlight = howStatusInFlight && !howWallStaleEarly;
   // HITL pause: do not poll while waiting_human — refresh() replaces gatePreview every 2s
-  // and Phase1DataGateReviewPanel resets the table (visible flicker).
+  // and the data-gate review table resets (visible flicker).
   const shouldPollWhat =
     !shouldPausePolling &&
     liveStatus !== 'waiting_human' &&

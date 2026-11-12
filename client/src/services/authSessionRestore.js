@@ -1,8 +1,8 @@
 import authService from './authService';
 import { getJwtEmail, getJwtSystemRole, getToken } from '../utils/tokenStorage';
 import { mergeAuthUserFromProfile, unwrapApiData } from '../utils/helpers';
-import { isAuthRefreshDisabled, refreshAccessTokenSingleFlight } from '../utils/authRefresh';
-import { hasSessionMarkerCookie } from '../utils/sessionMarkerCookie';
+import { refreshAccessTokenSingleFlight } from '../utils/authRefresh';
+import { hasSessionMarker } from '../utils/sessionMarkerCookie';
 
 let inflightRestore = null;
 
@@ -23,7 +23,7 @@ export async function restoreAuthSession() {
   let token = getToken();
   if (!token) {
     // Avoid guest spam POST /auth/refresh-token when no session marker (HttpOnly refresh alone is invisible to JS).
-    if (!isAuthRefreshDisabled() && hasSessionMarkerCookie()) {
+    if (hasSessionMarker()) {
       try {
         await refreshAccessTokenSingleFlight();
       } catch {

@@ -17,7 +17,7 @@ import { toShellCompat } from '../../utils/orgShellCompat';
 import { buildCompanyHomePath } from '../../utils/suitePathUtils';
 
 /** Company Space suite sidebar + L2 dept/team switch. */
-export default function CompanySidebar({ landingDemo = false } = {}) {
+export default function CompanySidebar() {
   const space = useSpace();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -97,7 +97,6 @@ export default function CompanySidebar({ landingDemo = false } = {}) {
     <>
       <FigmaNavigationSidebar
         suite="company"
-        landingDemo={landingDemo}
         contextSwitch={
           <CompanyContextSwitch
             level={level}

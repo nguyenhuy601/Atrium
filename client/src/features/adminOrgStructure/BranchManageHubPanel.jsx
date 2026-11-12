@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { useAppStrings } from '../../locales/appStrings';
 import AdminOrgUnitOpsHubShell from '../../components/Admin/AdminOrgUnitOpsHubShell';
 import useAdminOrgStructure from '../../hooks/useAdminOrgStructure';
+import { useAdminActionGate } from '../../hooks/useAdminActionGate';
+import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
 import BranchEditPanel from './BranchEditPanel';
 import BranchDisablePanel from './BranchDisablePanel';
 import BranchDeptPanel from './BranchDeptPanel';
@@ -12,18 +14,28 @@ const TAB_DEPT = 'departments';
 
 export default function BranchManageHubPanel({ orgId }) {
   const { t } = useAppStrings();
+  const { can, grantsLoading } = useAdminActionGate(orgId);
+  const canUpdateBranch = can(RBAC_GRANT.BRANCH_UPDATE);
   const { branches, loading, error, loadStructure } = useAdminOrgStructure(orgId, {
     includeInactive: true,
   });
 
-  const tabs = useMemo(
-    () => [
+  const tabs = useMemo(() => {
+    if (!canUpdateBranch) return [];
+    return [
       { id: TAB_EDIT, label: t('adminDomains.orgStructure.branchEdit') },
       { id: TAB_DISABLE, label: t('adminDomains.orgStructure.branchDisable') },
       { id: TAB_DEPT, label: t('adminDomains.orgStructure.branchDept') },
-    ],
-    [t]
-  );
+    ];
+  }, [t, canUpdateBranch]);
+
+  if (!grantsLoading && !canUpdateBranch) {
+    return (
+      <p className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+        {t('adminOrg.grantDenied')}
+      </p>
+    );
+  }
 
   return (
     <AdminOrgUnitOpsHubShell
@@ -32,7 +44,7 @@ export default function BranchManageHubPanel({ orgId }) {
       tabs={tabs}
       defaultTab={TAB_EDIT}
       items={branches}
-      loading={loading}
+      loading={loading || grantsLoading}
       error={error}
       onRetry={() => loadStructure()}
       pickerHint={t('adminOrg.branchEditPickerHint')}

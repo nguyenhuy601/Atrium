@@ -3,6 +3,8 @@ import { Navigate, useSearchParams } from 'react-router-dom';
 import { useAppStrings } from '../../locales/appStrings';
 import AdminOrgUnitOpsHubShell from '../../components/Admin/AdminOrgUnitOpsHubShell';
 import useAdminOrgStructure from '../../hooks/useAdminOrgStructure';
+import { useAdminActionGate } from '../../hooks/useAdminActionGate';
+import { RBAC_GRANT } from '../../config/rbacUiGrantMap';
 import DeptEditPanel from './DeptEditPanel';
 import DeptDisablePanel from './DeptDisablePanel';
 import DeptParentPanel from './DeptParentPanel';
@@ -21,21 +23,23 @@ const DEPT_TRANSFER_PATH = '/admin/org-structure/departments/transfer';
 export default function DeptManageHubPanel({ orgId }) {
   const { t } = useAppStrings();
   const [searchParams] = useSearchParams();
+  const { can, grantsLoading } = useAdminActionGate(orgId);
+  const canUpdateDept = can(RBAC_GRANT.DEPT_UPDATE);
   const { departments, loading, error, loadStructure } = useAdminOrgStructure(orgId, {
     includeInactive: true,
   });
 
-  const tabs = useMemo(
-    () => [
+  const tabs = useMemo(() => {
+    if (!canUpdateDept) return [];
+    return [
       { id: TAB_EDIT, label: t('adminDomains.orgStructure.deptEdit') },
       { id: TAB_DISABLE, label: t('adminDomains.orgStructure.deptDisable') },
       { id: TAB_PARENT, label: t('adminDomains.orgStructure.deptParent') },
       { id: TAB_HEAD, label: t('adminDomains.orgStructure.deptHead') },
       { id: TAB_MEMBERS, label: t('adminDomains.orgStructure.deptMembers') },
       { id: TAB_ORG_ROLES, label: t('adminDomains.orgStructure.deptOrgRoles') },
-    ],
-    [t]
-  );
+    ];
+  }, [t, canUpdateDept]);
 
   const transferRedirectTo = useMemo(() => {
     if (String(searchParams.get('tab') || '') !== 'transfer') return '';
@@ -50,6 +54,14 @@ export default function DeptManageHubPanel({ orgId }) {
     return <Navigate to={transferRedirectTo} replace />;
   }
 
+  if (!grantsLoading && !canUpdateDept) {
+    return (
+      <p className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+        {t('adminOrg.grantDenied')}
+      </p>
+    );
+  }
+
   return (
     <AdminOrgUnitOpsHubShell
       title={t('adminDomains.orgStructure.deptManageHub')}
@@ -57,7 +69,7 @@ export default function DeptManageHubPanel({ orgId }) {
       tabs={tabs}
       defaultTab={TAB_EDIT}
       items={departments}
-      loading={loading}
+      loading={loading || grantsLoading}
       error={error}
       onRetry={() => loadStructure()}
       pickerHint={t('adminOrg.deptEditPickerHint')}

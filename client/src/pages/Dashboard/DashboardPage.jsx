@@ -42,8 +42,7 @@ import {
 import { queryKeys } from '../../lib/queryKeys';
 import { STALE_TIME_DASHBOARD_MS } from '../../lib/queryClient';
 import { appShellBg } from '../../theme/shellTheme';
-import { useLandingSafeNavigate } from '../../hooks/useLandingSafeNavigate';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppStrings } from '../../locales/appStrings';
 import { resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
 import { useLocale } from '../../context/LocaleContext';
@@ -225,13 +224,11 @@ function githubContributionCellClass(total, isDarkMode) {
 }
 
 function DashboardPage({
-  landingDemo = false,
-  demoVariant = 'default',
   suiteLayout = false,
   suiteScope = 'me',
 } = {}) {
   const [activeFilter, setActiveFilter] = useState(() =>
-    landingDemo && demoVariant === 'tasks' ? 'tasks' : 'all',
+    'all',
   );
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatKey, setSelectedStatKey] = useState(null);
@@ -242,7 +239,7 @@ function DashboardPage({
   /** Tăng khi đổi danh sách bạn / lời mời để refetch metrics */
   const [metricsTick, setMetricsTick] = useState(0);
   const [metrics, setMetrics] = useState({
-    loading: !landingDemo,
+    loading: true,
     orgCount: null,
     friendsTotal: null,
     pendingCount: 0,
@@ -280,13 +277,13 @@ function DashboardPage({
   const { singleOrgMode, company } = useWorkspace();
   const isSingleCompany = singleOrgMode || readSingleOrgModeFlag();
   const { on, off } = useSocket();
-  const navigate = useLandingSafeNavigate(landingDemo);
+  const navigate = useNavigate();
   const location = useLocation();
   const { t } = useAppStrings();
   const { locale } = useLocale();
   const currentUserKey = String(user?.userId || user?._id || user?.id || '').trim();
   const isMeScope = suiteLayout && String(suiteScope || '').toLowerCase() === 'me';
-  const communicateEnabled = !landingDemo && !isMeScope;
+  const communicateEnabled = !isMeScope;
   const isSuiteOverview =
     suiteLayout &&
     ['communicate', 'collaborate'].includes(String(suiteScope || '').toLowerCase());
@@ -330,7 +327,7 @@ function DashboardPage({
 
   const dashboardQueryErrorNotifiedRef = useRef(false);
   useEffect(() => {
-    if (landingDemo || isMeScope) return;
+    if (isMeScope) return;
     // Suite overview hiển thị lỗi summary inline (có retry) — không toast trùng.
     const summaryFailed = !suiteLayout && summaryQuery.isError && summaryQuery.error;
     const failedQuery =
@@ -343,7 +340,6 @@ function DashboardPage({
     dashboardQueryErrorNotifiedRef.current = true;
     toast.error(resolveApiErrorMessage(failedQuery, { t, fallback: t('errors.generic') }));
   }, [
-    landingDemo,
     isMeScope,
     suiteLayout,
     summaryQuery.isError,
@@ -354,7 +350,7 @@ function DashboardPage({
   ]);
 
   useEffect(() => {
-    if (!suiteLayout || landingDemo || isMeScope) return;
+    if (!suiteLayout || isMeScope) return;
     const overviewPaths = new Set([
       '/communicate/overview',
       '/company/overview',
@@ -366,10 +362,10 @@ function DashboardPage({
     } else {
       window.scrollTo(0, 0);
     }
-  }, [location.pathname, suiteLayout, landingDemo, isMeScope, t]);
+  }, [location.pathname, suiteLayout, isMeScope, t]);
 
   useEffect(() => {
-    if (landingDemo || isMeScope) return undefined;
+    if (isMeScope) return undefined;
 
     /** Chỉ refresh list thông báo / messages — không refetch dashboard/me (tránh double TTFB). */
     const softRefreshNotifySurfaces = () => {
@@ -405,7 +401,7 @@ function DashboardPage({
       off('notification:unread_updated', handleUnreadUpdated);
       window.removeEventListener(NOTIFICATIONS_REFRESH_EVENT, softRefreshNotifySurfaces);
     };
-  }, [landingDemo, isMeScope, on, off, queryClient, refetchNotifications]);
+  }, [isMeScope, on, off, queryClient, refetchNotifications]);
 
   const displayName =
     user?.fullName ||
@@ -426,55 +422,15 @@ function DashboardPage({
   };
 
   useEffect(() => {
-    if (landingDemo) return;
     // Chỉ hiển thị modal chào khi vừa đăng nhập / lần đầu vào web trong phiên này
     const seen = localStorage.getItem('vh_seen_welcome');
     if (!seen) {
       setShowWelcome(true);
       localStorage.setItem('vh_seen_welcome', '1');
     }
-  }, [landingDemo]);
+  }, []);
 
   useEffect(() => {
-    if (landingDemo && demoVariant === 'tasks') {
-      setActiveFilter('tasks');
-    }
-  }, [landingDemo, demoVariant]);
-
-  useEffect(() => {
-    if (landingDemo) {
-      setMetrics({
-        loading: false,
-        orgCount: 0,
-        friendsTotal: 0,
-        pendingCount: 0,
-        unread: 0,
-        taskDone: 0,
-        activeVoiceMeetings: 0,
-        pendingApprovals: 0,
-        communicationCount: 0,
-        totalMembers: 0,
-        onTimeRate: 0,
-        avgResponseMinutes: 0,
-        overdue: 0,
-        dueThisWeek: 0,
-        myOpen: 0,
-        myOverdue: 0,
-        myDueThisWeek: 0,
-        openCount: 0,
-        boards: [],
-        membershipRole: null,
-        structureRole: null,
-        organizationRoleKeys: [],
-        overdueItems: [],
-      });
-      setUpcomingMeetings([]);
-      setWorkspaceEntries([]);
-      setActivityDailyMap({});
-      setRecentDmContacts([]);
-      setRecentNotifications([]);
-      return;
-    }
     if (isMeScope) return;
     // KPI từ summary/orgs/notif — không chờ messages (heatmap/DM hydrate sau).
     if (!dashboardSourcesReady) return;
@@ -824,9 +780,7 @@ function DashboardPage({
   }, [
     currentUserKey,
     metricsTick,
-    landingDemo,
     isMeScope,
-    demoVariant,
     locale,
     t,
     dashboardSourcesReady,
@@ -1465,7 +1419,7 @@ function DashboardPage({
     [t, metrics.totalMembers, metrics.myOpen, metrics.overdue]
   );
 
-  const shellH = landingDemo ? 'min-h-[760px] h-[760px]' : 'h-screen';
+  const shellH = 'h-screen';
 
   const dashboardBody = isMeScope ? (
     <PersonalOverviewView onNavigate={navigate} />
@@ -1578,7 +1532,7 @@ function DashboardPage({
       {!suiteLayout && <ShellWaveBackdrop />}
       {!suiteLayout && (
         <div className="h-full shrink-0">
-          <NavigationSidebar landingDemo={landingDemo} />
+          <NavigationSidebar />
         </div>
       )}
 

@@ -51,6 +51,15 @@ const userAuthSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    /** Hash refresh vừa rotate — cho phép race/tab cũ trong cửa sổ ngắn. */
+    previousRefreshToken: {
+      type: String,
+      default: null,
+    },
+    previousRefreshTokenExpiresAt: {
+      type: Date,
+      default: null,
+    },
     isActive: {
       type: Boolean,
       default: false, // Chỉ active sau khi verify email
@@ -135,6 +144,8 @@ const userAuthSchema = new mongoose.Schema(
         delete ret.password;
         delete ret.refreshToken;
         delete ret.refreshTokenExpiresAt;
+        delete ret.previousRefreshToken;
+        delete ret.previousRefreshTokenExpiresAt;
         delete ret.emailVerificationToken;
         delete ret.emailVerificationExpiresAt;
         delete ret.emailChangeToken;
@@ -156,6 +167,8 @@ const userAuthSchema = new mongoose.Schema(
         delete ret.password;
         delete ret.refreshToken;
         delete ret.refreshTokenExpiresAt;
+        delete ret.previousRefreshToken;
+        delete ret.previousRefreshTokenExpiresAt;
         delete ret.emailVerificationToken;
         delete ret.emailVerificationExpiresAt;
         delete ret.emailChangeToken;
@@ -180,6 +193,7 @@ userAuthSchema.index({ email: 1 }, { unique: true, sparse: true });
 userAuthSchema.index({ emailBlindIndex: 1 }, { unique: true, sparse: true });
 userAuthSchema.index({ userId: 1 }, { unique: true, sparse: true });
 userAuthSchema.index({ refreshToken: 1 });
+userAuthSchema.index({ previousRefreshToken: 1 }, { sparse: true });
 
 /** Sai MK bao nhiêu lần thì soft-lock 15s. */
 const LOGIN_FAILS_BEFORE_SOFT_LOCK = Math.max(

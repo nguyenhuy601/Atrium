@@ -216,7 +216,7 @@ function saveIdMap(storageKey, value) {
   }
 }
 
-function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
+function FriendChatPage({ suiteLayout = false } = {}) {
   const { isDarkMode } = useTheme();
   const { t } = useAppStrings();
   const { locale } = useLocale();
@@ -310,7 +310,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
   const { user } = useAuth();
   const { outboundRinging, startOutboundRinging, clearOutboundRinging } = useFriendCallSession();
   const { emit, on, off, onlineUsers, connected: socketConnected } = useSocket();
-  useFriendChatPageFocus({ enabled: !landingDemo });
+  useFriendChatPageFocus({ enabled: true });
   /** Peer mở từ Directory org — hiện rail tạm nếu chưa có trong GET /friends (auto-friend trễ). */
   const [directoryOpenPeer, setDirectoryOpenPeer] = useState(null);
   useEffect(() => {
@@ -463,10 +463,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
 
   const startFriendCall = useCallback(
     async (media, peerIdOverride) => {
-      if (landingDemo) {
-        toast(t('friendChat.callVideoSoon'), { icon: '📞' });
-        return;
-      }
+
       const calleeId = String(peerIdOverride || selectedFriendId || '').trim();
       if (!calleeId) return;
       if (outboundRinging?.callId) {
@@ -499,7 +496,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         else toast.error(resolveApiErrorMessage(err, { t, fallback: t('friendChat.callStartFail') }));
       }
     },
-    [landingDemo, selectedFriendId, outboundRinging?.callId, friendProfiles, startOutboundRinging, t]
+    [selectedFriendId, outboundRinging?.callId, friendProfiles, startOutboundRinging, t]
   );
 
   const handleFriendCallBackFromLog = useCallback(
@@ -514,7 +511,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     [selectedFriendId, startFriendCall]
   );
 
-  const acceptedFriendsQuery = useFriendsList({ status: 'accepted', enabled: !landingDemo });
+  const acceptedFriendsQuery = useFriendsList({ status: 'accepted', enabled: true });
 
   const refreshFriendsCache = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: queryKeys.friends.all });
@@ -526,13 +523,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
   }, [acceptedFriendsQuery.data]);
 
   useEffect(() => {
-    if (landingDemo) {
-      setFriends([]);
-      setFriendsLoading(false);
-      setSelectedFriendId(null);
-      setMessages([]);
-      return;
-    }
+
     if (acceptedFriendsQuery.isError) {
       toast.error(
         resolveApiErrorMessage(acceptedFriendsQuery.error, t('friendChat.loadFriendsFail'))
@@ -544,7 +535,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     setFriends(mergedFriendsFromQuery);
     setFriendsLoading(acceptedFriendsQuery.isLoading);
   }, [
-    landingDemo,
     currentUserId,
     t,
     mergedFriendsFromQuery,
@@ -834,7 +824,6 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
 
   // Khi có danh sách bạn: tự chọn người đã nhắn gần nhất (không ghi đè nếu user đã chọn)
   useEffect(() => {
-    if (landingDemo) return;
     if (!currentUserId) return;
     if (friends.length === 0) {
       setSelectedFriendId(null);
@@ -881,7 +870,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
     return () => {
       cancelled = true;
     };
-  }, [friends, currentUserId, fetchLastDmActivity, landingDemo, pinnedFriendIds, t]);
+  }, [friends, currentUserId, fetchLastDmActivity, pinnedFriendIds, t]);
 
   const parseMessagesResponse = useCallback((resp) => {
     const page = parseMessageListPage(resp);
@@ -1068,11 +1057,10 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
   ]);
 
   useEffect(() => {
-    if (landingDemo) return;
     if (selectedFriendId) {
       loadMessages(selectedFriendId);
     }
-  }, [selectedFriendId, loadMessages, landingDemo]);
+  }, [selectedFriendId, loadMessages]);
 
   useEffect(() => {
     setDmMessageSearch('');
@@ -1082,7 +1070,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
   }, [selectedFriendId]);
 
   useEffect(() => {
-    if (!selectedFriendId || landingDemo) return undefined;
+    if (!selectedFriendId) return undefined;
     const key = `${DM_DRAFT_PREFIX}${selectedFriendId}`;
     const timer = setTimeout(() => {
       const trimmed = message.trim();
@@ -1094,10 +1082,9 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
       }
     }, 350);
     return () => clearTimeout(timer);
-  }, [message, selectedFriendId, landingDemo]);
+  }, [message, selectedFriendId]);
 
   const { notifyTyping, refreshUnread, armSendTimeout } = useFriendDmRealtime({
-    landingDemo,
     on,
     off,
     emit,
@@ -1155,7 +1142,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
 
   // Gửi tin nhắn qua socket-service (realtime) + optimistic UI
   const handleSend = async () => {
-    if (!selectedFriendId || !message.trim() || landingDemo) return;
+    if (!selectedFriendId || !message.trim()) return;
 
     const text = message.trim();
     const tempId = `temp-${Date.now()}`;
@@ -1278,7 +1265,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
   );
 
   useEffect(() => {
-    if (!selectedFriendId || landingDemo) return undefined;
+    if (!selectedFriendId) return undefined;
     const id = String(selectedFriendId);
     let cancelled = false;
     (async () => {
@@ -1305,7 +1292,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
       cancelled = true;
     };
     // dataUpdatedAt: refetch friends → làm mới avatar peer đang mở chat
-  }, [selectedFriendId, landingDemo, acceptedFriendsQuery.dataUpdatedAt]);
+  }, [selectedFriendId, acceptedFriendsQuery.dataUpdatedAt]);
 
   useEffect(() => {
     setMediaViewer({ open: false, index: 0 });
@@ -2899,7 +2886,7 @@ function FriendChatPage({ landingDemo = false, suiteLayout = false } = {}) {
         />
       ) : (
         <div className={chatShell}>
-          <NavigationSidebar landingDemo={landingDemo} />
+          <NavigationSidebar />
           <div className={chatInner}>
             {chatSidebar}
             <div className="flex min-h-0 min-w-0 flex-1 gap-2 overflow-hidden">

@@ -17,7 +17,6 @@
 import axios from 'axios';
 import { applyAuthHeader, removeToken } from '../utils/tokenStorage';
 import {
-  isAuthRefreshDisabled,
   isAuthRefreshRateLimited,
   tryRefreshAndRetry,
 } from '../utils/authRefresh';
@@ -25,11 +24,6 @@ import { mapAuthSessionMessageForLogout } from '../utils/authErrorMessages';
 import { extractApiErrorMeta, resolveApiErrorMessage } from '../utils/resolveApiErrorMessage';
 import { createTranslator } from '../locales/buildStrings.js';
 import { readStoredLocale } from '../utils/localeFormat.js';
-import { isAutoLogoutDisabled } from '../utils/devAuth';
-import {
-  isLandingEmbedWriteGuardActive,
-  isWriteHttpMethod,
-} from '../utils/landingEmbedMode';
 import { getBrowserFrontendOrigin, resolveApiBaseUrl } from '../utils/browserOrigin';
 import {
   ensureNetworkControllerStarted,
@@ -127,13 +121,6 @@ const api = axios.create({
 api.interceptors.request.use(
   // Success handler: modify config trước khi gửi
   (config) => {
-    if (isLandingEmbedWriteGuardActive() && isWriteHttpMethod(config.method)) {
-      const block = new Error('LANDING_EMBED_WRITE_BLOCKED');
-      block.code = 'LANDING_EMBED_WRITE_BLOCKED';
-      block.isLandingEmbedBlock = true;
-      return Promise.reject(block);
-    }
-
     const publicRoutes = [
       '/auth/register',
       '/auth/login',
@@ -210,10 +197,6 @@ api.interceptors.response.use(
   /* ----- ERROR HANDLER -----
      Response lỗi (status 400+, 500+, network error) */
   async (error) => {
-    if (error?.code === 'LANDING_EMBED_WRITE_BLOCKED' || error?.isLandingEmbedBlock) {
-      return Promise.reject(error);
-    }
-
     if (error?.code === 'NETWORK_OFFLINE' || error?.isNetworkOffline) {
       const t = apiT();
       const message = t('api.networkOffline') || t('api.networkError');
@@ -315,7 +298,7 @@ api.interceptors.response.use(
         return Promise.reject(buildRejectedError(error, 'errors.generic'));
       }
 
-      if (!isAuthRefreshDisabled() && !error.config?.skipAuthRefresh) {
+      if (!error.config?.skipAuthRefresh) {
         try {
           const retried = await tryRefreshAndRetry(error, api);
           if (retried !== null && retried !== undefined) {
@@ -335,11 +318,6 @@ api.interceptors.response.use(
       console.error('[API] 401 Unauthorized:', { message, url: error.config?.url, data: error.response?.data });
       const userFacing401 = mapAuthSessionMessageForLogout(errorCode || message, readStoredLocale());
       toast.error(userFacing401, { duration: 4000 });
-
-      if (isAutoLogoutDisabled()) {
-        console.warn('[API] VITE_DISABLE_AUTO_LOGOUT: bỏ qua xóa token và redirect /login (chỉ debug).');
-        return Promise.reject(buildRejectedError(error, 'authSession.sessionExpired'));
-      }
 
       // Trì hoãn redirect 2s để user đọc được toast và có thể mở console xem chi tiết
       setTimeout(() => {

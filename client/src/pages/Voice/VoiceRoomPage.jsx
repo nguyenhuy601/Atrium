@@ -399,7 +399,7 @@ function hasPermissionAction(permissions, resource, action) {
   });
 }
 
-function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
+function VoiceRoomPage({ suiteLayout = false } = {}) {
   const navigate = useNavigate();
   const location = useLocation();
   const { roomId } = useParams();
@@ -710,10 +710,7 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
   }, [currentUserId]);
 
   useEffect(() => {
-    if (landingDemo) {
-      setVoiceFriends([]);
-      return;
-    }
+
     let cancelled = false;
     friendService
       .getFriends()
@@ -742,7 +739,7 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
     return () => {
       cancelled = true;
     };
-  }, [landingDemo]);
+  }, []);
 
   useEffect(() => {
     const kind = searchParams.get('kind');
@@ -866,7 +863,6 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
 
   /** URL cũ /voice/friend-1on1-*?callId=… → modal 1-1 trên chat, không lobby VoiceRoom */
   useEffect(() => {
-    if (landingDemo) return;
     const callId = String(searchParams.get('callId') || '').trim();
     const room = String(safeRoomId || '').trim();
     if (!callId || !room.startsWith('friend-1on1-')) return;
@@ -884,7 +880,6 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
     });
     navigate('/communicate/chat/friends', { replace: true });
   }, [
-    landingDemo,
     safeRoomId,
     searchParams,
     friendCallSession?.callId,
@@ -1518,7 +1513,6 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
   }, []);
 
   const loadLobbyMeetings = useCallback(async () => {
-    if (landingDemo) return;
     try {
       const res = await api.get('/meetings', {
         params: { mine: '1', limit: MEETING_HISTORY_MAX_ITEMS },
@@ -1530,7 +1524,7 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
     } catch {
       setLobbyMeetings([]);
     }
-  }, [landingDemo]);
+  }, []);
 
   const resetAfterRoomExit = useCallback(() => {
     clearActiveVoiceSession();
@@ -2256,7 +2250,7 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
   const leaveRoom = async () => {
     try {
       const friendCallId = searchParams.get('callId');
-      if (friendCallId && !landingDemo) {
+      if (friendCallId) {
         try {
           await api.post(`/voice/calls/${encodeURIComponent(friendCallId)}/end`);
         } catch {
@@ -2393,7 +2387,6 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
   }, [safeRoomId]);
 
   useEffect(() => {
-    if (landingDemo) return undefined;
     if (!safeRoomId) {
       setViewStage('home');
       setPrejoinMode(null);
@@ -2461,7 +2454,7 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
     return () => {
       cancelled = true;
     };
-  }, [safeRoomId, searchParams, landingDemo, currentUserId]);
+  }, [safeRoomId, searchParams, currentUserId]);
 
   useEffect(() => {
     return () => {
@@ -2474,7 +2467,7 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
 
   /** Sau F5: tự vào lại phòng nếu session còn trong grace period server. */
   useEffect(() => {
-    if (landingDemo || voiceRestoreAttemptedRef.current) return undefined;
+    if (voiceRestoreAttemptedRef.current) return undefined;
     if (!safeRoomId || !currentUserId) return undefined;
     if (searchParams.get('join') === '1') return undefined;
 
@@ -2522,10 +2515,9 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
 
     return undefined;
     // initVoiceRoom: stable enough; chỉ chạy một lần nhờ voiceRestoreAttemptedRef
-  }, [safeRoomId, currentUserId, landingDemo, searchParams, user]);
+  }, [safeRoomId, currentUserId, searchParams, user]);
 
   useEffect(() => {
-    if (landingDemo) return;
     const activeRemoteKeys = new Set();
     participants.forEach((participant) => {
       const key = `remote:${participant.socketId}`;
@@ -2545,21 +2537,19 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
         stopAudioLevelMonitor(key);
       }
     }
-  }, [participants, landingDemo]);
+  }, [participants]);
 
   useEffect(() => {
-    if (landingDemo) return undefined;
     const prejoinActive = createMeetingModalOpen || viewStage === 'prejoin';
     if (!prejoinActive) return undefined;
     startPrejoinPreview(prejoinAudioEnabled, prejoinVideoEnabled);
     return () => {
       stopPrejoinPreview();
     };
-  }, [createMeetingModalOpen, viewStage, prejoinAudioEnabled, prejoinVideoEnabled, landingDemo]);
+  }, [createMeetingModalOpen, viewStage, prejoinAudioEnabled, prejoinVideoEnabled]);
 
   /** Đảm bảo gán lại stream sau khi vào phòng (ref mount / StrictMode / re-render). */
   useEffect(() => {
-    if (landingDemo) return;
     if (viewStage !== 'inRoom') return;
     if (!hasLocalVideoTrack || isCameraOff) return;
     const stream = mediasoupRef.current.localStream;
@@ -2571,7 +2561,7 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
       el.srcObject = stream;
       el.play?.().catch(() => {});
     }
-  }, [viewStage, hasLocalVideoTrack, isCameraOff, joining, landingDemo]);
+  }, [viewStage, hasLocalVideoTrack, isCameraOff, joining]);
 
   const handleNewMeeting = () => {
     if (!canCreateVoiceRoom) {
@@ -2645,11 +2635,11 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
   );
 
   useEffect(() => {
-    if (landingDemo || viewStage !== 'home') return undefined;
+    if (viewStage !== 'home') return undefined;
     loadLobbyMeetings();
     const timer = setInterval(loadLobbyMeetings, 30000);
     return () => clearInterval(timer);
-  }, [landingDemo, viewStage, loadLobbyMeetings]);
+  }, [viewStage, loadLobbyMeetings]);
 
   const lobbyActiveCount = useMemo(
     () => lobbyRooms.filter((room) => room.active).length,
@@ -3245,7 +3235,7 @@ function VoiceRoomPage({ landingDemo = false, suiteLayout = false } = {}) {
           : `flex h-screen max-h-[100dvh] overflow-hidden ${isDarkMode ? 'bg-[#050810]' : appShellBg(false)}`
       }
     >
-      {!suiteLayout && <NavigationSidebar landingDemo={landingDemo} />}
+      {!suiteLayout && <NavigationSidebar />}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {viewStage !== 'inRoom' ? (
           suiteLayout && viewStage === 'home' ? (

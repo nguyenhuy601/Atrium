@@ -2,13 +2,15 @@
  * Accordion / submenu open-close — CSS grid-rows (không đo height JS).
  * Dùng cho menu suite sidebar (Projects parents, Admin sections, …).
  */
-export default function NavCollapse({ open, children, className = '', id }) {
+export default function NavCollapse({ open, children, className = '', id, style, ...rest }) {
   return (
     <div
       id={id}
+      style={style}
       className={`vh-nav-collapse vh-motion-respect ${className}`.trim()}
       data-open={open ? 'true' : 'false'}
       aria-hidden={!open}
+      {...rest}
     >
       <div className="vh-nav-collapse-inner">
         <div className="vh-nav-collapse-content">{children}</div>

@@ -6,7 +6,7 @@
 import { WHAT_MONITOR_CONFIG } from './WHAT_MONITOR_CONFIG.js';
 import { getWhatStatusCopy, resolveActivityLabelKey } from './whatMonitorStatusCopy.js';
 
-/** Macro catalog — mirrors Phase1AiRequirementProgress / APS pipelineProgress */
+/** Macro catalog — mirrors APS pipelineProgress steps */
 export const WHAT_MACRO_STEPS = Object.freeze([
   {
     step: 1,

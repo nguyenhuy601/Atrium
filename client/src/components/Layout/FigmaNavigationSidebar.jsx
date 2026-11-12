@@ -11,7 +11,6 @@ import {
   LayoutDashboard,
   MessageCircle,
   Mic,
-  Shield,
 } from 'lucide-react';
 import SidebarPositionFooter from './SidebarPositionFooter';
 import { Link, useLocation } from 'react-router-dom';
@@ -56,7 +55,6 @@ import {
   FIGMA_SIDEBAR_COLLAPSED,
   FIGMA_SIDEBAR_EXPANDED,
   FIGMA_SIDEBAR_NAV,
-  FIGMA_SIDEBAR_SECTION_LABEL,
   FIGMA_SIDEBAR_SUITE_STRIP,
   SUITE_COLORS,
   figmaNavItemBg,
@@ -242,7 +240,6 @@ function segmentFromProp(suiteProp) {
 
 export default function FigmaNavigationSidebar({
   suite: suiteProp = 'communicate',
-  landingDemo = false,
   contextSwitch = null,
 }) {
   const [collapsed, setCollapsed] = useState(() => {
@@ -280,7 +277,7 @@ export default function FigmaNavigationSidebar({
   const { unreadCount } = useNotificationBadge({
     scope: suiteProp === 'collaborate' || suiteProp === 'company' ? 'organization' : 'personal',
     organizationId: activeOrgId,
-    enabled: !landingDemo,
+    enabled: true,
   });
   useEffect(() => {
     closeMobileNav();
@@ -362,7 +359,7 @@ export default function FigmaNavigationSidebar({
           icon: Bell,
           label: t('nav.notifications'),
           path: '/communicate/notifications',
-          badge: landingDemo ? 0 : unreadCount,
+          badge: unreadCount,
         },
         {
           key: 'friends',
@@ -379,17 +376,6 @@ export default function FigmaNavigationSidebar({
           badge: 0,
         },
       ];
-      if (showManageSuite) {
-        items.push({
-          key: 'company-admin',
-          icon: Shield,
-          label: adminNavLabel,
-          externalNavigate: true,
-          onClick: () => navigateToSuite(SUITE.MANAGE, { path: adminNavPath }),
-          path: adminNavPath,
-          badge: 0,
-        });
-      }
       return items;
     }
     if (suiteProp === 'collaborate' || suiteProp === 'company') {
@@ -430,17 +416,6 @@ export default function FigmaNavigationSidebar({
             badge: 0,
           },
         ];
-        if (showManageSuite) {
-          items.push({
-            key: 'company-admin',
-            icon: Shield,
-            label: adminNavLabel,
-            externalNavigate: true,
-            onClick: () => navigateToSuite(SUITE.MANAGE, { path: adminNavPath }),
-            path: adminNavPath,
-            badge: 0,
-          });
-        }
         return items;
       }
       const items = [
@@ -502,24 +477,12 @@ export default function FigmaNavigationSidebar({
           badge: 0,
         });
       }
-      if (showManageSuite) {
-        items.push({
-          key: 'company-admin',
-          icon: Shield,
-          label: adminNavLabel,
-          externalNavigate: true,
-          onClick: () => navigateToSuite(SUITE.MANAGE, { path: adminNavPath }),
-          path: adminNavPath,
-          badge: 0,
-        });
-      }
       return items;
     }
     return [];
   }, [
     suiteProp,
     t,
-    landingDemo,
     unreadCount,
     activeOrgId,
     spaceDeptId,
@@ -527,10 +490,6 @@ export default function FigmaNavigationSidebar({
     isTeamLevel,
     isSingleCompany,
     showApprovalInbox,
-    showManageSuite,
-    adminNavLabel,
-    adminNavPath,
-    navigateToSuite,
   ]);
 
   const visibleNavItems = useMemo(
@@ -768,10 +727,6 @@ export default function FigmaNavigationSidebar({
           ? cloneElement(contextSwitch, { collapsed: railCollapsed })
           : contextSwitch
         : null}
-
-      {!railCollapsed && visibleNavItems.length > 0 ? (
-        <div className={FIGMA_SIDEBAR_SECTION_LABEL}>{t('nav.mainMenu')}</div>
-      ) : null}
 
       <nav className={FIGMA_SIDEBAR_NAV}>
         {visibleNavItems.map((item) => (

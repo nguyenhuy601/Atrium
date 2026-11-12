@@ -29,11 +29,13 @@ export function useAdminActionGate(orgIdProp) {
   /** @returns {boolean} true nếu được phép tiếp tục */
   const assertOrToast = useCallback(
     (requiredGrant) => {
+      // Grants chưa về: không toast "không có quyền" giả — tránh race khi user bấm sớm.
+      if (grantsLoading) return false;
       if (can(requiredGrant)) return true;
       toast.error(t('adminOrg.grantDenied'));
       return false;
     },
-    [can, t]
+    [can, grantsLoading, t]
   );
 
   return {

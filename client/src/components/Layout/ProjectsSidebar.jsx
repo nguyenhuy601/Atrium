@@ -459,7 +459,7 @@ function NavItem({
   );
 }
 
-export default function ProjectsSidebar({ landingDemo = false } = {}) {
+export default function ProjectsSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [showSuitePicker, setShowSuitePicker] = useState(false);
   const [expandedNavParents, setExpandedNavParents] = useState(() => new Set(['planning-resources']));
@@ -943,11 +943,9 @@ export default function ProjectsSidebar({ landingDemo = false } = {}) {
           </div>
         ) : null}
 
-        {!railCollapsed && (
-          <div className={FIGMA_SIDEBAR_SECTION_LABEL}>
-            {projectId ? t('nav.mainMenu') : t('nav.projectsPick')}
-          </div>
-        )}
+        {!railCollapsed && !projectId ? (
+          <div className={FIGMA_SIDEBAR_SECTION_LABEL}>{t('nav.projectsPick')}</div>
+        ) : null}
 
         <nav className={FIGMA_SIDEBAR_NAV} aria-busy={Boolean(pendingModule) || undefined}>
           {!projectId

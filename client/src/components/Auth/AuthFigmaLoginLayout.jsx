@@ -17,19 +17,10 @@ import {
 function AuthFigmaLoginLayout({
   aside,
   children,
-  landingDemo = false,
   nightOwl = false,
   showcaseAside = false,
 }) {
-  const showNight = Boolean(nightOwl) && !landingDemo;
-
-  if (landingDemo) {
-    return (
-      <div className="min-h-0 w-full bg-background">
-        <div className="mx-auto w-full max-w-[380px]">{children}</div>
-      </div>
-    );
-  }
+  const showNight = Boolean(nightOwl);
 
   if (showcaseAside) {
     return (

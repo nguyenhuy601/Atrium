@@ -25,7 +25,7 @@ const MEMBER_ORGANIZATION_ROLE_KEY = 'MEMBER';
 
 /**
  * Legacy / lowercase / alias → canonical UPPER key.
- * Do NOT map ORG_OWNER → DIRECTOR (ownership stays separate).
+ * ORG_OWNER / ORG_ADMIN gộp vào DIRECTOR (Cấu hình tổ chức chỉ Giám đốc).
  */
 const LEGACY_ORGANIZATION_ROLE_KEY_ALIASES = Object.freeze({
   department_manager: 'DEPARTMENT_MANAGER',
@@ -40,6 +40,8 @@ const LEGACY_ORGANIZATION_ROLE_KEY_ALIASES = Object.freeze({
   org_member: 'MEMBER',
   organization_administrator: 'IT_ADMIN',
   it_admin: 'IT_ADMIN',
+  org_owner: 'DIRECTOR',
+  org_admin: 'DIRECTOR',
 });
 
 function normalizeOrgRoleKeyLookup(rawKey) {
@@ -77,7 +79,13 @@ function organizationRoleLookupCodes(canonicalOrRaw) {
   const aliases = Object.entries(LEGACY_ORGANIZATION_ROLE_KEY_ALIASES)
     .filter(([, mapped]) => mapped === canonical)
     .map(([legacy]) => legacy);
-  return [...new Set([canonical, lower, ...aliases].filter(Boolean))];
+  // DB có thể lưu alias UPPER (ORG_OWNER) hoặc lowercase — đưa cả hai vào $in.
+  const aliasForms = aliases.flatMap((a) => {
+    const raw = String(a || '').trim();
+    if (!raw) return [];
+    return [raw, raw.toLowerCase(), raw.toUpperCase()];
+  });
+  return [...new Set([canonical, lower, ...aliasForms].filter(Boolean))];
 }
 
 function getOrganizationRoleByKey(key) {

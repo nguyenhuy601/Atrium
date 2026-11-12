@@ -11,7 +11,6 @@ const SEND_ACK_MS = 12000;
  * Socket + mark-read + typing cho FriendChatPage.
  */
 export function useFriendDmRealtime({
-  landingDemo,
   on,
   off,
   emit,
@@ -47,7 +46,7 @@ export function useFriendDmRealtime({
   );
 
   const refreshUnread = useCallback(async () => {
-    if (landingDemo || !currentUserId) return;
+    if (!currentUserId) return;
     try {
       const resp = await dmMessageService.getUnreadByPeer();
       const data = dmMessageService.unwrap(resp);
@@ -55,11 +54,11 @@ export function useFriendDmRealtime({
     } catch {
       /* ignore */
     }
-  }, [landingDemo, currentUserId, setUnreadByPeer]);
+  }, [currentUserId, setUnreadByPeer]);
 
   const markConversationRead = useCallback(
     async (peerId) => {
-      if (landingDemo || !peerId || markReadInFlightRef.current) return;
+      if (!peerId || markReadInFlightRef.current) return;
       markReadInFlightRef.current = true;
       try {
         await dmMessageService.markConversationRead(peerId);
@@ -82,18 +81,18 @@ export function useFriendDmRealtime({
         markReadInFlightRef.current = false;
       }
     },
-    [landingDemo, myIdStr, setMessages, setUnreadByPeer]
+    [myIdStr, setMessages, setUnreadByPeer]
   );
 
   const emitTypingStart = useCallback(() => {
-    if (!selectedFriendId || landingDemo) return;
+    if (!selectedFriendId) return;
     emit('friend:typing_start', { receiverId: selectedFriendId });
-  }, [emit, landingDemo, selectedFriendId]);
+  }, [emit, selectedFriendId]);
 
   const emitTypingStop = useCallback(() => {
-    if (!selectedFriendId || landingDemo) return;
+    if (!selectedFriendId) return;
     emit('friend:typing_stop', { receiverId: selectedFriendId });
-  }, [emit, landingDemo, selectedFriendId]);
+  }, [emit, selectedFriendId]);
 
   const notifyTyping = useCallback(() => {
     emitTypingStart();
@@ -109,14 +108,13 @@ export function useFriendDmRealtime({
   }, [refreshUnread]);
 
   useEffect(() => {
-    if (landingDemo || !selectedFriendId) return undefined;
+    if (!selectedFriendId) return undefined;
     const peer = String(selectedFriendId);
     const timer = setTimeout(() => markConversationRead(peer), 400);
     return () => clearTimeout(timer);
-  }, [landingDemo, selectedFriendId, markConversationRead]);
+  }, [selectedFriendId, markConversationRead]);
 
   useEffect(() => {
-    if (landingDemo) return;
     if (!on || !off || !myIdStr) return;
 
     const bumpLastDm = (m) => {
@@ -276,9 +274,7 @@ export function useFriendDmRealtime({
       off('friend:message_recalled', handleMessageRecalled);
       off('friend:message_deleted', handleMessageDeleted);
     };
-  }, [
-    landingDemo,
-    on,
+  }, [on,
     off,
     myIdStr,
     selectedFriendId,

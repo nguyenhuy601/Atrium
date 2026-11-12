@@ -72,21 +72,28 @@ async function tryLazyEnsureFriendship(senderId, peerId) {
   }
 }
 
-async function fetchRelationship({ peerId, authorizationHeader, senderId }) {
-  const fid = String(peerId || '').trim();
+/**
+ * Headers cho GET relationship (S2S).
+ * Ưu tiên gateway trust khi đã có senderId — tránh 401 dm_auth_required khi forward Bearer.
+ */
+function buildDmRelationshipHeaders({ authorizationHeader, senderId } = {}) {
   const sid = String(senderId || '').trim();
   const auth = authorizationHeader && String(authorizationHeader).trim();
-  const headers = {};
-  if (auth && auth.toLowerCase().startsWith('bearer ')) {
-    headers.Authorization = auth;
-  } else if (sid) {
-    Object.assign(headers, buildTrustedGatewayHeaders(sid));
-  } else {
-    const err = new Error('Authentication required');
-    err.statusCode = 401;
-    err.code = 'dm_auth_required';
-    throw err;
+  if (sid) {
+    return buildTrustedGatewayHeaders(sid);
   }
+  if (auth && auth.toLowerCase().startsWith('bearer ')) {
+    return { Authorization: auth };
+  }
+  const err = new Error('Authentication required');
+  err.statusCode = 401;
+  err.code = 'dm_auth_required';
+  throw err;
+}
+
+async function fetchRelationship({ peerId, authorizationHeader, senderId }) {
+  const fid = String(peerId || '').trim();
+  const headers = buildDmRelationshipHeaders({ authorizationHeader, senderId });
 
   const url = `${FRIEND_SERVICE_URL}/api/friends/${encodeURIComponent(fid)}/relationship`;
   const resp = await axios.get(url, {
@@ -157,6 +164,7 @@ function dmErrorToJson(err) {
 
 module.exports = {
   assertDmCanSend,
+  buildDmRelationshipHeaders,
   dmErrorToJson,
   isLazyEnsureEnabled,
   clearRelationshipCache,

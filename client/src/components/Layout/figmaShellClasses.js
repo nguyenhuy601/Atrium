@@ -1,13 +1,15 @@
 /** Figma Enterprise shell tokens — sidebar + top header */
 
+import { ADMIN_SUITE_ACCENT } from '../../config/adminSuiteTokens';
+
 export const SUITE_COLORS = {
   communicate: '#3B82F6',
   collaborate: '#10B981',
   company: '#10B981',
   projects: '#8B5CF6',
   me: '#F59E0B',
-  manage: '#DC2626',
-  admin: '#DC2626',
+  manage: ADMIN_SUITE_ACCENT,
+  admin: ADMIN_SUITE_ACCENT,
 };
 
 export const SUITE_SEGMENT = {

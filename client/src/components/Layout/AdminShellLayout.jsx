@@ -15,6 +15,7 @@ import FetchBar from '../../motion/primitives/FetchBar';
 import { FIGMA_SHELL_BODY, FIGMA_SHELL_MAIN, FIGMA_SHELL_ROOT } from './figmaShellClasses';
 import { getDefaultPathForSuite, SUITE, writeStoredSuite } from '../../utils/suitePathUtils';
 import { toManageRoutePath } from '../../utils/adminManagePath';
+import { adminSuiteAccentVars } from '../../config/adminSuiteTokens';
 
 /**
  * Phân hệ Admin hạ tầng (`/admin`) — chỉ systemRole=admin.
@@ -59,7 +60,7 @@ function AdminShellLayoutInner() {
   writeStoredSuite(SUITE.ADMIN);
 
   return (
-    <div className={FIGMA_SHELL_ROOT}>
+    <div className={FIGMA_SHELL_ROOT} style={adminSuiteAccentVars()}>
       <TopHeader />
       <ShellRoleBanner />
       <NetworkOfflineBanner />

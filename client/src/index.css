@@ -83,6 +83,14 @@
   --sidebar-border: rgba(255, 255, 255, 0.06);
   --sidebar-ring: #3b82f6;
 
+  /* Suite manage/admin chrome — sync client/src/config/adminSuiteTokens.js */
+  --admin-suite-accent: #2563eb;
+  --admin-suite-accent-hover: #1d4ed8;
+  --admin-suite-accent-soft: rgba(37, 99, 235, 0.14);
+  --admin-suite-accent-border: rgba(37, 99, 235, 0.35);
+  --admin-control-radius: var(--radius-md);
+  --admin-control-focus: var(--ring);
+
   --success: #10b981;
   --success-bg: rgba(16, 185, 129, 0.1);
   --warning: #f59e0b;
@@ -155,6 +163,12 @@ html.light {
   --sidebar-accent-foreground: #93c5fd;
   --sidebar-border: rgba(255, 255, 255, 0.06);
   --sidebar-ring: #3b82f6;
+  --admin-suite-accent: #2563eb;
+  --admin-suite-accent-hover: #1d4ed8;
+  --admin-suite-accent-soft: rgba(37, 99, 235, 0.14);
+  --admin-suite-accent-border: rgba(37, 99, 235, 0.35);
+  --admin-control-radius: var(--radius-md);
+  --admin-control-focus: var(--ring);
   --success: #10b981;
   --success-bg: rgba(16, 185, 129, 0.1);
   --warning: #f59e0b;
@@ -223,6 +237,12 @@ html.dark {
   --sidebar-accent-foreground: #93c5fd;
   --sidebar-border: rgba(255, 255, 255, 0.06);
   --sidebar-ring: #60a5fa;
+  --admin-suite-accent: #60a5fa;
+  --admin-suite-accent-hover: #3b82f6;
+  --admin-suite-accent-soft: rgba(96, 165, 250, 0.16);
+  --admin-suite-accent-border: rgba(96, 165, 250, 0.4);
+  --admin-control-radius: var(--radius-md);
+  --admin-control-focus: var(--ring);
   --success: #34d399;
   --success-bg: rgba(52, 211, 153, 0.1);
   --warning: #fbbf24;

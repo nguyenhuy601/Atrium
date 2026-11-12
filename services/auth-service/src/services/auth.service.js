@@ -10,7 +10,15 @@ const {
 const { generateAccessToken, generateOpaqueRefreshToken } = require('../config/jwt');
 const { bumpTokenVersion, accessTokenPayload } = require('../utils/tokenVersion');
 const { cacheTokenVersion } = require('@enterprise/shared/utils/tokenVersionAuth');
-const { hashRefreshToken, refreshTokenMatches } = require('../utils/refreshTokenHash');
+const {
+  hashRefreshToken,
+  refreshTokenMatches,
+  previousRefreshTokenMatches,
+} = require('../utils/refreshTokenHash');
+const {
+  previousRefreshGraceMs,
+  previousRefreshStillValid,
+} = require('../utils/refreshTokenGrace');
 const {
   refreshTokenExpiresAtFromNow,
   refreshTokenRedisTtlSeconds,
@@ -34,6 +42,20 @@ function createServiceError(message, statusCode = 400, errorCode = 'AUTH_VALIDAT
   const err = new Error(message);
   err.statusCode = statusCode;
   err.errorCode = errorCode;
+  return err;
+}
+
+function createRefreshInvalidError(reason) {
+  const normalized = String(reason || 'invalid').trim() || 'invalid';
+  // Mismatch: race rotate — mã riêng để FE/BE không xóa cookie/marker còn hợp lệ.
+  const errorCode =
+    normalized === 'mismatch' ? 'AUTH_REFRESH_MISMATCH' : 'AUTH_REFRESH_INVALID';
+  const err = createServiceError(
+    'Phiên đăng nhập không hợp lệ hoặc đã hết hạn',
+    401,
+    errorCode
+  );
+  err.refreshFailureReason = normalized;
   return err;
 }
 const MAX_LOGIN_PASSWORD_LENGTH = 256;
@@ -112,6 +134,8 @@ class AuthService {
 
     userAuth.refreshToken = hashRefreshToken(refreshToken);
     userAuth.refreshTokenExpiresAt = refreshTokenExpiresAtFromNow();
+    userAuth.previousRefreshToken = null;
+    userAuth.previousRefreshTokenExpiresAt = null;
     await userAuth.save();
 
     const redis = getRedisClient();
@@ -148,7 +172,7 @@ class AuthService {
     };
   }
 
-  /** Rotate refresh token — không bump tv. */
+  /** Rotate refresh token — không bump tv. Giữ hash cũ trong grace để race không wipe session. */
   async rotateRefreshTokens(userAuth, plainEmail) {
     const payload = accessTokenPayload(userAuth, plainEmail);
     await cacheTokenVersion(userAuth.userId, payload.tv);
@@ -156,6 +180,11 @@ class AuthService {
     const accessToken = generateAccessToken(payload);
     const refreshToken = generateOpaqueRefreshToken();
 
+    const previousHash = String(userAuth.refreshToken || '').trim() || null;
+    userAuth.previousRefreshToken = previousHash;
+    userAuth.previousRefreshTokenExpiresAt = previousHash
+      ? new Date(Date.now() + previousRefreshGraceMs())
+      : null;
     userAuth.refreshToken = hashRefreshToken(refreshToken);
     userAuth.refreshTokenExpiresAt = refreshTokenExpiresAtFromNow();
     await userAuth.save();
@@ -429,7 +458,7 @@ class AuthService {
     try {
       const raw = String(refreshTokenRaw || '').trim();
       if (!raw) {
-        throw createServiceError('Phiên đăng nhập không hợp lệ hoặc đã hết hạn', 401, 'AUTH_REFRESH_INVALID');
+        throw createRefreshInvalidError('missing');
       }
 
       const hashed = hashRefreshToken(raw);
@@ -438,13 +467,31 @@ class AuthService {
       if (!userAuth) {
         userAuth = await UserAuth.findOne({ refreshToken: raw }).maxTimeMS(5000);
       }
-
-      if (!userAuth || userAuth.refreshTokenExpiresAt < new Date()) {
-        throw createServiceError('Phiên đăng nhập không hợp lệ hoặc đã hết hạn', 401, 'AUTH_REFRESH_INVALID');
+      // Race: request song song vẫn cầm token vừa bị rotate — chấp nhận trong grace.
+      if (!userAuth) {
+        userAuth = await UserAuth.findOne({
+          previousRefreshToken: hashed,
+          previousRefreshTokenExpiresAt: { $gt: new Date() },
+        }).maxTimeMS(5000);
       }
 
-      if (!refreshTokenMatches(userAuth, raw)) {
-        throw createServiceError('Phiên đăng nhập không hợp lệ hoặc đã hết hạn', 401, 'AUTH_REFRESH_INVALID');
+      if (!userAuth) {
+        throw createRefreshInvalidError('not_found');
+      }
+
+      if (userAuth.refreshTokenExpiresAt < new Date()) {
+        throw createRefreshInvalidError('expired');
+      }
+
+      const matchesCurrent = refreshTokenMatches(userAuth, raw);
+      const matchesPrevious =
+        !matchesCurrent &&
+        previousRefreshStillValid(userAuth) &&
+        previousRefreshTokenMatches(userAuth, raw);
+
+      if (!matchesCurrent && !matchesPrevious) {
+        // Không clear cookie — có thể race với rotate thành công trên cùng browser.
+        throw createRefreshInvalidError('mismatch');
       }
 
       const plainEmail = await hydrateAuthEmailDoc(userAuth);
@@ -465,6 +512,8 @@ class AuthService {
       if (userAuth) {
         userAuth.refreshToken = null;
         userAuth.refreshTokenExpiresAt = null;
+        userAuth.previousRefreshToken = null;
+        userAuth.previousRefreshTokenExpiresAt = null;
         await bumpTokenVersion(userAuth);
         await userAuth.save();
       }

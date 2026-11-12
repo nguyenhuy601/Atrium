@@ -19,6 +19,11 @@ import MotionPresence from '../../motion/primitives/MotionPresence';
 import { VH_MOTION_BTN, VH_MOTION_SPINNER } from '../../motion/classes';
 import { motionTransitionFast } from '../../motion/transitions';
 import ShellAccountMenu from './ShellAccountMenu';
+import {
+  ADMIN_SUITE_ACCENT,
+  ADMIN_SUITE_ACCENT_GLOW,
+  ADMIN_SUITE_ACCENT_HOVER,
+} from '../../config/adminSuiteTokens';
 
 function getSuiteMeta(t, adminSuiteNav) {
   const adminLabel = adminSuiteNav?.labelKey
@@ -80,20 +85,20 @@ function getSuiteMeta(t, adminSuiteNav) {
       shortLabel: adminLabel,
       sublabel: t('nav.suite.manage.sublabel'),
       Icon: Shield,
-      color: '#DC2626',
-      gradStart: '#B91C1C',
-      gradEnd: '#DC2626',
-      bgGlow: 'rgba(220,38,38,0.12)',
+      color: ADMIN_SUITE_ACCENT,
+      gradStart: ADMIN_SUITE_ACCENT_HOVER,
+      gradEnd: ADMIN_SUITE_ACCENT,
+      bgGlow: ADMIN_SUITE_ACCENT_GLOW,
     },
     [SUITE.ADMIN]: {
       label: adminLabel,
       shortLabel: adminLabel,
       sublabel: t('nav.suite.admin.sublabel'),
       Icon: Shield,
-      color: '#DC2626',
-      gradStart: '#B91C1C',
-      gradEnd: '#DC2626',
-      bgGlow: 'rgba(220,38,38,0.12)',
+      color: ADMIN_SUITE_ACCENT,
+      gradStart: ADMIN_SUITE_ACCENT_HOVER,
+      gradEnd: ADMIN_SUITE_ACCENT,
+      bgGlow: ADMIN_SUITE_ACCENT_GLOW,
     },
   };
 }

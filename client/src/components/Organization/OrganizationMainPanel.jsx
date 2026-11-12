@@ -532,7 +532,6 @@ function FigmaOrgChatComposer({
 }
 
 const OrganizationMainPanel = ({
-  landingDemo = false,
   workspaceTabView = 'chat',
   workspaceDocFiles = [],
   loadingWorkspaceDocuments = false,
@@ -2723,7 +2722,6 @@ const OrganizationMainPanel = ({
                     micDeviceId={orgMicId}
                     speakerDeviceId={orgSpeakerId}
                     speakerVolume={orgSpeakerVolume}
-                    landingDemo={landingDemo}
                     onConnectionStateChange={setVoiceConnectionState}
                     onAudioStateChange={setVoiceAudioState}
                     onRoomSessionEnd={onVoiceRoomSessionEnd}

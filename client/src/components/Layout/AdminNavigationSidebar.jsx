@@ -125,9 +125,13 @@ function AdminDomainPicker({ domains, selectedDomain, onSelect }) {
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-haspopup="listbox"
-        className="flex w-full items-center gap-2 rounded-lg border border-red-500/25 bg-[#0f0a12] py-2 pl-2.5 pr-2 text-left outline-none transition hover:border-red-500/40 focus:border-red-500/50 focus:ring-1 focus:ring-red-500/30"
+        className="flex w-full items-center gap-2 rounded-lg border bg-[#0f0a12] py-2 pl-2.5 pr-2 text-left outline-none transition focus:ring-1"
+        style={{
+          borderColor: 'var(--admin-suite-accent-border)',
+          boxShadow: open ? '0 0 0 1px var(--admin-suite-accent-border)' : undefined,
+        }}
       >
-        <Icon size={14} className="shrink-0 text-red-400" aria-hidden />
+        <Icon size={14} className="shrink-0" style={{ color: ADMIN_COLOR }} aria-hidden />
         <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium text-white/90">
           {selectedDomain ? t(selectedDomain.labelKey) : t('adminDomains.allDomains')}
         </span>
@@ -190,13 +194,22 @@ function AdminDomainPickerMenu({ open, domains, selectedDomain, onSelect, onClos
       <button
         type="button"
         aria-label={t('common.close')}
-        className="absolute inset-0 cursor-default bg-black/40"
+        className="absolute inset-0 cursor-default bg-black/20"
         onClick={onClose}
       />
       <motion.div
         role="listbox"
-        style={menuBox ? { top: menuBox.top, left: menuBox.left, width: menuBox.width } : undefined}
-        className="fixed z-[270] max-h-[min(16rem,42vh)] overflow-y-auto rounded-lg border border-red-500/30 bg-[#12080A] py-1 shadow-[0_12px_32px_rgba(0,0,0,0.65)]"
+        style={
+          menuBox
+            ? {
+                top: menuBox.top,
+                left: menuBox.left,
+                width: menuBox.width,
+                borderColor: 'var(--admin-suite-accent-border)',
+              }
+            : undefined
+        }
+        className="fixed z-[270] max-h-[min(16rem,42vh)] overflow-y-auto rounded-lg border bg-[#0b1220] py-1 shadow-[0_12px_32px_rgba(0,0,0,0.55)]"
         {...motionPopover}
       >
           {domains.map((domain) => {
@@ -214,13 +227,15 @@ function AdminDomainPickerMenu({ open, domains, selectedDomain, onSelect, onClos
                 }}
                 className={`flex w-full items-center gap-2 px-2.5 py-2 text-left text-[0.8125rem] transition duration-fast ease-enterprise motion-reduce:transition-none ${
                   active
-                    ? 'bg-red-500/20 font-medium text-red-100'
+                    ? 'font-medium text-white'
                     : 'text-white/80 hover:bg-white/[0.06] hover:text-white'
                 }`}
+                style={active ? { background: 'var(--admin-suite-accent-soft)' } : undefined}
               >
                 <DomainItemIcon
                   size={14}
-                  className={`shrink-0 ${active ? 'text-red-400' : 'text-white/45'}`}
+                  className="shrink-0"
+                  style={{ color: active ? ADMIN_COLOR : 'rgba(255,255,255,0.45)' }}
                   aria-hidden
                 />
                 <span className="truncate">{t(domain.labelKey)}</span>
@@ -249,7 +264,8 @@ function AdminNavItem({ item, collapsed, isActive, badge = 0, onNavigate, href }
       title={collapsed ? label : undefined}
     >
       <span
-        className={`h-[6px] w-[6px] shrink-0 rounded-full ${isActive ? 'bg-red-400' : 'bg-white/25'}`}
+        className="h-[6px] w-[6px] shrink-0 rounded-full"
+        style={{ background: isActive ? ADMIN_COLOR : 'rgba(255,255,255,0.25)' }}
         aria-hidden
       />
       {!collapsed ? (
@@ -313,7 +329,8 @@ function AdminNavActionGroup({ items, labelKey, collapsed, isActivePath, badgeFo
         title={collapsed ? label : undefined}
       >
         <span
-          className={`h-[6px] w-[6px] shrink-0 rounded-full ${hasActive ? 'bg-red-400' : 'bg-white/25'}`}
+          className="h-[6px] w-[6px] shrink-0 rounded-full"
+          style={{ background: hasActive ? ADMIN_COLOR : 'rgba(255,255,255,0.25)' }}
           aria-hidden
         />
         {!collapsed ? (
@@ -335,7 +352,8 @@ function AdminNavActionGroup({ items, labelKey, collapsed, isActivePath, badgeFo
           menuKey={`admin-rail-flyout-${listId}`}
           id={listId}
           role="navigation"
-          className="absolute left-full top-0 z-40 ml-1 min-w-[11rem] rounded-lg border border-red-500/30 bg-[#12080A] py-1 shadow-[0_12px_32px_rgba(0,0,0,0.65)]"
+          className="absolute left-full top-0 z-40 ml-1 min-w-[11rem] rounded-lg border bg-[#0b1220] py-1 shadow-[0_12px_32px_rgba(0,0,0,0.55)]"
+          style={{ borderColor: 'var(--admin-suite-accent-border)' }}
         >
           {items.map((item) => (
             <AdminNavItem
@@ -350,7 +368,12 @@ function AdminNavActionGroup({ items, labelKey, collapsed, isActivePath, badgeFo
           ))}
         </MotionMenu>
       ) : (
-        <NavCollapse open={open} id={listId} className="mb-1 ml-1.5 border-l border-red-500/20 pl-1">
+        <NavCollapse
+          open={open}
+          id={listId}
+          className="mb-1 ml-1.5 border-l pl-1"
+          style={{ borderColor: 'var(--admin-suite-accent-border)' }}
+        >
           <div className="mt-0.5 space-y-px">
             {items.map((item) => (
               <AdminNavItem
@@ -433,10 +456,9 @@ function AdminNavSectionGroup({
           onClick={onToggle}
           aria-expanded={isExpanded}
           className={`flex w-full items-center justify-between gap-2 rounded-[7px] px-2.5 py-2 text-left transition ${
-            hasActive
-              ? 'bg-red-500/15 text-red-200'
-              : 'text-white/50 hover:bg-white/[0.05] hover:text-white/75'
+            hasActive ? 'text-white' : 'text-white/50 hover:bg-white/[0.05] hover:text-white/75'
           }`}
+          style={hasActive ? { background: 'var(--admin-suite-accent-soft)' } : undefined}
         >
           <span className="text-[0.625rem] font-bold uppercase tracking-[0.08em]">{t(section.labelKey)}</span>
           <ChevronDown
@@ -448,7 +470,8 @@ function AdminNavSectionGroup({
       ) : null}
       <NavCollapse
         open={Boolean(isExpanded && !collapsed)}
-        className="mb-1 ml-1.5 border-l border-red-500/20 pl-1"
+        className="mb-1 ml-1.5 border-l pl-1"
+        style={{ borderColor: 'var(--admin-suite-accent-border)' }}
       >
         <div className="mt-0.5 space-y-px">
           {renderNavRows({ items: section.items, collapsed, isActivePath, badgeForItem, onNavigate, hrefOf })}
@@ -661,8 +684,11 @@ export default function AdminNavigationSidebar({ surface = 'admin' } = {}) {
         />
       ) : null}
       <div
-        className={`${FIGMA_SIDEBAR} ${widthClass} fixed inset-y-0 left-0 z-[250] transform border-r-[#EF444422] transition-transform duration-200 ease-enterprise lg:relative lg:z-30 lg:translate-x-0 ${sidebarTranslate}`}
-        style={{ background: 'linear-gradient(180deg, #12080A 0%, #0D0D1A 55%, #0A0A14 100%)' }}
+        className={`${FIGMA_SIDEBAR} ${widthClass} fixed inset-y-0 left-0 z-[250] transform border-r transition-transform duration-200 ease-enterprise lg:relative lg:z-30 lg:translate-x-0 ${sidebarTranslate}`}
+        style={{
+          borderRightColor: 'var(--admin-suite-accent-border)',
+          background: 'linear-gradient(180deg, #0b1220 0%, #0D0D1A 55%, #0A0A14 100%)',
+        }}
       >
         <div className={`relative ${FIGMA_SIDEBAR_SUITE_STRIP}`}>
           <div

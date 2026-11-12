@@ -153,7 +153,6 @@ export default function OrganizationVoiceChannelView({
   channelLabel = '',
   isDarkMode,
   canVoice,
-  landingDemo = false,
   onConnectionStateChange,
   onAudioStateChange,
   onControlActionsReady,
@@ -312,7 +311,7 @@ export default function OrganizationVoiceChannelView({
   };
 
   useEffect(() => {
-    if (!joinedAtMs || landingDemo || !channelId || !canVoice) {
+    if (!joinedAtMs || !channelId || !canVoice) {
       setElapsedSec(0);
       return undefined;
     }
@@ -321,14 +320,14 @@ export default function OrganizationVoiceChannelView({
       setElapsedSec(Math.max(0, Math.floor((Date.now() - joinedAtMs) / 1000)));
     }, 1000);
     return () => window.clearInterval(id);
-  }, [joinedAtMs, landingDemo, channelId, canVoice]);
+  }, [joinedAtMs, channelId, canVoice]);
 
   const elapsedLabel = useMemo(() => {
-    if (!joinedAtMs || landingDemo || !channelId || !canVoice) {
+    if (!joinedAtMs || !channelId || !canVoice) {
       return '00:00';
     }
     return formatCallDuration(elapsedSec);
-  }, [joinedAtMs, elapsedSec, channelId, landingDemo, canVoice]);
+  }, [joinedAtMs, elapsedSec, channelId, canVoice]);
 
   useEffect(() => {
     participants.forEach((participant) => {
@@ -373,7 +372,7 @@ export default function OrganizationVoiceChannelView({
   }, [remoteOutputOpts]);
 
   useEffect(() => {
-    if (!channelId || landingDemo || !canVoice) return undefined;
+    if (!channelId || !canVoice) return undefined;
 
     let cancelled = false;
     /** Current join-session socket — do not read ref after teardown (avoid "No socket"). */
@@ -848,11 +847,11 @@ export default function OrganizationVoiceChannelView({
       teardownRef.current = null;
       teardown();
     };
-  }, [channelId, landingDemo, canVoice]);
+  }, [channelId, canVoice]);
 
   /** Đổi mic trong Cài đặt giọng nói khi đang ở kênh — thay track producer thay vì chờ rời/vào lại. */
   useEffect(() => {
-    if (!joinedAtMs || landingDemo || !canVoice || !micDeviceId) return undefined;
+    if (!joinedAtMs || !canVoice || !micDeviceId) return undefined;
     const producer = mediasoupRef.current.audioProducer;
     if (!producer) return undefined;
 
@@ -949,44 +948,30 @@ export default function OrganizationVoiceChannelView({
 
   const connected = Boolean(joinedAtMs && !joining && !error);
   const channelTitle = channelDisplayName || t('organizations.voiceChannelPh');
-  const statusText = landingDemo
-    ? t('orgPanel.voiceDemoHint')
-    : connected
-      ? t('orgPanel.voiceConnectedNow')
-      : joining
-        ? t('orgPanel.voiceConnecting')
-        : t('voiceRoom.connected');
-  const participantRows = landingDemo
-    ? [
-        {
-          id: 'local',
-          name: localDisplayName,
-          avatar: localAvatar,
-          userId: voiceUserId,
-          speaking: false,
-          muted: isMuted,
-          isLocal: true,
-        },
-      ]
-    : [
-        {
-          id: 'local',
-          name: localDisplayName,
-          avatar: localAvatar,
-          userId: voiceUserId,
-          speaking: localVoiceEnergy && !isMuted,
-          muted: isMuted,
-          isLocal: true,
-        },
-        ...sortedRemote.map((p) => ({
-          id: p.socketId,
-          name: p.displayName || p.userId || t('orgPanel.member'),
-          userId: p.userId,
-          speaking: Boolean(remoteSpeakingMap[p.socketId]),
-          muted: false,
-          isLocal: false,
-        })),
-      ];
+  const statusText = connected
+    ? t('orgPanel.voiceConnectedNow')
+    : joining
+      ? t('orgPanel.voiceConnecting')
+      : t('voiceRoom.connected');
+  const participantRows = [
+    {
+      id: 'local',
+      name: localDisplayName,
+      avatar: localAvatar,
+      userId: voiceUserId,
+      speaking: localVoiceEnergy && !isMuted,
+      muted: isMuted,
+      isLocal: true,
+    },
+    ...sortedRemote.map((p) => ({
+      id: p.socketId,
+      name: p.displayName || p.userId || t('orgPanel.member'),
+      userId: p.userId,
+      speaking: Boolean(remoteSpeakingMap[p.socketId]),
+      muted: false,
+      isLocal: false,
+    })),
+  ];
 
   const stageTone = isDarkMode
     ? {
@@ -1014,7 +999,7 @@ export default function OrganizationVoiceChannelView({
         control: 'border-slate-200 bg-white/95',
       };
 
-  if (!canVoice && !landingDemo) {
+  if (!canVoice) {
     return (
       <div className={`relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-none ${stageTone.root}`}>
         <div className={`max-w-md rounded-2xl border p-8 text-center shadow-sm ${stageTone.panel}`}>
@@ -1033,8 +1018,7 @@ export default function OrganizationVoiceChannelView({
       onClick={unlockAllRemoteAudio}
       role="presentation"
     >
-      {!landingDemo ? (
-        <div className="sr-only" aria-hidden>
+      <div className="sr-only" aria-hidden>
           {sortedRemote.map((p) => (
             <audio
               key={p.socketId}
@@ -1054,7 +1038,6 @@ export default function OrganizationVoiceChannelView({
             />
           ))}
         </div>
-      ) : null}
       <VoiceControlBridge
         onControlActionsReady={onControlActionsReady}
         toggleMute={toggleMute}
@@ -1065,7 +1048,7 @@ export default function OrganizationVoiceChannelView({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className={compactSuite ? stageTone.top : `${stageTone.top} shadow-xl backdrop-blur-md`}>
           <span
-            className={connected || landingDemo ? FIGMA_VOICE_STATUS_DOT : 'h-2 w-2 shrink-0 rounded-full bg-warning shadow-[0_0_6px] shadow-warning'}
+            className={connected ? FIGMA_VOICE_STATUS_DOT : 'h-2 w-2 shrink-0 rounded-full bg-warning shadow-[0_0_6px] shadow-warning'}
             title={statusText}
           />
           <span className="min-w-0 max-w-[16rem] truncate font-semibold">{channelTitle}</span>
@@ -1078,7 +1061,7 @@ export default function OrganizationVoiceChannelView({
             <span className={FIGMA_VOICE_WIFI_TEXT}>{statusText}</span>
           </span>
           <span className={`ml-auto font-mono text-xs tabular-nums ${connected ? 'text-success' : stageTone.muted}`}>
-            {landingDemo ? '01:14:16' : joining ? '...' : elapsedLabel}
+            {joining ? '...' : elapsedLabel}
           </span>
         </div>
 

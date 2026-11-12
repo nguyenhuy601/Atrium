@@ -76,11 +76,6 @@ const orgAvatarBtn =
 /** Trang thông báo trong menu tổ chức — giữ sidebar org khi mở */
 const ORG_NOTIFICATIONS_PATH = '/notifications/organization';
 
-const DEMO_ORGANIZATIONS = [
-  { _id: 'demo-org-1', name: 'Alpha Corp', slug: 'alpha-corp' },
-  { _id: 'demo-org-2', name: 'BetaLabs', slug: 'betalabs' },
-];
-
 const PUBLIC_NAV_DEF = [
   { key: 'dashboard', Icon: Home, path: '/dashboard' },
   { key: 'friends', Icon: MessageSquare, path: '/chat/friends' },
@@ -134,7 +129,7 @@ function navRailBackdropClassName(extra = '') {
   return `${shellNavRailBackdrop} ${shellNavRailMenuBackdropZ}${extra ? ` ${extra}` : ''}`;
 }
 
-const NavigationSidebar = ({ landingDemo = false, suite: suiteProp = null } = {}) => {
+const NavigationSidebar = ({ suite: suiteProp = null } = {}) => {
   const [time, setTime] = useState(new Date());
   const location = useLocation();
   const navigate = useNavigate();
@@ -254,27 +249,26 @@ const NavigationSidebar = ({ landingDemo = false, suite: suiteProp = null } = {}
   const { unreadCount } = useNotificationBadge({
     scope: notificationScope,
     organizationId: orgIdForBadge,
-    enabled: !landingDemo,
+    enabled: true,
   });
 
-  const bellBadgeCount = landingDemo ? 0 : unreadCount;
+  const bellBadgeCount = unreadCount;
 
   const { data: organizationsFromQuery = [] } = useOrganizationsMy({
-    enabled: !landingDemo,
+    enabled: true,
   });
 
-  const myOrganizations = landingDemo ? DEMO_ORGANIZATIONS : organizationsFromQuery;
+  const myOrganizations = organizationsFromQuery;
   const orgListIdsKey = useMemo(
     () =>
-      landingDemo ? organizationsIdsKey(DEMO_ORGANIZATIONS) : organizationsIdsKey(organizationsFromQuery),
-    [landingDemo, organizationsFromQuery]
+      organizationsIdsKey(organizationsFromQuery),
+    [organizationsFromQuery]
   );
   const workspaceUrlSyncRef = useRef('');
 
   const refreshOrganizations = useCallback(() => {
-    if (landingDemo) return;
     queryClient.invalidateQueries({ queryKey: queryKeys.organizations.my() });
-  }, [landingDemo, queryClient]);
+  }, [queryClient]);
 
   useEffect(() => {
     if (profileOpen || createOrgMenuOpen || joinByLinkOpen) setSidebarExpanded(true);
@@ -288,10 +282,10 @@ const NavigationSidebar = ({ landingDemo = false, suite: suiteProp = null } = {}
   }, [sidebarExpanded, profileOpen, createOrgMenuOpen, joinByLinkOpen]);
 
   useEffect(() => {
-    if (!landingDemo && location.pathname.startsWith('/workspaces')) {
+    if (location.pathname.startsWith('/workspaces')) {
       refreshOrganizations();
     }
-  }, [location.pathname, landingDemo, refreshOrganizations]);
+  }, [location.pathname, refreshOrganizations]);
 
   /** Tránh overlay menu backdrop kẹt sau điều hướng — chặn click/hover toàn màn hình. */
   useEffect(() => {
@@ -329,7 +323,7 @@ const NavigationSidebar = ({ landingDemo = false, suite: suiteProp = null } = {}
 
   /** Đồng bộ workspace đang chọn (legacy /w/:slug; org từ context, không ghi URL). */
   useEffect(() => {
-    if (landingDemo || !orgListIdsKey) return;
+    if (!orgListIdsKey) return;
 
     let target = null;
     if (!suiteProp && slugFromPath) {
@@ -354,7 +348,7 @@ const NavigationSidebar = ({ landingDemo = false, suite: suiteProp = null } = {}
 
     workspaceUrlSyncRef.current = syncKey;
     setActiveWorkspace(workspacePayloadFromOrg(target));
-  }, [slugFromPath, orgIdFromUrl, orgListIdsKey, landingDemo, setActiveWorkspace, suiteProp, activeWorkspace]);
+  }, [slugFromPath, orgIdFromUrl, orgListIdsKey, setActiveWorkspace, suiteProp, activeWorkspace]);
 
   const LOCALE_TAG_EN = 'en-US';
   const LOCALE_TAG_VI = 'vi-VN';
@@ -394,10 +388,7 @@ const NavigationSidebar = ({ landingDemo = false, suite: suiteProp = null } = {}
   const isOnline = !isInvisible && String(user?.status || '').toLowerCase() === 'online';
 
   const handleToggleInvisible = async () => {
-    if (landingDemo) {
-      toast(t('nav.toastDemoInvisible'), { icon: '🔒' });
-      return;
-    }
+
     if (togglingInvisible) return;
     const nextInvisible = !isInvisible;
 
@@ -415,12 +406,7 @@ const NavigationSidebar = ({ landingDemo = false, suite: suiteProp = null } = {}
   };
 
   const performLogout = async () => {
-    if (landingDemo) {
-      toast(t('nav.toastDemoLogout'), { icon: '🔒' });
-      setProfileOpen(false);
-      setLogoutConfirmOpen(false);
-      return;
-    }
+
 
     try {
       await Promise.race([logout(), new Promise((resolve) => setTimeout(resolve, 1500))]);
@@ -438,10 +424,7 @@ const NavigationSidebar = ({ landingDemo = false, suite: suiteProp = null } = {}
   };
 
   const handleLogoutClick = () => {
-    if (landingDemo) {
-      performLogout();
-      return;
-    }
+
     setLogoutConfirmOpen(true);
     setProfileOpen(false);
   };
@@ -797,7 +780,7 @@ const NavigationSidebar = ({ landingDemo = false, suite: suiteProp = null } = {}
                     </Tooltip>
                   );
                 })}
-                {!landingDemo && !singleOrgMode && (
+                {!singleOrgMode && (
                   <Tooltip label={createOrgShortLabel}>
                     <button
                       type="button"

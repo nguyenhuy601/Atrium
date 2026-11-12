@@ -162,7 +162,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       - ThemeProvider khởi tạo → load theme từ localStorage
       - AuthProvider khởi tạo → check token, auto login nếu có
       - SocketProvider khởi tạo → connect socket nếu đã login
-      - App render → lazy load HomePage
+      - App render → lazy load LoginPage (route /)
       - Toaster ready → sẵn sàng hiển thị notifications
    
    4. User tương tác:

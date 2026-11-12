@@ -10,14 +10,13 @@ function AuthPageLayout({
   children,
   contentMaxWidth = 'max-w-lg',
   mainAlign = 'center',
-  landingDemo = false,
   nightOwl = false,
   glassCard = false,
   showcaseAside = false,
 }) {
-  if (showcaseAside && !landingDemo) {
+  if (showcaseAside) {
     return (
-      <AuthFigmaLoginLayout aside={aside} landingDemo={landingDemo} nightOwl={nightOwl} showcaseAside>
+      <AuthFigmaLoginLayout aside={aside} nightOwl={nightOwl} showcaseAside>
         {children}
       </AuthFigmaLoginLayout>
     );
@@ -29,7 +28,7 @@ function AuthPageLayout({
       : `w-full ${contentMaxWidth}`;
 
   let cardClass = FIGMA_LOGIN_CARD;
-  if (nightOwl && !landingDemo) {
+  if (nightOwl) {
     cardClass = FIGMA_LOGIN_CARD_NIGHT;
   } else if (glassCard) {
     cardClass = FIGMA_LOGIN_CARD_GLASS;
@@ -38,7 +37,6 @@ function AuthPageLayout({
   return (
     <AuthFigmaLoginLayout
       aside={aside}
-      landingDemo={landingDemo}
       nightOwl={nightOwl}
       showcaseAside={false}
     >

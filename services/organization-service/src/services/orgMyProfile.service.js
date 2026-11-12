@@ -160,6 +160,9 @@ async function buildOrgMyProfile({ userId, orgId, access, include = '' }) {
     myOrganizationRoles,
     myPosition,
     placement,
+    /** Membership HR context — additive cho Hồ sơ cá nhân (read-only). */
+    joinedAt: access.membership?.joinedAt || null,
+    membershipStatus: access.membership?.status || null,
     scope,
     memberReady,
     memberReadyCode: memberReady ? null : 'ORG_MEMBER_NOT_READY',

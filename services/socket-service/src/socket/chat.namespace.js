@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { buildTrustedGatewayHeaders } = require('@enterprise/shared/middleware/gatewayTrust');
 const { emitToUser } = require('./realtimeHub');
 const { publishFriendDm } = require('../messaging/rabbitPublisher');
 const redisPresence = require('../presence/redisPresence');
@@ -242,7 +243,10 @@ module.exports = function registerChatNamespace(io) {
         if (replyToMessageId) body.replyToMessageId = replyToMessageId;
 
         const resp = await axios.post(`${CHAT_SERVICE_URL}/api/messages`, body, {
-          headers: authorization ? { Authorization: authorization } : {},
+          headers: {
+            ...buildTrustedGatewayHeaders(userId),
+            ...(authorization ? { Authorization: authorization } : {}),
+          },
           timeout: 15000,
           validateStatus: () => true,
         });

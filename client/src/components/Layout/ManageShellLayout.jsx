@@ -15,6 +15,7 @@ import FetchBar from '../../motion/primitives/FetchBar';
 import { FIGMA_SHELL_BODY, FIGMA_SHELL_MAIN, FIGMA_SHELL_ROOT } from './figmaShellClasses';
 import { getDefaultPathForSuite, SUITE, writeStoredSuite } from '../../utils/suitePathUtils';
 import { toAdminRoutePath } from '../../utils/adminManagePath';
+import { adminSuiteAccentVars } from '../../config/adminSuiteTokens';
 
 /**
  * Suite Quản trị (`/manage`) — grant-gated, cùng chrome suite (picker) như Communicate/Company/Projects.
@@ -66,7 +67,7 @@ function ManageShellLayoutInner() {
   writeStoredSuite(SUITE.MANAGE);
 
   return (
-    <div className={FIGMA_SHELL_ROOT}>
+    <div className={FIGMA_SHELL_ROOT} style={adminSuiteAccentVars()}>
       <TopHeader />
       <ShellRoleBanner />
       <NetworkOfflineBanner />

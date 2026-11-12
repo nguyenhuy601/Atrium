@@ -25,6 +25,31 @@ const CHAT = [
   ['communication.chat.send', 'ORGANIZATION'],
 ];
 
+/** PMO — chỉ project/* ; không org/HR admin. */
+const PMO_PROJECT_GRANTS = Object.freeze([
+  ['project.project.view', 'ORGANIZATION'],
+  ['project.project.create', 'ORGANIZATION'],
+  ['project.project.update', 'ORGANIZATION'],
+  ['project.project.archive', 'ORGANIZATION'],
+  ['project.sprint.view', 'ORGANIZATION'],
+  ['project.sprint.create', 'ORGANIZATION'],
+  ['project.sprint.start', 'ORGANIZATION'],
+  ['project.sprint.close', 'ORGANIZATION'],
+  ['project.backlog.view', 'ORGANIZATION'],
+  ['project.backlog.update', 'ORGANIZATION'],
+  ['project.task.view', 'ORGANIZATION'],
+  ['project.task.create', 'ORGANIZATION'],
+  ['project.task.update', 'ORGANIZATION'],
+  ['project.task.assign', 'ORGANIZATION'],
+  ['project.task.comment', 'ORGANIZATION'],
+  ['project.workflow.view', 'ORGANIZATION'],
+  ['project.workflow.update', 'ORGANIZATION'],
+  ['project.report.view', 'ORGANIZATION'],
+  ['project.change_request.view', 'ORGANIZATION'],
+  ['project.change_request.create', 'ORGANIZATION'],
+  ['project.change_request.update', 'ORGANIZATION'],
+]);
+
 const ROLE_GRANTS = Object.freeze({
   MEMBER: [
     ['organization.employee.view', 'SELF'],
@@ -46,6 +71,7 @@ const ROLE_GRANTS = Object.freeze({
     ['project.project.create', 'ORGANIZATION'],
     ...CHAT,
   ],
+  /** Cấu hình tổ chức (structure/policy update) — chỉ DIRECTOR. */
   DIRECTOR: [
     ['organization.employee.view', 'ORGANIZATION'],
     ['organization.employee.update', 'ORGANIZATION'],
@@ -58,7 +84,10 @@ const ROLE_GRANTS = Object.freeze({
     ['organization.organization_role.view', 'ORGANIZATION'],
     ['organization.structure.view', 'ORGANIZATION'],
     ['organization.structure.update', 'ORGANIZATION'],
+    ['organization.policy.view', 'ORGANIZATION'],
     ['organization.policy.update', 'ORGANIZATION'],
+    ['organization.master_data.view', 'ORGANIZATION'],
+    ['organization.master_data.update', 'ORGANIZATION'],
     ['system.audit.view', 'ORGANIZATION'],
     ['project.project.create', 'ORGANIZATION'],
   ],
@@ -67,8 +96,10 @@ const ROLE_GRANTS = Object.freeze({
     ['organization.employee.invite', 'ORGANIZATION'],
     ['organization.employee.update', 'ORGANIZATION'],
     ['organization.employee.disable', 'ORGANIZATION'],
+    ['organization.employee.reset_password', 'ORGANIZATION'],
     ['organization.organization_role.view', 'ORGANIZATION'],
     ['organization.organization_role.update', 'ORGANIZATION'],
+    ['organization.master_data.view', 'ORGANIZATION'],
   ],
   RESOURCE_MANAGER: [
     ['organization.employee.view', 'ORGANIZATION'],
@@ -82,7 +113,7 @@ const ROLE_GRANTS = Object.freeze({
     ['organization.employee.invite', 'ORGANIZATION'],
     ['organization.employee.update', 'ORGANIZATION'],
     ['organization.employee.disable', 'ORGANIZATION'],
-    // Không department.view — HR chỉ Suite người dùng, không org-structure.
+    // Không department/structure — HR chỉ Suite người dùng / tài khoản.
   ],
   AUDITOR: [
     ['organization.employee.view', 'ORGANIZATION'],
@@ -98,6 +129,7 @@ const ROLE_GRANTS = Object.freeze({
     ['organization.employee.view', 'DEPARTMENT'],
     ...CHAT,
   ],
+  PMO_MANAGER: [...PMO_PROJECT_GRANTS],
 });
 
 const ROLE_NAMES = Object.freeze({
@@ -110,22 +142,32 @@ const ROLE_NAMES = Object.freeze({
   HR_APPROVER: 'Nhân sự',
   AUDITOR: 'Kiểm toán',
   MENTOR: 'Người hướng dẫn',
+  PMO_MANAGER: 'Quản lý PMO',
 });
 
 const ROLE_DESCRIPTIONS = Object.freeze({
   TEAM_LEAD: 'Điều phối nhóm được giao',
   DEPARTMENT_MANAGER: 'Quản lý phòng ban được giao',
-  DIRECTOR: 'Sở hữu và chịu trách nhiệm cấp tổ chức',
+  DIRECTOR: 'Sở hữu, cấu hình tổ chức và chịu trách nhiệm cấp tổ chức',
   IT_ADMIN: 'Quản lý tài khoản và ma trận vai trò tổ chức',
   RESOURCE_MANAGER: 'Điều phối nhân sự giữa các dự án',
   HR_APPROVER: 'Phê duyệt nghiệp vụ nhân sự',
   AUDITOR: 'Kiểm tra tuân thủ và audit tổ chức',
   MENTOR: 'Hướng dẫn chuyên môn cho nhân viên',
   MEMBER: 'Nhân viên trong doanh nghiệp',
+  PMO_MANAGER: 'Quản trị quy trình và tiêu chuẩn quản lý dự án (không HR/org admin)',
 });
 
-/** Vị trí HR (lowercase master) → vai trò tổ chức UPPER. DIRECTOR không nằm ở đây. */
+/** Vai trò legacy — gộp assignment/grant sang DIRECTOR rồi disable. */
+const DEPRECATED_MERGE_INTO_DIRECTOR = Object.freeze(['ORG_OWNER', 'ORG_ADMIN']);
+
+/**
+ * Vị trí → vai trò tổ chức UPPER.
+ * Gồm master lowercase + catalog UPPER đang dùng trên org thật.
+ * DIRECTOR chỉ gắn C-level; không gắn IC.
+ */
 const POSITION_ROLE_CODE = Object.freeze({
+  // Master lowercase
   engineering_manager: 'DEPARTMENT_MANAGER',
   team_lead: 'TEAM_LEAD',
   product_manager: 'RESOURCE_MANAGER',
@@ -135,15 +177,76 @@ const POSITION_ROLE_CODE = Object.freeze({
   ux_designer: MEMBER_CODE,
   devops_engineer: MEMBER_CODE,
   scrum_master: MEMBER_CODE,
-  technical_lead: MEMBER_CODE,
+  technical_lead: 'TEAM_LEAD',
   intern: MEMBER_CODE,
+  // Catalog UPPER / leadership
+  CEO: 'DIRECTOR',
+  CTO: 'DIRECTOR',
+  COO: 'DIRECTOR',
+  ENGINEERING_MANAGER: 'DEPARTMENT_MANAGER',
+  TECHNICAL_MANAGER: 'DEPARTMENT_MANAGER',
+  PRODUCT_MANAGER: 'RESOURCE_MANAGER',
+  PROJECT_MANAGER: 'RESOURCE_MANAGER',
+  SENIOR_PROJECT_MANAGER: 'RESOURCE_MANAGER',
+  DELIVERY_MANAGER: 'RESOURCE_MANAGER',
+  PRODUCT_OWNER: 'RESOURCE_MANAGER',
+  HR_MANAGER: 'HR_APPROVER',
+  HR_SPECIALIST: 'HR_APPROVER',
+  TECHNICAL_RECRUITER: 'HR_APPROVER',
+  SALES_MANAGER: 'DEPARTMENT_MANAGER',
+  FINANCE_MANAGER: 'DEPARTMENT_MANAGER',
+  QA_MANAGER: 'DEPARTMENT_MANAGER',
+  QA_LEAD: 'TEAM_LEAD',
+  SYSTEM_ADMINISTRATOR: 'IT_ADMIN',
+  IT_SUPPORT_SPECIALIST: 'IT_ADMIN',
+  // IC / engineers → MEMBER
+  SOFTWARE_ENGINEER_INTERN: MEMBER_CODE,
+  JUNIOR_SOFTWARE_ENGINEER: MEMBER_CODE,
+  SOFTWARE_ENGINEER: MEMBER_CODE,
+  SENIOR_SOFTWARE_ENGINEER: MEMBER_CODE,
+  BACKEND_ENGINEER: MEMBER_CODE,
+  FRONTEND_ENGINEER: MEMBER_CODE,
+  FULLSTACK_ENGINEER: MEMBER_CODE,
+  MOBILE_ENGINEER: MEMBER_CODE,
+  SOFTWARE_ARCHITECT: MEMBER_CODE,
+  SOLUTION_ARCHITECT: MEMBER_CODE,
+  BUSINESS_ANALYST: MEMBER_CODE,
+  SENIOR_BUSINESS_ANALYST: MEMBER_CODE,
+  SYSTEM_ANALYST: MEMBER_CODE,
+  UI_UX_DESIGNER: MEMBER_CODE,
+  PRODUCT_DESIGNER: MEMBER_CODE,
+  PROJECT_COORDINATOR: MEMBER_CODE,
+  SCRUM_MASTER: MEMBER_CODE,
+  PMO_ANALYST: MEMBER_CODE,
+  QA_ENGINEER: MEMBER_CODE,
+  SENIOR_QA_ENGINEER: MEMBER_CODE,
+  TEST_AUTOMATION_ENGINEER: MEMBER_CODE,
+  MANUAL_TESTER: MEMBER_CODE,
+  DEVOPS_ENGINEER: MEMBER_CODE,
+  SENIOR_DEVOPS_ENGINEER: MEMBER_CODE,
+  CLOUD_ENGINEER: MEMBER_CODE,
+  DATABASE_ADMINISTRATOR: MEMBER_CODE,
+  SECURITY_ENGINEER: MEMBER_CODE,
+  DATA_ENGINEER: MEMBER_CODE,
+  DATA_ANALYST: MEMBER_CODE,
+  DATA_SCIENTIST: MEMBER_CODE,
+  AI_ENGINEER: MEMBER_CODE,
+  MACHINE_LEARNING_ENGINEER: MEMBER_CODE,
+  MLOPS_ENGINEER: MEMBER_CODE,
+  ACCOUNTANT: MEMBER_CODE,
+  FINANCIAL_ANALYST: MEMBER_CODE,
+  SALES_EXECUTIVE: MEMBER_CODE,
+  BUSINESS_DEVELOPMENT_EXECUTIVE: MEMBER_CODE,
+  ACCOUNT_MANAGER: MEMBER_CODE,
+  PRESALES_ENGINEER: MEMBER_CODE,
+  CUSTOMER_SUCCESS_SPECIALIST: MEMBER_CODE,
+  TECHNICAL_SUPPORT_ENGINEER: MEMBER_CODE,
+  ADMINISTRATIVE_SPECIALIST: MEMBER_CODE,
 });
 
 const ensuredOrgs = new Set();
 
 const ALLOWLIST_MEMBER_NAME = MEMBER_DISPLAY_NAME;
-const TRIM_PREFIXES = ['organization.', 'project.', 'system.'];
-
 /** org_member / member / MEMBER và tên hiển thị thành viên → MEMBER. */
 function normalizeAllowlistRoleCode(role) {
   const code = String(role?.code || role || '').trim();
@@ -159,12 +262,12 @@ function roleIsOnAllowlist(role) {
 }
 
 function tickShouldBeRemoved(roleCode, permissionCode) {
-  const code = String(permissionCode || '').trim().toLowerCase();
-  if (!TRIM_PREFIXES.some((prefix) => code.startsWith(prefix))) return false;
   const baselineCode = normalizeAllowlistRoleCode(roleCode);
   const pairs = ROLE_GRANTS[baselineCode];
   if (!pairs) return false;
-  return !pairs.some(([permission]) => permission === code);
+  const code = String(permissionCode || '').trim().toLowerCase();
+  // SoT: mọi tick không nằm baseline đều gỡ (kể cả communication/file/meeting).
+  return !pairs.some(([permission]) => String(permission).toLowerCase() === code);
 }
 
 function grantsOf(roleCode) {
@@ -329,12 +432,74 @@ async function ensureMissingTicks(organizationId, roleId, entries) {
   for (const [permissionCode, scopeType] of entries) {
     const res = await OrgRolePermission.updateOne(
       { organizationId, roleId, permissionCode },
-      { $setOnInsert: { organizationId, roleId, permissionCode, scopeType } },
+      {
+        $set: { scopeType },
+        $setOnInsert: { organizationId, roleId, permissionCode },
+      },
       { upsert: true }
     );
     if (res.upsertedCount) inserted += 1;
   }
   return inserted;
+}
+
+/**
+ * ORG_OWNER / ORG_ADMIN → DIRECTOR: chuyển grant/assignment/binding, disable role cũ, xóa tick.
+ */
+async function mergeDeprecatedRolesIntoDirector(organizationId, directorRole) {
+  if (!directorRole?._id) return { mergedUsers: 0, disabledRoles: 0 };
+  const OrgRoleAssignment = require('../models/OrgRoleAssignment');
+  const deprecated = await OrganizationalRole.find({
+    organizationId,
+    code: { $in: [...DEPRECATED_MERGE_INTO_DIRECTOR] },
+  })
+    .select('_id code')
+    .lean();
+  if (!deprecated.length) return { mergedUsers: 0, disabledRoles: 0 };
+
+  const aliasIds = deprecated.map((r) => r._id);
+  await reassignGrantsFromAliasRoles(organizationId, directorRole._id, aliasIds);
+
+  let mergedUsers = 0;
+  for (const row of deprecated) {
+    const assignments = await OrgRoleAssignment.find({
+      organizationId,
+      roleKey: { $in: [row.code, String(row.code || '').toLowerCase()] },
+    })
+      .select('userId')
+      .lean();
+    for (const a of assignments) {
+      const uid = a.userId;
+      const exists = await OrgRoleAssignment.findOne({
+        organizationId,
+        userId: uid,
+        roleKey: 'DIRECTOR',
+      })
+        .select('_id')
+        .lean();
+      if (!exists) {
+        await OrgRoleAssignment.create({
+          organizationId,
+          userId: uid,
+          roleKey: 'DIRECTOR',
+          assignedBy: uid,
+        });
+        mergedUsers += 1;
+      }
+    }
+    await OrgRoleAssignment.deleteMany({
+      organizationId,
+      roleKey: { $in: [row.code, String(row.code || '').toLowerCase()] },
+    });
+  }
+
+  await OrgRolePermission.deleteMany({ organizationId, roleId: { $in: aliasIds } });
+  await OrganizationalRole.updateMany(
+    { _id: { $in: aliasIds } },
+    { $set: { status: 'disabled' } }
+  );
+
+  return { mergedUsers, disabledRoles: deprecated.length };
 }
 
 async function ensurePositionBinding(organizationId, positionCode, roleId) {
@@ -396,9 +561,11 @@ async function dropBindingsOutsideAllowlist(organizationId) {
   return res.deletedCount || dropIds.length;
 }
 
-async function ensureOrgRoleGrantBaseline(organizationId) {
+async function ensureOrgRoleGrantBaseline(organizationId, { force = false } = {}) {
   const orgKey = String(organizationId || '').trim();
-  if (!orgKey || ensuredOrgs.has(orgKey)) return { skipped: true };
+  if (!orgKey) return { skipped: true };
+  if (!force && ensuredOrgs.has(orgKey)) return { skipped: true };
+  if (force) ensuredOrgs.delete(orgKey);
 
   const roleByCode = new Map();
   let sort = 10;
@@ -408,6 +575,11 @@ async function ensureOrgRoleGrantBaseline(organizationId) {
     roleByCode.set(code, row);
     await ensureMissingTicks(organizationId, row._id, ROLE_GRANTS[code]);
   }
+
+  const directorMerge = await mergeDeprecatedRolesIntoDirector(
+    organizationId,
+    roleByCode.get('DIRECTOR')
+  );
 
   const allowlistedRoles = await OrganizationalRole.find({ organizationId })
     .select('_id code name')
@@ -422,12 +594,13 @@ async function ensureOrgRoleGrantBaseline(organizationId) {
     );
   }
   const removedBindings = await dropBindingsOutsideAllowlist(organizationId);
-  if (removedTicks || removedBindings) {
+  if (removedTicks || removedBindings || directorMerge.disabledRoles) {
     const { logger } = require('@enterprise/shared');
     logger.info('[orgRoleGrantBaseline] trimmed leftover grants', {
       organizationId: orgKey,
       removedTicks,
       removedBindings,
+      directorMerge,
     });
     const [activeAssignments, personalGrants] = await Promise.all([
       EmployeePositionAssignment.find({ organizationId, status: 'active' }).select('userId').lean(),
@@ -462,7 +635,7 @@ async function ensureOrgRoleGrantBaseline(organizationId) {
   );
 
   ensuredOrgs.add(orgKey);
-  return { skipped: false };
+  return { skipped: false, directorMerge, removedTicks, removedBindings };
 }
 
 module.exports = {

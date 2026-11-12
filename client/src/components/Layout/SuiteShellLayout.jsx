@@ -16,7 +16,7 @@ import { getDefaultPathForSuite, SUITE, writeStoredSuite } from '../../utils/sui
 import { useAppStrings } from '../../locales/appStrings';
 import { VH_MOTION_BTN } from '../../motion/classes';
 
-function SuiteShellLayoutInner({ sidebar, landingDemo = false }) {
+function SuiteShellLayoutInner({ sidebar }) {
   const location = useLocation();
   const { t } = useAppStrings();
   const {
@@ -27,14 +27,14 @@ function SuiteShellLayoutInner({ sidebar, landingDemo = false }) {
     hideHeaderLoading,
   } = useShellLayout();
   const { isSystemAdmin } = useCompanyAdminAccess();
-  const hideChrome = !landingDemo && immersiveChrome;
+  const hideChrome = immersiveChrome;
   const hideTopHeader = useMemo(
     () => Boolean(projectIdFromPathname(location.pathname)),
     [location.pathname]
   );
   const headerLoading = headerLoadingLabel != null;
-  const showTopHeader = !landingDemo && !hideChrome && !hideTopHeader;
-  const showShellTools = !landingDemo && !hideChrome;
+  const showTopHeader = !hideChrome && !hideTopHeader;
+  const showShellTools = !hideChrome;
 
   useEffect(() => {
     if (!hideTopHeader) return undefined;
@@ -43,7 +43,7 @@ function SuiteShellLayoutInner({ sidebar, landingDemo = false }) {
   }, [location.pathname, hideTopHeader, hideHeaderLoading]);
 
   // Tài khoản hệ thống admin không dùng shell nhân viên (communicate/collaborate/me).
-  if (!landingDemo && isSystemAdmin) {
+  if (isSystemAdmin) {
     writeStoredSuite(SUITE.ADMIN);
     return <Navigate to={getDefaultPathForSuite(SUITE.ADMIN)} replace />;
   }
@@ -51,9 +51,9 @@ function SuiteShellLayoutInner({ sidebar, landingDemo = false }) {
   return (
     <div className={FIGMA_SHELL_ROOT}>
       {showTopHeader ? <TopHeader /> : null}
-      {!landingDemo && !hideChrome && <ShellRoleBanner />}
-      {!landingDemo && <NetworkOfflineBanner />}
-      {!landingDemo && <JoinOrganizationModal />}
+      {!hideChrome && <ShellRoleBanner />}
+      <NetworkOfflineBanner />
+      <JoinOrganizationModal />
       {showShellTools ? (
         <>
           <FetchBar active={headerLoading} />
@@ -84,9 +84,9 @@ function SuiteShellLayoutInner({ sidebar, landingDemo = false }) {
   );
 }
 
-const SuiteShellLayout = ({ sidebar, landingDemo = false }) => (
+const SuiteShellLayout = ({ sidebar }) => (
   <ShellLayoutProvider>
-    <SuiteShellLayoutInner sidebar={sidebar} landingDemo={landingDemo} />
+    <SuiteShellLayoutInner sidebar={sidebar} />
   </ShellLayoutProvider>
 );
 

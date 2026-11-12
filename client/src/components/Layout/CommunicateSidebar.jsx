@@ -1,7 +1,5 @@
 import FigmaNavigationSidebar from './FigmaNavigationSidebar';
 
-const CommunicateSidebar = ({ landingDemo = false } = {}) => (
-  <FigmaNavigationSidebar suite="communicate" landingDemo={landingDemo} />
-);
+const CommunicateSidebar = () => <FigmaNavigationSidebar suite="communicate" />;
 
 export default CommunicateSidebar;

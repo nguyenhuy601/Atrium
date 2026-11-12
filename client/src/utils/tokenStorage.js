@@ -2,6 +2,8 @@
  * Access token: in-memory only (không lưu vào localStorage/sessionStorage).
  * Refresh token: không lưu phía client; server lưu trong HttpOnly cookie.
  */
+import { clearSessionMarkerCookie, markSessionPresent } from './sessionMarkerCookie';
+
 const KEY = 'token'; // legacy cleanup
 const REFRESH_KEY = 'refreshToken'; // legacy cleanup
 const TOKEN_CHANGE_EVENT = 'vh-token-changed';
@@ -91,11 +93,12 @@ export function applyAuthHeader(config) {
   return config;
 }
 
-/** Ghi JWT vào storage đã cấu hình (không mirror sang storage kia). */
+/** Ghi JWT vào memory + đánh dấu còn session (để F5 gọi refresh). */
 export function setToken(token) {
   const value = token != null ? String(token).trim() : '';
   if (!value) return;
   accessTokenMemory = value;
+  markSessionPresent();
   notifyTokenChange();
 }
 
@@ -111,6 +114,7 @@ export function setRefreshToken(token) {
 
 export function removeToken() {
   accessTokenMemory = null;
+  clearSessionMarkerCookie();
 
   // Cleanup legacy keys (if the app was logged in before switching to HttpOnly refresh cookies).
   try {

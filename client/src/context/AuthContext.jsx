@@ -29,7 +29,6 @@ import {
   onTokenChange,
   getResolvedBearerToken,
 } from '../utils/tokenStorage';
-import { isAutoLogoutDisabled } from '../utils/devAuth';
 import { resolveApiErrorMessage, extractApiErrorMeta } from '../utils/resolveApiErrorMessage';
 import { resolveApiBaseUrl } from '../utils/browserOrigin';
 import { applyUiRoleOverlay, clearStoredUiRole } from '../utils/uiRoleUtils';
@@ -108,7 +107,7 @@ function AuthProvider({ children }) {
         // Chỉ xóa token khi server xác nhận 401 — lỗi mạng/503 không được logout oan
         console.error('Auth check failed:', error);
         const st = error?.response?.status ?? error?.status;
-        if (st === 401 && !isAutoLogoutDisabled()) {
+        if (st === 401) {
           removeToken();
         }
       } finally {
@@ -417,7 +416,7 @@ function AuthProvider({ children }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-// AuthContext: re-export từ ./auth-context.js (override cục bộ trong LandingDemoAuth)
+// AuthContext: re-export từ ./auth-context.js
 export { AuthProvider, AuthContext };
 
 /* ========================================

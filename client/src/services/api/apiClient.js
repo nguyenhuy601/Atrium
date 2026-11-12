@@ -2,39 +2,16 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 import { applyAuthHeader, removeToken } from '../../utils/tokenStorage';
 import {
-  isAuthRefreshDisabled,
   isAuthRefreshRateLimited,
   tryRefreshAndRetry,
 } from '../../utils/authRefresh';
 import { mapAuthSessionMessageForLogout } from '../../utils/authErrorMessages';
 import { extractApiErrorMeta, resolveApiErrorMessage } from '../../utils/resolveApiErrorMessage';
-import { isAutoLogoutDisabled } from '../../utils/devAuth';
-import {
-  isLandingEmbedActive,
-  isLandingEmbedWriteGuardActive,
-  isWriteHttpMethod,
-} from '../../utils/landingEmbedMode';
 import { createTranslator } from '../../locales/buildStrings.js';
 import { readStoredLocale } from '../../utils/localeFormat.js';
 
 function apiT() {
   return createTranslator(readStoredLocale());
-}
-
-/** Từ chối im lặng mọi lỗi HTTP khi đang xem demo landing — không đụng toast/redirect */
-function rejectLandingEmbedSilent(error) {
-  const t = apiT();
-  const userMessage = resolveApiErrorMessage(error, { t });
-  const meta = extractApiErrorMeta(error);
-  return Promise.reject({
-    message: userMessage,
-    userMessage,
-    status: meta.status,
-    data: meta.data,
-    code: meta.code,
-    errorCode: meta.errorCode,
-    isLandingEmbedSilent: true,
-  });
 }
 
 const AUTH_PUBLIC_PATHS = [
@@ -84,20 +61,6 @@ const apiClient = axios.create({
 // Request interceptor - Add auth token
 apiClient.interceptors.request.use(
   (config) => {
-    if (isLandingEmbedWriteGuardActive() && isWriteHttpMethod(config.method)) {
-      const block = new Error('LANDING_EMBED_WRITE_BLOCKED');
-      block.code = 'LANDING_EMBED_WRITE_BLOCKED';
-      block.isLandingEmbedBlock = true;
-      return Promise.reject(block);
-    }
-
-    if (isLandingEmbedActive() && !isAuthPublicUrl(config.url)) {
-      const block = new Error('LANDING_EMBED_API_BLOCKED');
-      block.code = 'LANDING_EMBED_API_BLOCKED';
-      block.isLandingEmbedBlock = true;
-      return Promise.reject(block);
-    }
-
     if (!isAuthPublicUrl(config.url)) {
       applyAuthHeader(config);
     }
@@ -139,14 +102,7 @@ apiClient.interceptors.response.use(
     return response.data;
   },
   async (error) => {
-    if (error?.code === 'LANDING_EMBED_WRITE_BLOCKED' || error?.isLandingEmbedBlock) {
-      return Promise.reject(error);
-    }
-
     if (error?.code === 'NETWORK_OFFLINE' || error?.isNetworkOffline) {
-      if (isLandingEmbedActive()) {
-        return rejectLandingEmbedSilent(error);
-      }
       const t = apiT();
       const message = t('api.networkOffline') || t('api.networkError');
       toastNetworkAware(toast, message, networkController);
@@ -164,10 +120,6 @@ apiClient.interceptors.response.use(
 
     const config = error?.config;
 
-    if (isLandingEmbedActive()) {
-      return rejectLandingEmbedSilent(error);
-    }
-
     if (config?.skipGlobalErrorHandling) {
       return Promise.reject(error);
     }
@@ -182,7 +134,7 @@ apiClient.interceptors.response.use(
     
     // Handle specific error codes
     if (error.response?.status === 401) {
-      if (!isAuthRefreshDisabled() && !config?.skipAuthRefresh && !isAuthPublicUrl(config?.url)) {
+      if (!config?.skipAuthRefresh && !isAuthPublicUrl(config?.url)) {
         try {
           const retried = await tryRefreshAndRetry(error, apiClient);
           if (retried !== null && retried !== undefined) {
@@ -198,14 +150,10 @@ apiClient.interceptors.response.use(
         }
       }
 
-      if (isAutoLogoutDisabled()) {
-        console.warn('[apiClient] VITE_DISABLE_AUTO_LOGOUT: bỏ qua logout/redirect (chỉ debug).');
-      } else {
-        removeToken();
-        window.location.href = '/login';
-        const authHint = error.response?.data?.errorCode || error.response?.data?.code || message;
-        toast.error(mapAuthSessionMessageForLogout(authHint, readStoredLocale()));
-      }
+      removeToken();
+      window.location.href = '/login';
+      const authHint = error.response?.data?.errorCode || error.response?.data?.code || message;
+      toast.error(mapAuthSessionMessageForLogout(authHint, readStoredLocale()));
     } else if (error.response?.status === 403) {
       if (!error.config?.skipPermissionDeniedToast) {
         toast.error(message || t('errors.forbidden'));

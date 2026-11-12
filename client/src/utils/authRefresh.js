@@ -1,6 +1,8 @@
 import axios from 'axios';
 import {
   applyAuthHeader,
+  getJwtPayload,
+  getToken,
   setToken,
 } from './tokenStorage';
 import { resolveApiBaseUrl } from './browserOrigin';
@@ -8,20 +10,22 @@ import { clearSessionMarkerCookie } from './sessionMarkerCookie';
 
 let refreshPromise = null;
 
-export function isAuthRefreshDisabled() {
-  const raw = String(import.meta.env.VITE_DISABLE_AUTH_REFRESH || '').trim().toLowerCase();
-  const disabled = raw === '1' || raw === 'true' || raw === 'yes';
-  if (disabled && import.meta.env.PROD) {
-    console.warn(
-      '[Atrium] VITE_DISABLE_AUTH_REFRESH is enabled in production — expired sessions may not auto-refresh.'
-    );
-  }
-  return disabled;
-}
+/** Skew: coi access JWT gần hết hạn cũng cần refresh. */
+const ACCESS_EXPIRY_SKEW_MS = 30_000;
 
 /** 429 trên refresh — giữ session, không coi như logout. */
 export function isAuthRefreshRateLimited(error) {
   return Boolean(error?.isAuthRateLimited) || Number(error?.response?.status) === 429;
+}
+
+/** Access thiếu hoặc đã (sắp) hết hạn — mới được gọi refresh vì 401. */
+export function isAccessTokenMissingOrExpired(nowMs = Date.now()) {
+  if (!getToken()) return true;
+  const payload = getJwtPayload();
+  if (!payload || payload.exp == null) return true;
+  const expMs = Number(payload.exp) * 1000;
+  if (!Number.isFinite(expMs)) return true;
+  return expMs <= nowMs + ACCESS_EXPIRY_SKEW_MS;
 }
 
 function sleep(ms) {
@@ -33,6 +37,18 @@ function resolveRetryAfterMs(error) {
   const sec = Number(raw);
   if (Number.isFinite(sec) && sec > 0) return Math.min(sec * 1000, 10_000);
   return 2000;
+}
+
+function refreshErrorCode(error) {
+  return String(
+    error?.response?.data?.errorCode || error?.response?.data?.code || error?.errorCode || ''
+  ).trim();
+}
+
+/** Chỉ xóa marker khi server xác nhận phiên chết — không xóa khi mismatch race. */
+function clearMarkerIfSessionDead(error) {
+  if (refreshErrorCode(error) === 'AUTH_REFRESH_MISMATCH') return;
+  clearSessionMarkerCookie();
 }
 
 async function postRefreshOnce() {
@@ -68,7 +84,7 @@ async function callRefreshEndpoint() {
   } catch (error) {
     const status = Number(error?.response?.status);
     if (status === 401) {
-      clearSessionMarkerCookie();
+      clearMarkerIfSessionDead(error);
       throw error;
     }
     if (status === 429) {
@@ -77,7 +93,7 @@ async function callRefreshEndpoint() {
         return await postRefreshOnce();
       } catch (retryErr) {
         if (Number(retryErr?.response?.status) === 401) {
-          clearSessionMarkerCookie();
+          clearMarkerIfSessionDead(retryErr);
         }
         if (Number(retryErr?.response?.status) === 429) {
           retryErr.isAuthRateLimited = true;
@@ -101,6 +117,7 @@ export function refreshAccessTokenSingleFlight() {
 
 /**
  * Thử refresh + retry request gốc (tối đa 1 lần).
+ * Chỉ khi access JWT thiếu/hết hạn — tránh rotate thừa vì 401 quyền/nghiệp vụ.
  * @returns {Promise<unknown>|null} response nếu retry thành công; null nếu không áp dụng
  */
 export async function tryRefreshAndRetry(error, axiosInstance) {
@@ -111,6 +128,10 @@ export async function tryRefreshAndRetry(error, axiosInstance) {
 
   const url = String(config.url || '');
   if (url.includes('/auth/refresh-token') || url.includes('/auth/login')) {
+    return null;
+  }
+
+  if (!isAccessTokenMissingOrExpired()) {
     return null;
   }
 

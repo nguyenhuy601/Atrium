@@ -24,7 +24,7 @@ import { getDefaultPathForSuite, readStoredSuite } from '../../utils/suitePathUt
 
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function LoginPage({ landingDemo = false } = {}) {
+function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { login, isAuthenticated, loading: authLoading } = useAuth();
@@ -87,12 +87,12 @@ function LoginPage({ landingDemo = false } = {}) {
   }, [location.state]);
 
   useEffect(() => {
-    if (landingDemo || authLoading) return;
+    if (authLoading) return;
     if (oneTimeCreds || inviteForgotHint) return;
     if (isAuthenticated) {
       navigate(getDefaultPathForSuite(readStoredSuite()), { replace: true });
     }
-  }, [landingDemo, authLoading, isAuthenticated, navigate, oneTimeCreds, inviteForgotHint]);
+  }, [authLoading, isAuthenticated, navigate, oneTimeCreds, inviteForgotHint]);
 
   const clearFieldError = (field) => {
     setFieldErrors((prev) => (prev[field] ? { ...prev, [field]: '' } : prev));
@@ -113,10 +113,7 @@ function LoginPage({ landingDemo = false } = {}) {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (landingDemo) {
-      toast(t('login.demoToast'), { icon: '🔒' });
-      return;
-    }
+
 
     if (!validateFields()) return;
 
@@ -142,7 +139,7 @@ function LoginPage({ landingDemo = false } = {}) {
 
   if (
     enteringApp ||
-    (!landingDemo && !authLoading && isAuthenticated && !oneTimeCreds && !inviteForgotHint)
+    (!authLoading && isAuthenticated && !oneTimeCreds && !inviteForgotHint)
   ) {
     return <BrandPageLoader message={t('login.submitting')} />;
   }
@@ -152,11 +149,10 @@ function LoginPage({ landingDemo = false } = {}) {
 
   return (
     <AuthPageLayout
-      aside={<AuthMarketingAside nightOwl={visualNight} compact={!landingDemo} />}
-      landingDemo={landingDemo}
+      aside={<AuthMarketingAside nightOwl={visualNight} compact />}
       nightOwl={visualNight}
-      glassCard={!landingDemo}
-      showcaseAside={!landingDemo}
+      glassCard
+      showcaseAside
     >
       <FetchBar active={loading} />
 
@@ -164,19 +160,17 @@ function LoginPage({ landingDemo = false } = {}) {
         className={`relative z-20 w-full max-w-[22rem] pointer-events-auto ${closeColor}`}
         data-testid="login-motion-root"
       >
-        {!landingDemo ? (
-          <Link
-            to="/"
-            className="absolute -right-1 -top-1 z-[5] flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-inherit transition-[opacity,background] duration-150 ease-in-out hover:bg-[color-mix(in_srgb,currentColor_10%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600"
-            aria-label={t('authLayout.home')}
-            title={t('authLayout.home')}
-          >
-            <X className="h-5 w-5" strokeWidth={2} aria-hidden />
-          </Link>
-        ) : null}
+        <Link
+          to="/"
+          className="absolute -right-1 -top-1 z-[5] flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-none bg-transparent text-inherit transition-[opacity,background] duration-150 ease-in-out hover:bg-[color-mix(in_srgb,currentColor_10%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-600"
+          aria-label={t('authLayout.home')}
+          title={t('authLayout.home')}
+        >
+          <X className="h-5 w-5" strokeWidth={2} aria-hidden />
+        </Link>
 
         <MotionStagger className="space-y-0">
-          {!landingDemo ? <AuthFigmaLoginMobileLogo /> : null}
+          <AuthFigmaLoginMobileLogo />
 
           <div>
             <h2

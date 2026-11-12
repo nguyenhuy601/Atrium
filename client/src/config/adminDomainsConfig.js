@@ -3,7 +3,7 @@
  * `implementation` trỏ tới màn đã có; còn lại hiển thị placeholder.
  */
 
-export const ADMIN_SUITE_COLOR = '#EF4444';
+export { ADMIN_SUITE_COLOR, ADMIN_SUITE_ACCENT } from './adminSuiteTokens';
 
 export const ADMIN_DOMAIN_STORAGE_KEY = 'vh_admin_active_domain';
 
@@ -356,8 +356,8 @@ export const ADMIN_DOMAINS = [
             labelKey: 'adminDomains.systemConfig.configHub',
             end: true,
             implementation: 'system-config-hub',
-            adminOnly: true,
-            requiredGrant: 'organization.policy.view',
+            // Cấu hình tổ chức — chỉ DIRECTOR (policy.update), không mở bằng policy.view (AUDITOR).
+            requiredGrant: 'organization.policy.update',
           },
           {
             id: 'company',
@@ -383,7 +383,7 @@ export const ADMIN_DOMAINS = [
             implementation: 'settings-structure',
             settingsTab: 'structure',
             nav: 'hidden',
-            requiredGrant: 'organization.structure.view',
+            requiredGrant: 'organization.structure.update',
           },
         ],
       },
